@@ -71,7 +71,9 @@ export class Renderer {
         const px = x * t;
         const py = y * t;
         ctx.beginPath();
-        ctx.roundRect(px + t * 0.08, py + t * 0.08, t * 0.84, t * 0.84, t * 0.22);
+        // roundRect is Chrome 99+/Safari 16.4+; older phones still get a square shelf.
+        if (ctx.roundRect) ctx.roundRect(px + t * 0.08, py + t * 0.08, t * 0.84, t * 0.84, t * 0.22);
+        else ctx.rect(px + t * 0.08, py + t * 0.08, t * 0.84, t * 0.84);
         ctx.fill();
         ctx.stroke();
       }

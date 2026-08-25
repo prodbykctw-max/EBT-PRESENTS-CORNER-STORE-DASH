@@ -2,10 +2,10 @@
   "name": "ebt-presents-corner-store-dash",
   "version": "1.0.0",
   "private": true,
-  "description": "EBT Presents: Corner Store Dash — grab the list, dodge the bully, clear checkout.",
+  "description": "EBT Presents: Corner Store Dash \u2014 grab the list, dodge the bully, clear checkout.",
   "type": "module",
   "scripts": {
-    "dev": "npx --yes serve public -l 5173",
+    "dev": "node scripts/serve.mjs 5173",
     "dev:worker": "wrangler dev",
     "deploy": "wrangler deploy",
     "db:local": "wrangler d1 execute ebt-leaderboard --local --file=./schema.sql",

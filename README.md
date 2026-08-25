@@ -13,10 +13,13 @@ Cloudflare D1 leaderboard.
 ## Quick start
 
 ```bash
-npm install          # optional — only needed for QA + wrangler
-npm run dev          # static server on http://localhost:5173
-npm run qa           # map + gameplay checks (browser pass runs if puppeteer is installed)
+npm run dev          # zero-dependency static server on http://localhost:5173
+npm run qa           # map + gameplay checks — no install needed
+npm install --include=dev   # only for the browser QA pass + wrangler
 ```
+
+> On a machine with `NODE_ENV=production` set globally, a bare `npm install` silently
+> skips devDependencies and prints "up to date". Use `--include=dev` there.
 
 To run the game against a local Worker and a local D1 copy:
 

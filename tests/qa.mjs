@@ -90,7 +90,7 @@ let puppeteer = null;
 try {
   ({ default: puppeteer } = await import('puppeteer'));
 } catch {
-  console.log('  [SKIP] puppeteer not installed — run `npm install` to enable');
+  console.log('  [SKIP] puppeteer not installed — run `npm install --include=dev` to enable');
 }
 
 if (puppeteer) {
