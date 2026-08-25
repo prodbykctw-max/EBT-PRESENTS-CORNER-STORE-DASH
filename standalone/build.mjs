@@ -33,4 +33,5 @@ const out = shell
 
 writeFileSync(here('index.html'), out);
 copyFileSync(here('index.html'), here('../public/standalone.html'));
-console.log(`standalone/index.html assembled (${out.length} chars) -> also copied to public/standalone.html`);
+copyFileSync(here('index.html'), here('../index.html')); // repo root -> GitHub Pages serves the game at /
+console.log(`standalone/index.html assembled (${out.length} chars) -> also copied to public/standalone.html and ./index.html`);
