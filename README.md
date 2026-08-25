@@ -10,6 +10,16 @@ Cloudflare D1 leaderboard.
 - **Degrades cleanly.** If the API is down the game still plays and scores fall back to
   `localStorage`.
 
+## Two builds in this repo
+
+- **v2.1 standalone (current)** — `standalone/` holds the newest game: a single
+  self-contained `index.html` where the store mockup image *is* the board (collision is
+  derived from its pixels — see `standalone/corner-store-dash-handoff.md` for the full
+  writeup). It is also served at **`/standalone.html`** by the dev server and the Worker,
+  which makes the global leaderboard work same-origin with no config. Edit
+  `standalone/csd.js` / `shell2.html`, then reassemble with `npm run build:standalone`.
+- **v1 modular** — `public/` + `public/src/` (tile-grid engine, covered by `npm run qa`).
+
 ## Quick start
 
 ```bash

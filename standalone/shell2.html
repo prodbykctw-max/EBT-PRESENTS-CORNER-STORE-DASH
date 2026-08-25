@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="Corner Store Dash — grab everything on the EBT list, dodge the bully, make it to checkout. A standalone EBT game.">
+<meta name="theme-color" content="#0A0A0C">
+<title>CORNER STORE DASH · an EBT game</title>
+<style>
+  :root{ --pink:#E85D9E; --magenta:#C2255C; --gold:#F5C518; --cream:#FFF3E0; --coral:#F08C4B; --navy:#1E2340; --ink:#0A0A0C; }
+  *{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  html,body{ height:100%; }
+  body{ background:var(--ink); color:var(--cream); overflow:hidden;
+    font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+    touch-action:manipulation; user-select:none; -webkit-user-select:none;
+    display:flex; align-items:center; justify-content:center; }
+  canvas#view{ image-rendering:pixelated; image-rendering:crisp-edges; touch-action:none; display:block; }
+  #loading{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    font-weight:900; letter-spacing:.2em; color:var(--gold); z-index:30; background:var(--ink); }
+  .sideBtns{ position:fixed; right:14px; bottom:16px; z-index:12; display:flex; flex-direction:column; gap:10px; opacity:.85; }
+  .sideBtns button{ width:52px; height:52px; background:rgba(30,35,64,.8); border:3px solid var(--gold);
+    border-radius:12px; color:var(--gold); font-size:20px; cursor:pointer; }
+  .sideBtns button:active{ background:var(--gold); color:var(--ink); }
+  .dpad{ position:fixed; left:14px; bottom:16px; z-index:12; display:grid;
+    grid-template-columns:56px 56px 56px; grid-template-rows:56px 56px 56px; gap:4px; opacity:.46; }
+  .dpad:active{ opacity:.85; }
+  .dpad button{ background:rgba(30,35,64,.85); border:3px solid var(--gold); color:var(--gold);
+    font-size:20px; font-weight:900; cursor:pointer; border-radius:10px; }
+  .dpad button:active{ background:var(--gold); color:var(--ink); }
+  .dpad .blank{ visibility:hidden; }
+  @media (min-width:700px){ .dpad{ display:none; } }
+  .ov{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
+    background:rgba(10,10,14,.9); z-index:20; text-align:center; padding:20px; gap:14px; }
+  .ov.on{ display:flex; }
+  .card{ background:linear-gradient(160deg,var(--pink),var(--magenta));
+    border:4px solid var(--navy); box-shadow:0 6px 0 var(--navy), 0 0 0 3px var(--gold);
+    padding:22px 18px 18px; max-width:340px; width:92%; }
+  .eyebrow{ font-size:9px; letter-spacing:.22em; color:var(--cream); opacity:.9; margin-bottom:10px; }
+  .title{ font-size:34px; line-height:.95; font-weight:900; color:var(--gold); text-shadow:3px 3px 0 var(--navy); }
+  .title small{ display:block; font-size:19px; color:#fff; text-shadow:2px 2px 0 var(--navy); margin-top:4px; }
+  .rules{ font-size:12px; line-height:1.9; font-weight:700; letter-spacing:.04em; }
+  .rules b{ color:var(--gold); }
+  .hint{ font-size:9px; letter-spacing:.14em; opacity:.75; line-height:1.8; }
+  .btn{ font:inherit; font-weight:900; letter-spacing:.1em; font-size:14px; cursor:pointer;
+    background:var(--gold); color:var(--ink); border:3px solid var(--navy);
+    box-shadow:0 4px 0 var(--navy); padding:12px 22px; }
+  .btn:active{ transform:translateY(3px); box-shadow:0 1px 0 var(--navy); }
+  .btn.alt{ background:var(--cream); }
+  .pulse{ animation:pulse 1.1s infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.45} }
+  @media (prefers-reduced-motion:reduce){ .pulse{ animation:none; } }
+  #endTitle{ font-size:28px; font-weight:900; text-shadow:3px 3px 0 var(--navy); }
+  #endSub{ font-size:10px; letter-spacing:.12em; opacity:.9; }
+  .scoreBig{ font-size:22px; color:var(--gold); font-weight:900; letter-spacing:.08em; }
+  #submitRow{ display:flex; flex-direction:column; gap:10px; align-items:center; }
+  .initRow{ display:flex; gap:10px; }
+  .slot{ display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .slot .lt{ font-size:24px; font-weight:900; color:var(--cream); background:var(--navy);
+    border:3px solid var(--pink); width:44px; padding:8px 0; }
+  .slot button{ font:inherit; font-weight:900; background:none; border:2px solid var(--gold);
+    color:var(--gold); width:44px; padding:4px 0; cursor:pointer; font-size:12px; }
+  #lbList{ list-style:none; width:min(300px,86vw); font-size:12px; font-weight:800; letter-spacing:.06em; }
+  #lbList li{ display:flex; justify-content:space-between; padding:4px 8px; border-bottom:1px solid rgba(255,243,224,.15); }
+  #lbList li.me{ color:var(--gold); background:rgba(245,197,24,.1); }
+  #lbNote{ font-size:8.5px; letter-spacing:.1em; opacity:.7; }
+</style>
+</head>
+<body>
+  <div id="loading">LOADING\u2026</div>
+  <canvas id="view" width="853" height="1844"></canvas>
+  <div class="sideBtns">
+    <button id="btnPause">\u23F8</button>
+    <button id="btnMute">\uD83D\uDD0A</button>
+  </div>
+  <div class="dpad" id="dpadBox">
+    <button class="blank"></button><button id="padU">\u25B2</button><button class="blank"></button>
+    <button id="padL">\u25C0</button><button class="blank"></button><button id="padR">\u25B6</button>
+    <button class="blank"></button><button id="padD">\u25BC</button><button class="blank"></button>
+  </div>
+
+  <div class="ov" id="ovTitle">
+    <div class="card">
+      <div class="eyebrow">EBT PRESENTS</div>
+      <div class="title">CORNER STORE<small>DASH</small></div>
+    </div>
+    <button class="btn pulse" id="btnTitle">TAP TO START</button>
+  </div>
+
+  <div class="ov" id="ovHow">
+    <div class="rules">
+      GRAB EVERYTHING ON THE <b>EBT LIST</b><br>
+      DON'T GET CAUGHT BY THE <b>BULLY</b><br>
+      HIT <b>CHECKOUT</b> TO WIN
+    </div>
+    <div class="hint">DRAG ANYWHERE OR USE THE D-PAD<br>ARROWS / WASD \u00b7 P = PAUSE<br>1 CONTINUE PER RUN \u2014 ITEMS KEPT<br>FASTER RUN = BIGGER SCORE</div>
+    <button class="btn" id="btnStart">START RUN</button>
+  </div>
+
+  <div class="ov" id="ovEnd">
+    <div id="endTitle">YOU MADE IT OUT!</div>
+    <div id="endSub"></div>
+    <div class="scoreBig">SCORE <span id="finalScore">000000</span></div>
+    <button class="btn" id="btnContinue">CONTINUE \u25B6</button>
+    <div id="submitRow">
+      <div class="initRow">
+        <div class="slot"><button id="up0">\u25B2</button><div class="lt" id="init0">E</div><button id="dn0">\u25BC</button></div>
+        <div class="slot"><button id="up1">\u25B2</button><div class="lt" id="init1">B</div><button id="dn1">\u25BC</button></div>
+        <div class="slot"><button id="up2">\u25B2</button><div class="lt" id="init2">T</div><button id="dn2">\u25BC</button></div>
+      </div>
+      <button class="btn alt" id="btnSubmit">SAVE SCORE</button>
+    </div>
+    <ol id="lbList"></ol>
+    <div id="lbNote"></div>
+    <button class="btn" id="btnAgain">RUN IT BACK</button>
+    <button class="btn alt" id="btnMenu">MAIN MENU</button>
+  </div>
+
+  <div class="ov" id="ovPause">
+    <div id="endTitle2" style="font-size:26px;font-weight:900;">PAUSED</div>
+    <div class="hint">TAP TO RESUME</div>
+    <button class="btn alt" id="btnMenu2">MAIN MENU</button>
+  </div>
+
+<script>
+var BOARD_SRC="data:image/webp;base64,%%B64%%";
+%%GAME%%
+</script>
+</body>
+</html>

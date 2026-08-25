@@ -12,6 +12,7 @@
     "db:remote": "wrangler d1 execute ebt-leaderboard --remote --file=./schema.sql",
     "db:top": "wrangler d1 execute ebt-leaderboard --remote --command \"SELECT name, score FROM scores ORDER BY score DESC LIMIT 10\"",
     "qa": "node tests/qa.mjs",
+    "build:standalone": "node standalone/build.mjs",
     "lighthouse": "npx --yes lighthouse http://localhost:5173 --preset=desktop --only-categories=performance,accessibility,best-practices,seo --output=html --output-path=./lighthouse-report.html"
   },
   "devDependencies": {
