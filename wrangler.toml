@@ -1,0 +1,19 @@
+name = "ebt-corner-store-dash"
+main = "worker/index.js"
+compatibility_date = "2025-06-01"
+workers_dev = true
+
+# The Worker serves the static game itself, so there is one deploy, one origin,
+# and no CORS hop between the game and its leaderboard.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "404-page"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ebt-leaderboard"
+database_id = "3a2c03b7-8a55-4cce-8b66-b9486219a8f2"
+
+[observability]
+enabled = true

@@ -1,0 +1,14 @@
+node_modules/
+package-lock.json
+.wrangler/
+.dev.vars
+.env
+.env.*
+dist/
+lighthouse-report.html
+qa-screenshot.png
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

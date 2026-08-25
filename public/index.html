@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>EBT Presents: Corner Store Dash</title>
+<meta name="description" content="Grab every item on the EBT list, dodge the bully, and clear the checkout lane." />
+<meta name="theme-color" content="#101318" />
+<meta property="og:title" content="EBT Presents: Corner Store Dash" />
+<meta property="og:description" content="Grab the list. Dodge the bully. Hit checkout." />
+<meta property="og:type" content="website" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><text y=%2226%22 font-size=%2226%22>🛒</text></svg>" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1><span class="brand">EBT PRESENTS</span> Corner Store Dash</h1>
+  <div class="stats" role="status" aria-live="polite">
+    <div><span class="k">Score</span><b id="score">0</b></div>
+    <div><span class="k">List</span><b id="progress">0/8</b></div>
+    <div><span class="k">Time</span><b id="time">150s</b></div>
+    <div><span class="k">Carts</span><b id="lives">🛒🛒🛒</b></div>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="stage-wrap">
+    <canvas id="stage" aria-label="Corner store game board"></canvas>
+    <div class="dpad" aria-hidden="false">
+      <button data-dir="up" aria-label="Move up">▲</button>
+      <div class="row">
+        <button data-dir="left" aria-label="Move left">◀</button>
+        <button data-dir="down" aria-label="Move down">▼</button>
+        <button data-dir="right" aria-label="Move right">▶</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <h2>The EBT List</h2>
+    <ul id="list" class="list"></ul>
+
+    <h2>Leaderboard</h2>
+    <label class="name-row">
+      <span>Tag</span>
+      <input id="name" maxlength="16" placeholder="SHOPPER" autocomplete="off" />
+    </label>
+    <ol id="board" class="board"></ol>
+    <p id="board-note" class="note"></p>
+    <button id="restart" class="btn">Run it back (R)</button>
+  </aside>
+</main>
+
+<footer class="foot">
+  <p>Arrows / WASD or swipe to move · SPACE to start · R to restart</p>
+</footer>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
