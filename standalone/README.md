@@ -1,4 +1,14 @@
-# CORNER STORE DASH — standalone EBT game (v2.1)
+# CORNER STORE DASH — standalone EBT game (v2.2)
+
+## v2.2 update: full free-flow floor
+Aisle sign banners, the ENTRANCE sign, the welcome mat and the doorway were
+all being treated as solid because they aren't floor-colored. Every aisle
+sign is now a walk-through overlay, the entry/mat area is open, and only
+real furniture (shelf bodies, counters, cart corrals, walls) blocks. Also
+fixed a ghost of the mockup's baked-in shopper that had been stamped into
+the floor by a bad erase in v2 — it was an invisible obstacle sitting in
+the middle of the main lane. Store went from 22% to 38% walkable; the main
+lane now runs the full height with no pinch points.
 
 ## v2.1 update: collision geometry rebuilt
 Movement was reported as "restricted by poorly defined aisles and walk area."
@@ -35,13 +45,10 @@ score digits, and EBT-list checkmarks are all rendered live on top of the artwor
 - **Quick link:** open `index.html` as an artifact in Claude → share → Publish.
 - **Production:** Cloudflare Dashboard → Workers & Pages → Create → Pages → **Upload assets** → drop `index.html` → `ebt-game.pages.dev`.
 
-## Global leaderboard
-The leaderboard client is wired to this repo's Worker API (`worker/index.js`:
-`POST/GET /api/scores`, D1 `ebt-leaderboard`, id `3a2c03b7-8a55-4cce-8b66-b9486219a8f2`).
-`API_BASE = ""` means same-origin — deploy with `npm run deploy` and the game served at
-`/standalone.html` talks to `/api/scores` directly, no config. Set `API_BASE` to a Worker
-URL only when hosting the HTML elsewhere (e.g. Pages). If the API is unreachable
-(`file://`, static-only hosting), scores fall back to local session storage automatically.
+## Global leaderboard (optional, later)
+1. `npx wrangler deploy` in a folder with `worker.js` + `wrangler.toml` (D1 already created: `ebt-leaderboard`, id `3a2c03b7-8a55-4cce-8b66-b9486219a8f2`, schema applied).
+2. Set `ALLOWED_ORIGIN` in `worker.js` to your Pages URL.
+3. In `index.html`, set `API_BASE = "https://<worker>.workers.dev"`. Blank = local session scores (works fine without any of this).
 
 ## Tuning knobs (top of the script in index.html)
 `PSPEED 260` player · `B_BASE 205` bully base · `B_PER_ITEM 8` escalation · `B_CAP 253` max ·

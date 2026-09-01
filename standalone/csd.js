@@ -5,7 +5,7 @@
    ============================================================ */
 "use strict";
 
-var API_BASE = ""; // ← Worker origin for the global leaderboard. Empty = same-origin /api/* (the repo Worker serves both game and API); falls back to local session scores when the API is unreachable (file://, static-only hosting).
+var API_BASE = ""; // ← set to deployed Worker URL for the global leaderboard. Empty = local session scores.
 
 var IW=853, IH=1844;          // board image dimensions
 var MC=4, MW=Math.ceil(IW/MC), MH=Math.ceil(IH/MC);   // mask cells (4px)
@@ -23,7 +23,7 @@ var ITEMS=[
  {id:"RICE & BEANS",x:530,y:292, rows:[327,355], pts:200, icon:"BEANS"}
 ];
 var PADS=[[402,390,430,465],[402,550,430,635],[402,728,430,812]];
-var SPAWN_P={x:368,y:1330}, SPAWN_B={x:650,y:320};
+var SPAWN_P={x:415,y:1380}, SPAWN_B={x:650,y:320};
 var PSPEED=260, B_IDLE=90, B_BASE=205, B_PER_ITEM=8, B_CAP=253;
 var CATCH_R=30, PICK_R=36;
 var BULLY_LINES=["HEY! YOU!","GIMME THAT!","GET BACK HERE!","THOSE ARE MINE!"];
@@ -76,19 +76,26 @@ function buildMasks(imgCanvas){
     for(var x4=hiCell;x4<MW;x4++) walk[cyy*MW+x4]=0;
   }
   setRect(0,1540,IW,IH,0);
-  // flat-colored props the floor classifier can't read correctly
-  setRect(343,175,462,398,0);   // exit door (sign + frame)
-  setRect(0,86,300,392,0);      // EBT list panel
-  setRect(730,580,795,840,0);   // ENTRANCE sign
-  setRect(790,868,840,950,0);   // ATM / card reader
-  setRect(758,278,780,398,0);   // potted plant, rice&beans corner
-  setRect(783,200,853,468,0);   // LOW PRICES sign
-  // entry band: force-walkable (mat/turnstiles read as non-floor colors), then punch out real obstacles
-  setRect(14,1476,840,1606,1);
-  setRect(18,1478,215,1606,0); setRect(588,1478,808,1606,0);   // cart corrals
-  setRect(243,1490,332,1608,0); setRect(505,1490,578,1608,0);  // potted plants
-  setRect(203,1470,233,1608,0); setRect(487,1470,517,1608,0);  // turnstile posts
-  setRect(0,1606,IW,IH,0);
+  // --- SIGNAGE IS AN OVERLAY, NOT A WALL ---------------------------------
+  // Each aisle unit is a pink header banner sitting ON TOP of the shelf. In
+  // top-down terms the banner is drawn over the floor BEHIND the shelf, so
+  // it must be walkable — otherwise every horizontal lane is silently
+  // narrowed by ~35px and some pinch shut entirely. The color classifier
+  // can't know this (pink isn't floor-colored), so the banner strips are
+  // measured off the art and forced walkable here. Same for the ENTRANCE
+  // sign and the corner planter: flat props you walk past, not obstacles.
+  // Only real furniture (shelf bodies, counters, cart corrals) blocks.
+  var BANNERS=[[136,108,372,148],[497,108,741,148],[506,327,714,363],[127,352,391,387],
+               [511,508,714,543],[115,531,391,565],[506,682,716,717],[95,721,382,756],
+               [481,912,724,945],[72,918,391,951],[60,1095,388,1129],[456,1100,738,1133],
+               [48,1285,376,1318],[449,1285,747,1320]];
+  for(var bi=0;bi<BANNERS.length;bi++){ var bn=BANNERS[bi]; setRect(bn[0],bn[1],bn[2],bn[3],1); }
+  setRect(728,575,800,845,1);   // ENTRANCE sign — overlay
+  setRect(752,272,786,402,1);   // corner planter — overlay
+  // entry / welcome mat / doorway: fully open floor, only the cart corrals block
+  setRect(14,1470,840,1650,1);
+  setRect(18,1478,215,1615,0); setRect(588,1478,808,1615,0);   // cart corrals
+  setRect(0,1650,IW,IH,0);
   setRect(0,0,10,IH,0); setRect(IW-8,0,IW,IH,0);
   // light despeckle: fill single-cell pits only (classifier + wall clip already leave a clean edge)
   var w2=new Uint8Array(walk);
@@ -358,7 +365,6 @@ function winCheck(){
   }
 }
 function endScreen(won){
-  S.won=!!won;
   var canCont = !won && S.continues>0;
   el("endTitle").textContent = won? "YOU MADE IT OUT!" : (canCont? "CAUGHT!" : "THE BULLY GOT YOU!");
   el("endTitle").style.color = won? PAL.gold : PAL.coral;
@@ -646,37 +652,27 @@ function cycleInit(slot,delta){
 function renderBoard(rows,mine,note){
   var html="";
   rows.slice(0,10).forEach(function(r,i){
-    var nm=r.initials||r.name||"???"; // local rows use initials, the Worker returns name
-    var hl=(mine&&nm===mine.initials&&r.score===mine.score)?' class="me"':'';
-    html+="<li"+hl+"><span>"+(i+1)+". "+nm+"</span><span>"+String(r.score).padStart(6,"0")+"</span></li>";
+    var hl=(mine&&r.initials===mine.initials&&r.score===mine.score)?' class="me"':'';
+    html+="<li"+hl+"><span>"+(i+1)+". "+r.initials+"</span><span>"+String(r.score).padStart(6,"0")+"</span></li>";
   });
   el("lbList").innerHTML=html||"<li><span>NO SCORES YET</span><span>------</span></li>";
   el("lbNote").textContent=note||"";
 }
 function submitScore(){
-  var entry={initials:initials.join(""),score:S.score};
+  var entry={initials:initials.join(""),score:S.score,level_reached:1};
   el("submitRow").style.display="none";
-  function localFallback(){
+  if(!API_BASE){
     localLB.push(entry); localLB.sort(function(a,b){return b.score-a.score;});
-    renderBoard(localLB,entry,"LOCAL SESSION SCORES \u2014 GLOBAL BOARD UNREACHABLE");
+    renderBoard(localLB,entry,"LOCAL SESSION SCORES \u2014 set API_BASE for the global board");
+    return;
   }
-  // Worker API (worker/index.js): POST /api/scores {name,score,items,time_left,won} -> {ok,rank};
-  // the top-10 list comes from a follow-up GET /api/scores.
-  var payload={
-    name:entry.initials,
-    score:S.score,
-    items:S.nGot,
-    time_left:Math.min(3600,Math.max(0,Math.floor(S.runT||0))), // v2 counts up: elapsed run seconds
-    won:!!S.won
-  };
-  fetch(API_BASE+"/api/scores",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
-    .then(function(r){ if(!r.ok) throw new Error("submit "+r.status); return r.json(); })
-    .then(function(d){
-      return fetch(API_BASE+"/api/scores?limit=10")
-        .then(function(r2){ if(!r2.ok) throw new Error("list "+r2.status); return r2.json(); })
-        .then(function(list){ renderBoard(list.scores||[],entry,d.rank?"YOU RANKED #"+d.rank+" GLOBALLY":""); });
-    })
-    .catch(localFallback);
+  fetch(API_BASE+"/api/score",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(entry)})
+    .then(function(r){return r.json();})
+    .then(function(d){ renderBoard(d.top||[],entry,d.rank?"YOU RANKED #"+d.rank:""); })
+    .catch(function(){
+      localLB.push(entry); localLB.sort(function(a,b){return b.score-a.score;});
+      renderBoard(localLB,entry,"OFFLINE \u2014 LOCAL SCORES");
+    });
 }
 
 /* ---------- boot / loop ---------- */
