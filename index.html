@@ -269,9 +269,16 @@ function buildMasks(imgCanvas){
   // to run to 1650, which opened a ~30px strip of pavement BELOW the corrals —
   // outside the store, shorter than the sprite, and the thing that made the
   // welcome mat feel like it grabbed you.
-  setRect(14,1470,840,1610,1);
-  setRect(18,1478,215,1610,0); setRect(588,1478,808,1610,0);   // cart corrals
-  setRect(0,1610,IW,IH,0);
+  // Measured off the art: the cream interior floor ends at y~1555, the WELCOME
+  // mat runs y=1560..1630, and navy street pavement starts at y=1640. So the
+  // vestibule is walkable THROUGH the bottom of the mat, and the hard edge goes
+  // at 1634 - the threshold, not the middle of the mat. (v2.3 cut this at 1610,
+  // which sliced the mat in half and stopped you dead halfway across it. v2.2
+  // cut it at 1650, which opened a strip of street below the corrals. The
+  // corrals are now blocked to the same 1634 so neither pocket can come back.)
+  setRect(14,1470,840,1634,1);
+  setRect(18,1478,215,1634,0); setRect(588,1478,808,1634,0);   // cart corrals
+  setRect(0,1634,IW,IH,0);
   // Top-left lane: the strip between the left wall and the Dairy shelf is real
   // floor, but a few small props sitting on it broke the color run into
   // fragments, so the flood fill dropped the whole lane and the top-left corner

@@ -92,9 +92,15 @@ Three changes on top of v2.2. Full detail is in `standalone/README.md`.
   Android Chrome gets all of it.
 - **Two collision bugs fixed**, both reported as "the rug and the top-left corner
   are hard to move in", and both real geometry rather than feel:
-  1. The entry band was force-opened to y=1650, ~40px past the end of the
-     storefront floor, leaving a cramped strip of pavement below the cart
-     corrals that the player could slip into and stick in. Clamped to 1610.
+  1. The entry band was force-opened to y=1650, past the end of the storefront
+     floor, leaving a cramped strip of pavement below the cart corrals that the
+     player could slip into and stick in. The threshold is measured off the art:
+     cream floor ends ~1555, the WELCOME mat runs 1560..1630, street pavement
+     starts 1640 - so the vestibule is walkable through the bottom of the mat,
+     the hard edge is y=1634, and the corrals are blocked to the same line.
+     **Do not move this edge without re-rendering the green overlay.** Cutting
+     at 1650 opens a strip of street under the corrals; cutting at 1610 slices
+     the mat in half and jams you halfway across it. Both have shipped.
   2. The lane between the left wall and the Dairy shelf is real floor, but small
      props on it fragmented the color run, so the flood fill dropped the whole
      lane and sealed the top-left corner. Opened per the standing rule that

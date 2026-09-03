@@ -58,9 +58,14 @@ iPhone; Android Chrome gets all of it.
 **Movement.** Two real geometry bugs behind "the rug and the top-left corner are hard
 to move in":
 
-1. The entry band was force-opened to y=1650, ~30px past where the storefront floor
-   actually ends, which left a cramped strip of pavement *below* the cart corrals that
-   you could slip into and stick in. Clamped to y=1610.
+1. The entry band was force-opened to y=1650, past where the storefront floor actually
+   ends, which left a cramped strip of pavement *below* the cart corrals that you could
+   slip into and stick in. The threshold is now measured off the art rather than guessed:
+   the cream interior floor ends at y~1555, the WELCOME mat runs y=1560..1630, and street
+   pavement starts at y=1640 - so the vestibule is walkable *through* the bottom of the
+   mat, the hard edge sits at y=1634, and the cart corrals are blocked to that same line
+   so no under-corral pocket can come back. (The first v2.3 build cut this at 1610, which
+   sliced the mat in half and stopped you dead halfway across it.)
 2. The lane between the left wall and the Dairy shelf is real floor, but a few small
    props sitting on it broke the color run into fragments, so the flood fill dropped
    the whole lane and the top-left corner was sealed shut. Opened per the standing rule
