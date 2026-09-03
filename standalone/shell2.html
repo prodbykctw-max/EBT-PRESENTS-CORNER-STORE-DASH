@@ -17,18 +17,36 @@
   canvas#view{ image-rendering:pixelated; image-rendering:crisp-edges; touch-action:none; display:block; }
   #loading{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
     font-weight:900; letter-spacing:.2em; color:var(--gold); z-index:30; background:var(--ink); }
-  .sideBtns{ position:fixed; right:14px; bottom:16px; z-index:12; display:flex; flex-direction:column; gap:10px; opacity:.85; }
-  .sideBtns button{ width:52px; height:52px; background:rgba(30,35,64,.8); border:3px solid var(--gold);
-    border-radius:12px; color:var(--gold); font-size:20px; cursor:pointer; }
-  .sideBtns button:active{ background:var(--gold); color:var(--ink); }
-  .dpad{ position:fixed; left:14px; bottom:16px; z-index:12; display:grid;
-    grid-template-columns:56px 56px 56px; grid-template-rows:56px 56px 56px; gap:4px; opacity:.46; }
-  .dpad:active{ opacity:.85; }
-  .dpad button{ background:rgba(30,35,64,.85); border:3px solid var(--gold); color:var(--gold);
-    font-size:20px; font-weight:900; cursor:pointer; border-radius:10px; }
+  /* Controls sit in the two bottom corners and stay out of the drag zone in
+     the middle. Both clusters share one bottom baseline and respect the phone's
+     safe-area inset so nothing lands under a home indicator. */
+  .sideBtns{ position:fixed; right:calc(10px + env(safe-area-inset-right)); z-index:12;
+    bottom:calc(12px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:6px; opacity:.8; }
+  .sideBtns button{ width:44px; height:44px; background:rgba(30,35,64,.82); border:3px solid var(--gold);
+    border-radius:12px; color:var(--gold); font-size:17px; line-height:1; cursor:pointer; }
+  .sideBtns button:active{ background:var(--gold); color:var(--ink); transform:translateY(1px); }
+  /* D-pad: one tight cross rather than three loose rows. 48px keys on a 2px
+     seam read as a single control under the thumb, and the cluster comes in at
+     148px instead of 176px, so it stops sprawling over the store entrance. */
+  .dpad{ position:fixed; left:calc(10px + env(safe-area-inset-left)); z-index:12;
+    bottom:calc(12px + env(safe-area-inset-bottom)); display:grid; touch-action:none;
+    grid-template-columns:repeat(3,48px); grid-template-rows:repeat(3,48px); gap:2px;
+    opacity:.55; transition:opacity .12s ease; }
+  .dpad:active{ opacity:.97; }
+  .dpad button{ background:rgba(30,35,64,.88); border:3px solid var(--gold); color:var(--gold);
+    font-size:17px; line-height:1; font-weight:900; cursor:pointer; border-radius:7px; }
   .dpad button:active{ background:var(--gold); color:var(--ink); }
+  .dpad #padU{ border-radius:13px 13px 5px 5px; }
+  .dpad #padD{ border-radius:5px 5px 13px 13px; }
+  .dpad #padL{ border-radius:13px 5px 5px 13px; }
+  .dpad #padR{ border-radius:5px 13px 13px 5px; }
   .dpad .blank{ visibility:hidden; }
+  /* Visible hub ties the four keys into one control; it has no id, so sliding
+     a thumb across it holds the current direction instead of dropping input. */
+  .dpad .hub{ visibility:visible; background:rgba(30,35,64,.5); border:2px solid rgba(245,197,24,.3);
+    border-radius:6px; }
   @media (min-width:700px){ .dpad{ display:none; } }
+  @media (prefers-reduced-motion:reduce){ .dpad{ transition:none; } }
   .ov{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
     background:rgba(10,10,14,.9); z-index:20; text-align:center; padding:20px; gap:14px; }
   .ov.on{ display:flex; }
@@ -69,13 +87,13 @@
   <div id="loading">LOADING\u2026</div>
   <canvas id="view" width="853" height="1844"></canvas>
   <div class="sideBtns">
-    <button id="btnPause">\u23F8</button>
-    <button id="btnMute">\uD83D\uDD0A</button>
+    <button id="btnPause" aria-label="Pause">\u23F8</button>
+    <button id="btnMute" aria-label="Mute sound">\uD83D\uDD0A</button>
   </div>
   <div class="dpad" id="dpadBox">
-    <button class="blank"></button><button id="padU">\u25B2</button><button class="blank"></button>
-    <button id="padL">\u25C0</button><button class="blank"></button><button id="padR">\u25B6</button>
-    <button class="blank"></button><button id="padD">\u25BC</button><button class="blank"></button>
+    <button class="blank"></button><button id="padU" aria-label="Move up">\u25B2</button><button class="blank"></button>
+    <button id="padL" aria-label="Move left">\u25C0</button><button class="blank hub" tabindex="-1" aria-hidden="true"></button><button id="padR" aria-label="Move right">\u25B6</button>
+    <button class="blank"></button><button id="padD" aria-label="Move down">\u25BC</button><button class="blank"></button>
   </div>
 
   <div class="ov" id="ovTitle">

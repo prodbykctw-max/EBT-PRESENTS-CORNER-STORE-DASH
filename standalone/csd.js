@@ -30,6 +30,35 @@ var BULLY_LINES=["HEY! YOU!","GIMME THAT!","GET BACK HERE!","THOSE ARE MINE!"];
 
 /* ---------- state ---------- */
 var S={mode:"boot",score:0,got:{},nGot:0,active:false,t:0,runT:0,muted:false,line:0};
+
+/* ---------- haptics ----------------------------------------------------
+   Every touch the player makes answers back. Patterns are deliberately
+   short — a tick you feel and don't notice — except the three moments that
+   should land in your hand: bagging an item, the list going complete, and
+   getting caught.
+   Independent of the mute button on purpose: mute is about not making noise
+   in public, which is exactly when you still want the feel. iOS Safari does
+   not implement the Vibration API, so this is a no-op there and the game is
+   built to be complete without it. */
+var HAPTICS = typeof navigator !== "undefined" && typeof navigator.vibrate === "function";
+var hapLast = 0;
+function haptic(pattern, minGapMs){
+  if(!HAPTICS) return;
+  var now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+  if(minGapMs && now - hapLast < minGapMs) return;
+  hapLast = now;
+  try{ navigator.vibrate(pattern); }catch(e){}
+}
+var HAP = {
+  tap:      12,                    // any button
+  turn:     16,                    // d-pad / joystick changes direction
+  pick:     [0,22,45,22],          // item bagged
+  listDone: [0,30,55,30,55,60],    // checkout just unlocked
+  alert:    [0,45,70,45],          // the bully clocks you
+  near:     9,                     // he is right behind you (throttled)
+  caught:   [0,110,70,180],        // run over
+  win:      [0,45,60,45,60,150]
+};
 var player=null, bully=null, bubbles=[];
 var board=null, bctx=null, view=null, vctx=null;
 var walk=null, field=null, nav=null;   // Uint8Array masks
@@ -92,10 +121,19 @@ function buildMasks(imgCanvas){
   for(var bi=0;bi<BANNERS.length;bi++){ var bn=BANNERS[bi]; setRect(bn[0],bn[1],bn[2],bn[3],1); }
   setRect(728,575,800,845,1);   // ENTRANCE sign — overlay
   setRect(752,272,786,402,1);   // corner planter — overlay
-  // entry / welcome mat / doorway: fully open floor, only the cart corrals block
-  setRect(14,1470,840,1650,1);
-  setRect(18,1478,215,1615,0); setRect(588,1478,808,1615,0);   // cart corrals
-  setRect(0,1650,IW,IH,0);
+  // entry / welcome mat / doorway: fully open floor, only the cart corrals block.
+  // The band stops at y=1610 where the storefront floor actually ends. It used
+  // to run to 1650, which opened a ~30px strip of pavement BELOW the corrals —
+  // outside the store, shorter than the sprite, and the thing that made the
+  // welcome mat feel like it grabbed you.
+  setRect(14,1470,840,1610,1);
+  setRect(18,1478,215,1610,0); setRect(588,1478,808,1610,0);   // cart corrals
+  setRect(0,1610,IW,IH,0);
+  // Top-left lane: the strip between the left wall and the Dairy shelf is real
+  // floor, but a few small props sitting on it broke the color run into
+  // fragments, so the flood fill dropped the whole lane and the top-left corner
+  // was sealed. Props are overlays (see the ground rule above) — open the lane.
+  setRect(108,100,138,300,1);
   setRect(0,0,10,IH,0); setRect(IW-8,0,IW,IH,0);
   // light despeckle: fill single-cell pits only (classifier + wall clip already leave a clean edge)
   var w2=new Uint8Array(walk);
@@ -132,8 +170,14 @@ function fieldAt(x,y){
   if(cx<0||cy<0||cx>=MW||cy>=MH) return 0;
   return field[cy*MW+cx];
 }
+/* Collision box. Narrowed from +-9 to +-7 (and the head sample from -6 to -5)
+   after the report that the top corners and the entry mat felt sticky: the
+   store is drawn in perspective, so the lanes along the top-left and top-right
+   walls taper to ~24px, and an 18px-wide box left barely 3px of slack there —
+   enough to look walkable and feel jammed. 14px keeps the sprite honest
+   against real furniture while giving the tapered corners room to breathe. */
 function boxFree(x,y){
-  return fieldAt(x-9,y)&&fieldAt(x+9,y)&&fieldAt(x-9,y-6)&&fieldAt(x+9,y-6)&&fieldAt(x,y+3);
+  return fieldAt(x-7,y)&&fieldAt(x+7,y)&&fieldAt(x-7,y-5)&&fieldAt(x+7,y-5)&&fieldAt(x,y+3);
 }
 function snapToField(x,y){
   if(boxFree(x,y)) return {x:x,y:y};
@@ -194,14 +238,14 @@ function los(x0,y0,x1,y1){
 
 /* ---------- movement ---------- */
 function nudgeY(nx,y){
-  for(var k=3;k<=10;k+=3){
+  for(var k=3;k<=15;k+=3){
     if(boxFree(nx,y-k)) return -1;
     if(boxFree(nx,y+k)) return 1;
   }
   return 0;
 }
 function nudgeX(x,ny){
-  for(var k=3;k<=10;k+=3){
+  for(var k=3;k<=15;k+=3){
     if(boxFree(x-k,ny)) return -1;
     if(boxFree(x+k,ny)) return 1;
   }
@@ -316,13 +360,13 @@ function bubble(x,y,text,ttl){ bubbles.push({x:x,y:y,text:text,ttl:ttl||1.2,max:
 function collect(it){
   S.got[it.id]=1; S.nGot++; addScore(it.pts);
   bubble(it.sx,it.sy-40,"+"+it.pts+" "+it.id,1.2);
-  sfx.pick();
-  if(!S.active){ S.active=true; bubble(bully.x,bully.y-92,"HEY! MY SNACKS!",1.4); sfx.alert(); }
-  if(S.nGot===ITEMS.length){ bubble(player.x,player.y-96,"CHECKOUT! →",1.6); sfx.register(); }
+  sfx.pick(); haptic(HAP.pick);
+  if(!S.active){ S.active=true; bubble(bully.x,bully.y-92,"HEY! MY SNACKS!",1.4); sfx.alert(); haptic(HAP.alert); }
+  if(S.nGot===ITEMS.length){ bubble(player.x,player.y-96,"CHECKOUT! →",1.6); sfx.register(); haptic(HAP.listDone); }
 }
 function caught(){
   if(S.mode!=="play") return;
-  S.mode="end"; sfx.death();
+  S.mode="end"; sfx.death(); haptic(HAP.caught);
   bubble(bully.x,bully.y-92,"GOTCHA!",1.6);
   setTimeout(function(){ endScreen(false); },900);
 }
@@ -358,7 +402,7 @@ function winCheck(){
       var timeBonus=Math.max(0,1500-Math.floor(S.runT)*15);
       addScore(500+timeBonus);
       S.timeBonus=timeBonus;
-      sfx.win();
+      sfx.win(); haptic(HAP.win);
       setTimeout(function(){ endScreen(true); },500);
       return;
     }
@@ -426,7 +470,11 @@ function bindTouch(){
     drag.cx=t.clientX; drag.cy=t.clientY;
     var dx=drag.cx-drag.ax, dy=drag.cy-drag.ay, m=Math.hypot(dx,dy);
     if(m>44){ drag.ax=drag.cx-dx/m*44; drag.ay=drag.cy-dy/m*44; dx=drag.cx-drag.ax; dy=drag.cy-drag.ay; m=44; }
-    if(m>10){ drag.on=true; drag.x=dx/m; drag.y=dy/m; }
+    if(m>10){
+      var q=(Math.abs(dx)>Math.abs(dy)) ? (dx>0?"R":"L") : (dy>0?"D":"U");
+      if(!drag.on || drag.q!==q){ drag.q=q; haptic(HAP.turn,60); }
+      drag.on=true; drag.x=dx/m; drag.y=dy/m;
+    }
     else drag.on=false;
   },{passive:true});
   c.addEventListener("touchend",function(){ drag=null; },{passive:true});
@@ -439,6 +487,7 @@ function bindTouch(){
     if(!t){ padDir=null; return; }
     var elm=document.elementFromPoint(t.clientX,t.clientY);
     var d=elm&&padMap[elm.id];
+    if(d && (!padDir || padDir.x!==d[0] || padDir.y!==d[1])) haptic(HAP.turn);
     padDir=d?{x:d[0],y:d[1]}:padDir;
     ev.preventDefault();
   }
@@ -448,7 +497,7 @@ function bindTouch(){
   box.addEventListener("touchcancel",function(){ padDir=null; });
   Object.keys(padMap).forEach(function(id){
     var b=el(id);
-    b.addEventListener("mousedown",function(){ padDir={x:padMap[id][0],y:padMap[id][1]}; });
+    b.addEventListener("mousedown",function(){ haptic(HAP.turn); padDir={x:padMap[id][0],y:padMap[id][1]}; });
     b.addEventListener("mouseup",function(){ padDir=null; });
     b.addEventListener("mouseleave",function(){ if(padDir) padDir=null; });
   });
@@ -634,8 +683,12 @@ var BASS=[0,0,3,5,0,0,7,5], BASS_HOT=[12,10,8,7,12,10,7,5], ROOT=98;
 function startMusic(){
   if(musicTimer) return;
   musicTimer=setInterval(function(){
-    if(S.muted||S.mode!=="play") return;
+    if(S.mode!=="play") return;
     var hot = bully && player && Math.hypot(player.x-bully.x,player.y-bully.y)<280 && S.active;
+    // he is on you: a low pulse in the hand, throttled so it reads as tension
+    // rather than a buzz. Deliberately outside the mute check.
+    if(hot && Math.hypot(player.x-bully.x,player.y-bully.y)<190) haptic(HAP.near,620);
+    if(S.muted) return;
     var pat=hot?BASS_HOT:BASS, st=pat[mStep%pat.length];
     tone(ROOT*Math.pow(2,st/12),0,hot?0.09:0.12,"triangle",0.05);
     if(mStep%4===0) tone(ROOT*2*Math.pow(2,st/12),0,0.05,"square",0.02);
@@ -739,6 +792,11 @@ function init(){
   el("btnPause").addEventListener("click",function(ev){ ev.stopPropagation(); togglePause(); });
   el("btnMenu2").addEventListener("click",function(ev){ ev.stopPropagation(); goMenu(); });
   el("btnSubmit").addEventListener("click",submitScore);
+  // one delegated tick for every button; the d-pad has its own turn haptic
+  document.addEventListener("pointerdown",function(ev){
+    var t=ev.target;
+    if(t&&t.tagName==="BUTTON"&&!(t.closest&&t.closest(".dpad"))) haptic(HAP.tap);
+  },{passive:true});
   el("btnMute").addEventListener("click",function(){ S.muted=!S.muted; el("btnMute").textContent=S.muted?"\uD83D\uDD07":"\uD83D\uDD0A"; });
   [0,1,2].forEach(function(s){
     el("up"+s).addEventListener("click",function(){cycleInit(s,1);});

@@ -37,6 +37,49 @@ score digits, and EBT-list checkmarks are all rendered live on top of the artwor
 - Controls: drag anywhere / on-screen d-pad (mobile), arrows/WASD (desktop).
 - Leaderboard: same backend as v1 — Worker + D1 (unchanged `worker.js` + `schema.sql`).
 
+## What changed in v2.3 — controls + feel
+
+**Buttons.** The d-pad was three loose rows sprawling 176px across the store entrance;
+it is now one tight cross — 48px keys on a 2px seam, 148px total, with a visible hub
+that ties the four arrows into a single control. Sliding a thumb across the hub holds
+the current direction instead of dropping input. The pause/mute pair came down to 44px
+and both clusters now share one bottom baseline and respect `env(safe-area-inset-*)`,
+so nothing sits under a home indicator.
+
+**Haptics.** Every touch answers back, via `haptic()` / the `HAP` pattern table near the
+top of `csd.js`: a tick on each direction change (d-pad and drag joystick), a tick on
+every button, a double pulse when you bag an item, a longer pattern when the list goes
+complete, a triple when the bully first clocks you, a low throttled pulse while he is
+within 190px, and a hard pattern on catch and on win. Haptics deliberately ignore the
+mute button — mute is about not making noise in public, which is exactly when the feel
+matters. **iOS Safari does not implement the Vibration API**, so this is a no-op on
+iPhone; Android Chrome gets all of it.
+
+**Movement.** Two real geometry bugs behind "the rug and the top-left corner are hard
+to move in":
+
+1. The entry band was force-opened to y=1650, ~30px past where the storefront floor
+   actually ends, which left a cramped strip of pavement *below* the cart corrals that
+   you could slip into and stick in. Clamped to y=1610.
+2. The lane between the left wall and the Dairy shelf is real floor, but a few small
+   props sitting on it broke the color run into fragments, so the flood fill dropped
+   the whole lane and the top-left corner was sealed shut. Opened per the standing rule
+   that props are overlays, not furniture.
+
+The collision box also went from 18px wide to 14px (`boxFree`, `±9 → ±7`). The store is
+drawn in perspective, so the lanes along the top walls taper to ~24px — an 18px box left
+3px of slack there, which looks walkable and feels jammed. Corner-assist probes now reach
+15px instead of 10px.
+
+Not opened: the **top-right** "lane". It looks like floor in the mask but the overlay
+render shows it is the top face of the wall under the LOW PRICES sign — there is no
+aisle there. It is unreachable by the collision box, which is correct.
+
+Regression numbers after the change: 13/14 aisle banners walkable (was 12 — the Dairy
+banner is now reachable via the reopened left lane), center lane clear over 56 probes,
+top-left lane clear over 36 probes, mat clear over 32 probes, and the out-of-store strip
+below the corrals correctly blocked.
+
 ## Judgment calls to review
 1. **RICE and BEANS are two separate pickups at the RICE & BEANS aisle** (it's named for both). Every other aisle has exactly one. Easy to move — each item is one line in `ITEMS` in the script.
 2. **One life.** Matches "without being caught." Feel too harsh? Say the word and I'll add hearts.
