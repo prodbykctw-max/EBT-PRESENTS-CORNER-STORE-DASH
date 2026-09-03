@@ -1,68 +1,119 @@
-# CORNER STORE DASH — full handoff (pick this up and finish it)
+# CORNER STORE DASH — full handoff
 
-**Read this top section first. It is the actual job. Everything below it is
-reference material you only need if you're changing the game.**
+**Read this top section first. It is how the project is wired. Everything below
+it is reference material you only need if you're changing the game.**
 
 ---
 
-## THE JOB
+## START HERE
 
-Push this game to GitHub and get it live, then hand back a working URL.
+The game is **shipped and live**. There is no outstanding deploy task.
 
 - **Repo:** `https://github.com/prodbykctw-max/EBT-PRESENTS-CORNER-STORE-DASH`
   (dashes, not underscores)
+- **Live:** `https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/`
 - **Owner:** prodbykctw-max (Melvin / KCTW, RARE Agency)
-- **Target live URL:** `https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/`
-- **He is on his phone.** Do not hand back manual click-through steps. Do the
-  push yourself and reply with the link.
+- **Current version:** v2.3
+- **GitHub Pages is already enabled** and serves the repo root on `main`.
+  Do **not** run `gh api ... /pages` — there is nothing to set up. A push to
+  `main` is the deploy; the site updates within about a minute.
 
-### Files
+### The working folder on Melvin's machine
 
-They ship as a zip (`corner-store-dash-v2.2.zip`) downloaded from the chat
-this came from. Contents:
+```
+C:\Users\Owner\Documents\EBT-PRESENTS-CORNER-STORE-DASH   <- THE REAL ONE
+```
 
-| file | what it is |
+That folder has `origin` set and tracks `main`. Use it.
+
+```
+C:\Users\Owner\Documents\_OLD-scaffold-do-not-use         <- dead, ignore
+```
+
+That is a stale copy from the first session with **no remote** and pre-game
+history. Everything in it is already an ancestor of `origin/main`, so nothing is
+stranded there — but if you commit into it, the work goes nowhere. Check
+`git remote -v` before you start if you are unsure which folder you are in.
+
+### The build step — the one rule that bites
+
+`index.html` is **generated**, and it exists in three places that must stay
+identical:
+
+| path | role |
 |---|---|
-| `index.html` | **the entire playable game.** Self-contained, ~392KB, board image inlined as base64. This is the only file needed to run or deploy. |
-| `csd.js` | game logic source |
-| `shell2.html` | DOM/CSS/overlay markup source |
-| `board.b64` | base64 of the board WebP (inlined into index.html at assembly) |
-| `README.md` | player/deploy-facing summary + version history |
-| `corner-store-dash-handoff.md` | this document |
+| `index.html` (repo root) | what GitHub Pages serves |
+| `standalone/index.html` | the canonical build output |
+| `public/standalone.html` | what the Worker / dev server serves |
 
-`index.html` is already assembled from the other three and is current. You do
-**not** need to rebuild it unless you change `csd.js` or `shell2.html` — if you
-do, the assembly step is in "Rebuilding index.html" further down.
-
-### Do this
+Edit `standalone/csd.js` (game logic) and/or `standalone/shell2.html`
+(DOM + CSS), then:
 
 ```bash
-git clone https://github.com/prodbykctw-max/EBT-PRESENTS-CORNER-STORE-DASH
-cd EBT-PRESENTS-CORNER-STORE-DASH
-# copy the unzipped files in here, then:
-git add -A
-git commit -m "v2.2: free-flow floor — aisle signs as walkable overlays, open entry/mat, remove baked-figure ghost obstacle"
-git push
+node standalone/build.mjs
 ```
 
-Then enable GitHub Pages so it's actually live:
+That assembles the shell + game script + `board.b64` into `standalone/index.html`
+and copies it to the other two paths. **Never hand-edit `index.html`** — the next
+build overwrites it, and editing only one of the three copies ships a site that
+disagrees with its own source.
 
-```bash
-gh api -X POST repos/prodbykctw-max/EBT-PRESENTS-CORNER-STORE-DASH/pages \
-  -f "source[branch]=main" -f "source[path]=/"
-```
+### Pushing
 
-(If Pages is already enabled, that returns 409 — fine, ignore it. If the
-default branch is `master` rather than `main`, substitute it.)
+`gh` is installed and authenticated on Melvin's machine as prodbykctw-max with
+`repo` scope, and Git Credential Manager is set up, so `git push` just works
+there.
 
-Give it ~60s, confirm the URL returns 200, and reply with the live link.
+Worth knowing: a **cloud/sandboxed Claude session cannot push this repo** — the
+git proxy refuses it over HTTPS, SSH and the API alike unless the repo has been
+added to that session's authorized sources. That is an authorization wall, not a
+credential problem, and no amount of retrying or re-auth fixes it. If you are
+running in a sandbox and hit `access denied by the git proxy`, the way through is
+to run the push on Melvin's connected machine instead.
 
-### If the push fails on auth
+---
 
-Don't hand the auth problem back to him with a wall of instructions — he's on
-mobile. Say plainly what's missing (e.g. `gh auth login` needed) in one line
-and, if you can, run the auth flow. `gh` is the path of least resistance here
-since it handles both the push and the Pages enable.
+## v2.3 (current): controls + feel
+
+Three changes on top of v2.2. Full detail is in `standalone/README.md`.
+
+- **Control layout tightened.** The d-pad is one 148px cross (48px keys, 2px
+  seam, visible hub) instead of a 176px sprawl of three rows. The hub carries no
+  `id`, so sliding a thumb across it holds the current direction instead of
+  dropping input — that is deliberate, don't "fix" it by giving it an id.
+  Pause/mute came down to 44px; both clusters share a bottom baseline and honor
+  `env(safe-area-inset-*)`.
+- **Haptics added.** `haptic()` plus the `HAP` pattern table near the top of
+  `csd.js`. Ticks on direction change (d-pad and drag joystick) and on every
+  button; pulses on pickup, list complete, first bully alert, proximity
+  (throttled to 620ms), catch and win. Deliberately **independent of the mute
+  button** — mute is about not making noise in public, which is exactly when the
+  feel matters. No-op on iOS Safari, which does not implement the Vibration API;
+  Android Chrome gets all of it.
+- **Two collision bugs fixed**, both reported as "the rug and the top-left corner
+  are hard to move in", and both real geometry rather than feel:
+  1. The entry band was force-opened to y=1650, ~40px past the end of the
+     storefront floor, leaving a cramped strip of pavement below the cart
+     corrals that the player could slip into and stick in. Clamped to 1610.
+  2. The lane between the left wall and the Dairy shelf is real floor, but small
+     props on it fragmented the color run, so the flood fill dropped the whole
+     lane and sealed the top-left corner. Opened per the standing rule that
+     props are overlays, not furniture.
+  `boxFree` also narrowed from ±9 to ±7 (head sample −6 to −5): the store is
+  drawn in perspective, so the top lanes taper to ~24px, and an 18px box left 3px
+  of slack — walkable-looking and jammed-feeling. Corner-assist probes now reach
+  15px instead of 10px.
+
+**Not opened: the top-right "lane."** It reads as floor in the mask, but a green
+overlay render shows it is the top face of the wall under the LOW PRICES sign.
+There is no aisle there. It is unreachable by the collision box, which is
+correct — leave it.
+
+Verified headless (Playwright) against the built `index.html`: no console errors,
+13/14 aisle banners walkable (the Dairy banner is newly reachable via the
+reopened left lane), center lane clear over 56 probes, top-left lane clear over
+36, mat clear over 32, out-of-store strip correctly blocked, player runs
+y=1380 → 238 in one unbroken move.
 
 ---
 
@@ -71,7 +122,10 @@ since it handles both the push and the Pages enable.
 The game is **done and passing its full test suite.** Nothing is half-built.
 If you're only pushing, you can stop reading here.
 
-Most recent work (v2.2) was a collision-geometry rebuild, driven by the
+The work described below is v2.2, kept for the reasoning behind the
+collision mask. v2.3 sits on top of it — see the section above.
+
+That v2.2 pass was a collision-geometry rebuild, driven by the
 report that movement felt *"restricted by poorly defined aisles"* and that you
 *"can't move behind signs on the aisle"* and *"can't move by the door."* Two
 real bugs were behind that:
