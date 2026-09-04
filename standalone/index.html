@@ -320,14 +320,26 @@ function fieldAt(x,y){
   if(cx<0||cy<0||cx>=MW||cy>=MH) return 0;
   return field[cy*MW+cx];
 }
-/* Collision box. Narrowed from +-9 to +-7 (and the head sample from -6 to -5)
-   after the report that the top corners and the entry mat felt sticky: the
-   store is drawn in perspective, so the lanes along the top-left and top-right
-   walls taper to ~24px, and an 18px-wide box left barely 3px of slack there —
-   enough to look walkable and feel jammed. 14px keeps the sprite honest
-   against real furniture while giving the tapered corners room to breathe. */
+/* Collision FOOTPRINT - the feet, not the body. 18px wide originally, then 14,
+   then 10; now three samples across the feet plus one just in front.
+
+   The mask (`field`) already covers the tile right up to every fixture base.
+   `boxFree` asks where the player's CENTRE may sit, which is that mask inset by
+   the footprint - so a fat box paints a dead gutter around every shelf, and you
+   see tile you cannot stand on. The old +-9/-6/+3 box left 6px of dead tile on
+   the sides of a shelf and 4-5px above and below it. This leaves 4px at the
+   sides and 1-2px front and back, which is the mask's own 4px cell - you cannot
+   get closer without rebuilding the masks at finer resolution.
+
+   The centre sample matters: x-3 and x+3 straddle 6px, so without it a lone 4px
+   wall cell sitting exactly at x would pass unnoticed.
+
+   The sprite is much wider than this footprint and will overlap fixture art when
+   you stand against one. That is correct for a flat-drawn top-down game - actors
+   render above the board, so it reads as standing in front of the shelf. Feet
+   collide; bodies overlap. Do not "fix" it by widening this back out. */
 function boxFree(x,y){
-  return fieldAt(x-7,y)&&fieldAt(x+7,y)&&fieldAt(x-7,y-5)&&fieldAt(x+7,y-5)&&fieldAt(x,y+3);
+  return fieldAt(x-3,y)&&fieldAt(x+3,y)&&fieldAt(x,y)&&fieldAt(x,y+1);
 }
 function snapToField(x,y){
   if(boxFree(x,y)) return {x:x,y:y};
