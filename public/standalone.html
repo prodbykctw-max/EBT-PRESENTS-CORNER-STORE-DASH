@@ -283,7 +283,12 @@ function buildMasks(imgCanvas){
   // x=730, so x 710..729 is clean tile. The classifier lost that strip to the
   // counter's shadow, leaving a visible band of floor you could not stand on
   // right where the aisle passes the sign. 710 sits tight to the counter.
-  setRect(710,575,800,845,1);   // ENTRANCE sign — overlay
+  // Bottom edge 845 -> 858. The decal has a painted dark border, and its bottom
+  // one occupies y=847..852. The overlay stopped at 845, so that border stayed
+  // classified as not-floor and became a 5px fence running x=737..792 straight
+  // across the corridor between the registers and the mat - walk down that side
+  // and you stop dead at y=846. It is paint on a floor mat, not an obstacle.
+  setRect(710,575,800,858,1);   // ENTRANCE mat — overlay, borders included
   // Checkout counters cast a shadow to their right that the colour classifier
   // reads as not-floor, so a ~6px band of tile beside each counter was dead.
   // The counters' dark bodies all end at x=707-709 (10px grid read), so opening
