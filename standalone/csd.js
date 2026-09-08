@@ -141,14 +141,28 @@ function buildMasks(imgCanvas){
   // cut it at 1650, which opened a strip of street below the corrals. The
   // corrals are now blocked to the same 1634 so neither pocket can come back.)
   setRect(14,1470,840,1634,1);
-  setRect(18,1478,215,1634,0); setRect(588,1478,808,1634,0);   // cart corrals
+  // Cart corrals, re-measured off the art with a 10px grid overlay rather than
+  // eyeballed: both top rails start at y~1498 and the posts span x 41..227 and
+  // x 600..790. The old rects started at y=1478 and ran x 18..215 / 588..808,
+  // which ate a ~25px band of real tile above each corral (624 + 490 mask cells
+  // of floor you could see and not walk on) while missing the posts' outer edge.
+  setRect(39,1497,229,1634,0); setRect(598,1497,792,1634,0);   // cart corrals
   setRect(0,1634,IW,IH,0);
   // Top-left lane: the strip between the left wall and the Dairy shelf is real
   // floor, but a few small props sitting on it broke the color run into
   // fragments, so the flood fill dropped the whole lane and the top-left corner
   // was sealed. Props are overlays (see the ground rule above) — open the lane.
   setRect(108,100,138,300,1);
-  setRect(0,0,10,IH,0); setRect(IW-8,0,IW,IH,0);
+  // Board-edge guards. The store's tile genuinely runs to x=0 and x=852 along
+  // the lower half, so the old 10px/8px guards were clipping real floor at both
+  // edges. 4px is enough to keep the footprint off the image border.
+  setRect(0,0,4,IH,0); setRect(IW-4,0,IW,IH,0);
+  // The top-right wall face reads as floor to the colour classifier: it is the
+  // pale painted wall under the LOW PRICES sign, drawn in perspective, not
+  // ground. The measured floor edge at y=292 is x=760 and the wall leans further
+  // left as it goes up, so nothing at or right of 760 in the top band is floor.
+  // Blocking it kills the walkable island that sat up there.
+  setRect(760,96,IW,300,0);
   // light despeckle: fill single-cell pits only (classifier + wall clip already leave a clean edge)
   var w2=new Uint8Array(walk);
   for(var y2=1;y2<MH-1;y2++)for(var x2=1;x2<MW-1;x2++){
