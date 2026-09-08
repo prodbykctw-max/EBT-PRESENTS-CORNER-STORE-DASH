@@ -269,7 +269,17 @@ function buildMasks(imgCanvas){
                [481,912,724,945],[72,918,391,951],[60,1095,388,1129],[456,1100,738,1133],
                [48,1285,376,1318],[449,1285,747,1320]];
   for(var bi=0;bi<BANNERS.length;bi++){ var bn=BANNERS[bi]; setRect(bn[0],bn[1],bn[2],bn[3],1); }
-  setRect(728,575,800,845,1);   // ENTRANCE sign — overlay
+  // ENTRANCE sign overlay. Left edge pulled 728 -> 710: a 10px grid read puts
+  // the checkout counter's dark edge at x=707-709 and the sign's border at
+  // x=730, so x 710..729 is clean tile. The classifier lost that strip to the
+  // counter's shadow, leaving a visible band of floor you could not stand on
+  // right where the aisle passes the sign. 710 sits tight to the counter.
+  setRect(710,575,800,845,1);   // ENTRANCE sign — overlay
+  // Checkout counters cast a shadow to their right that the colour classifier
+  // reads as not-floor, so a ~6px band of tile beside each counter was dead.
+  // The counters' dark bodies all end at x=707-709 (10px grid read), so opening
+  // from 709 leaves them solid while giving the lane back its full width.
+  setRect(709,326,732,575,1);   // counter shadow strip, checkout 1 + the gap
   setRect(752,272,786,402,1);   // corner planter — overlay
   // entry / welcome mat / doorway: fully open floor, only the cart corrals block.
   // The band stops at y=1610 where the storefront floor actually ends. It used
