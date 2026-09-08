@@ -529,28 +529,43 @@ function bindTouch(){
   },{passive:true});
   c.addEventListener("touchend",function(){ drag=null; },{passive:true});
   c.addEventListener("touchcancel",function(){ drag=null; },{passive:true});
-  // d-pad: container-level tracking so sliding between arrows re-aims instantly
-  var padMap={padU:[0,-1],padD:[0,1],padL:[-1,0],padR:[1,0]};
+  /* D-pad. Direction comes from where the thumb sits relative to the pad's
+     centre, not from which key it happens to land on. A thumb on a corner
+     resolves to the nearer axis instead of falling into a dead gap, sliding
+     across the pad re-aims continuously, and the middle is a genuine dead zone:
+     there is no direction to give at the centre, so a touch there does nothing
+     rather than pretending to be a button. The pad's children are
+     pointer-events:none, so the container sees the whole gesture. */
+  var PADV={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
   var box=el("dpadBox");
-  function aim(ev){
+  var padKey={up:el("padU"),down:el("padD"),left:el("padL"),right:el("padR")};
+  function padLight(name){
+    for(var k in padKey) padKey[k].classList.toggle("on", k===name);
+    box.classList.toggle("live", !!name);
+  }
+  function padAim(cx,cy){
+    var r=box.getBoundingClientRect();
+    var dx=cx-(r.left+r.width/2), dy=cy-(r.top+r.height/2);
+    if(Math.hypot(dx,dy) < r.width*0.17) return;   // dead centre: hold, don't steer
+    var name = Math.abs(dx)>Math.abs(dy) ? (dx>0?"right":"left") : (dy>0?"down":"up");
+    var d=PADV[name];
+    if(!padDir || padDir.x!==d[0] || padDir.y!==d[1]) haptic(HAP.turn);
+    padDir={x:d[0],y:d[1]};
+    padLight(name);
+  }
+  function padRelease(){ padDir=null; padLight(null); }
+  function padTouch(ev){
     var t=ev.touches[0];
-    if(!t){ padDir=null; return; }
-    var elm=document.elementFromPoint(t.clientX,t.clientY);
-    var d=elm&&padMap[elm.id];
-    if(d && (!padDir || padDir.x!==d[0] || padDir.y!==d[1])) haptic(HAP.turn);
-    padDir=d?{x:d[0],y:d[1]}:padDir;
+    if(t) padAim(t.clientX,t.clientY);
     ev.preventDefault();
   }
-  box.addEventListener("touchstart",aim,{passive:false});
-  box.addEventListener("touchmove",aim,{passive:false});
-  box.addEventListener("touchend",function(ev){ padDir=null; ev.preventDefault(); },{passive:false});
-  box.addEventListener("touchcancel",function(){ padDir=null; });
-  Object.keys(padMap).forEach(function(id){
-    var b=el(id);
-    b.addEventListener("mousedown",function(){ haptic(HAP.turn); padDir={x:padMap[id][0],y:padMap[id][1]}; });
-    b.addEventListener("mouseup",function(){ padDir=null; });
-    b.addEventListener("mouseleave",function(){ if(padDir) padDir=null; });
-  });
+  box.addEventListener("touchstart",padTouch,{passive:false});
+  box.addEventListener("touchmove",padTouch,{passive:false});
+  box.addEventListener("touchend",function(ev){ padRelease(); ev.preventDefault(); },{passive:false});
+  box.addEventListener("touchcancel",padRelease);
+  box.addEventListener("mousedown",function(ev){ padAim(ev.clientX,ev.clientY); ev.preventDefault(); });
+  box.addEventListener("mousemove",function(ev){ if(ev.buttons) padAim(ev.clientX,ev.clientY); });
+  window.addEventListener("mouseup",padRelease);
 }
 
 /* ---------- sprites ---------- */

@@ -25,26 +25,35 @@
   .sideBtns button{ width:44px; height:44px; background:rgba(30,35,64,.82); border:3px solid var(--gold);
     border-radius:12px; color:var(--gold); font-size:17px; line-height:1; cursor:pointer; }
   .sideBtns button:active{ background:var(--gold); color:var(--ink); transform:translateY(1px); }
-  /* D-pad: one tight cross rather than three loose rows. 48px keys on a 2px
-     seam read as a single control under the thumb, and the cluster comes in at
-     148px instead of 176px, so it stops sprawling over the store entrance. */
-  .dpad{ position:fixed; left:calc(10px + env(safe-area-inset-left)); z-index:12;
-    bottom:calc(12px + env(safe-area-inset-bottom)); display:grid; touch-action:none;
-    grid-template-columns:repeat(3,48px); grid-template-rows:repeat(3,48px); gap:2px;
-    opacity:.55; transition:opacity .12s ease; }
-  .dpad:active{ opacity:.97; }
-  .dpad button{ background:rgba(30,35,64,.88); border:3px solid var(--gold); color:var(--gold);
-    font-size:17px; line-height:1; font-weight:900; cursor:pointer; border-radius:7px; }
-  .dpad button:active{ background:var(--gold); color:var(--ink); }
-  .dpad #padU{ border-radius:13px 13px 5px 5px; }
-  .dpad #padD{ border-radius:5px 5px 13px 13px; }
-  .dpad #padL{ border-radius:13px 5px 5px 13px; }
-  .dpad #padR{ border-radius:5px 13px 13px 5px; }
+  /* D-pad sits bottom-CENTRE, over the entrance mat, so either thumb reaches it
+     without stretching across the phone the way the old bottom-left corner did.
+     186px of cross with 60px keys: bigger targets, and centred means the travel
+     from rest to any arrow is the same in every direction.
+     Direction is computed from where the thumb sits relative to the pad's
+     centre, not from which key it lands on. That does three things: a thumb on
+     a corner resolves to the nearer axis instead of falling in a dead gap,
+     sliding across the pad re-aims continuously, and the centre is a real dead
+     zone - there is no direction to give there, so it does nothing at all.
+     Every child is pointer-events:none so the container owns the whole gesture
+     and nothing inside is independently clickable. */
+  .dpad{ position:fixed; left:50%; transform:translateX(-50%); z-index:12;
+    bottom:calc(10px + env(safe-area-inset-bottom)); display:grid; touch-action:none;
+    grid-template-columns:repeat(3,60px); grid-template-rows:repeat(3,60px); gap:3px;
+    opacity:.5; transition:opacity .12s ease; }
+  .dpad.live{ opacity:.96; }
+  .dpad > *{ pointer-events:none; }
+  .dpad button{ background:rgba(30,35,64,.85); border:3px solid var(--gold); color:var(--gold);
+    font-size:20px; line-height:1; font-weight:900; border-radius:8px; }
+  .dpad button.on{ background:var(--gold); color:var(--ink); }
+  .dpad #padU{ border-radius:15px 15px 5px 5px; }
+  .dpad #padD{ border-radius:5px 5px 15px 15px; }
+  .dpad #padL{ border-radius:15px 5px 5px 15px; }
+  .dpad #padR{ border-radius:5px 15px 15px 5px; }
   .dpad .blank{ visibility:hidden; }
-  /* Visible hub ties the four keys into one control; it has no id, so sliding
-     a thumb across it holds the current direction instead of dropping input. */
-  .dpad .hub{ visibility:visible; background:rgba(30,35,64,.5); border:2px solid rgba(245,197,24,.3);
-    border-radius:6px; }
+  /* The hub is decoration, not a control - a dashed ring reads as "nothing to
+     press here", and it is a div so it can never take a click or a tab stop. */
+  .dpad .hub{ background:rgba(30,35,64,.38); border:2px dashed rgba(245,197,24,.30);
+    border-radius:50%; }
   @media (min-width:700px){ .dpad{ display:none; } }
   @media (prefers-reduced-motion:reduce){ .dpad{ transition:none; } }
   .ov{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
@@ -92,7 +101,7 @@
   </div>
   <div class="dpad" id="dpadBox">
     <button class="blank"></button><button id="padU" aria-label="Move up">▲</button><button class="blank"></button>
-    <button id="padL" aria-label="Move left">◀</button><button class="blank hub" tabindex="-1" aria-hidden="true"></button><button id="padR" aria-label="Move right">▶</button>
+    <button id="padL" aria-label="Move left">◀</button><div class="hub" aria-hidden="true"></div><button id="padR" aria-label="Move right">▶</button>
     <button class="blank"></button><button id="padD" aria-label="Move down">▼</button><button class="blank"></button>
   </div>
 
@@ -672,28 +681,43 @@ function bindTouch(){
   },{passive:true});
   c.addEventListener("touchend",function(){ drag=null; },{passive:true});
   c.addEventListener("touchcancel",function(){ drag=null; },{passive:true});
-  // d-pad: container-level tracking so sliding between arrows re-aims instantly
-  var padMap={padU:[0,-1],padD:[0,1],padL:[-1,0],padR:[1,0]};
+  /* D-pad. Direction comes from where the thumb sits relative to the pad's
+     centre, not from which key it happens to land on. A thumb on a corner
+     resolves to the nearer axis instead of falling into a dead gap, sliding
+     across the pad re-aims continuously, and the middle is a genuine dead zone:
+     there is no direction to give at the centre, so a touch there does nothing
+     rather than pretending to be a button. The pad's children are
+     pointer-events:none, so the container sees the whole gesture. */
+  var PADV={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
   var box=el("dpadBox");
-  function aim(ev){
+  var padKey={up:el("padU"),down:el("padD"),left:el("padL"),right:el("padR")};
+  function padLight(name){
+    for(var k in padKey) padKey[k].classList.toggle("on", k===name);
+    box.classList.toggle("live", !!name);
+  }
+  function padAim(cx,cy){
+    var r=box.getBoundingClientRect();
+    var dx=cx-(r.left+r.width/2), dy=cy-(r.top+r.height/2);
+    if(Math.hypot(dx,dy) < r.width*0.17) return;   // dead centre: hold, don't steer
+    var name = Math.abs(dx)>Math.abs(dy) ? (dx>0?"right":"left") : (dy>0?"down":"up");
+    var d=PADV[name];
+    if(!padDir || padDir.x!==d[0] || padDir.y!==d[1]) haptic(HAP.turn);
+    padDir={x:d[0],y:d[1]};
+    padLight(name);
+  }
+  function padRelease(){ padDir=null; padLight(null); }
+  function padTouch(ev){
     var t=ev.touches[0];
-    if(!t){ padDir=null; return; }
-    var elm=document.elementFromPoint(t.clientX,t.clientY);
-    var d=elm&&padMap[elm.id];
-    if(d && (!padDir || padDir.x!==d[0] || padDir.y!==d[1])) haptic(HAP.turn);
-    padDir=d?{x:d[0],y:d[1]}:padDir;
+    if(t) padAim(t.clientX,t.clientY);
     ev.preventDefault();
   }
-  box.addEventListener("touchstart",aim,{passive:false});
-  box.addEventListener("touchmove",aim,{passive:false});
-  box.addEventListener("touchend",function(ev){ padDir=null; ev.preventDefault(); },{passive:false});
-  box.addEventListener("touchcancel",function(){ padDir=null; });
-  Object.keys(padMap).forEach(function(id){
-    var b=el(id);
-    b.addEventListener("mousedown",function(){ haptic(HAP.turn); padDir={x:padMap[id][0],y:padMap[id][1]}; });
-    b.addEventListener("mouseup",function(){ padDir=null; });
-    b.addEventListener("mouseleave",function(){ if(padDir) padDir=null; });
-  });
+  box.addEventListener("touchstart",padTouch,{passive:false});
+  box.addEventListener("touchmove",padTouch,{passive:false});
+  box.addEventListener("touchend",function(ev){ padRelease(); ev.preventDefault(); },{passive:false});
+  box.addEventListener("touchcancel",padRelease);
+  box.addEventListener("mousedown",function(ev){ padAim(ev.clientX,ev.clientY); ev.preventDefault(); });
+  box.addEventListener("mousemove",function(ev){ if(ev.buttons) padAim(ev.clientX,ev.clientY); });
+  window.addEventListener("mouseup",padRelease);
 }
 
 /* ---------- sprites ---------- */
