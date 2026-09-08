@@ -24,7 +24,14 @@ var ITEMS=[
 ];
 var PADS=[[402,390,430,465],[402,550,430,635],[402,728,430,812]];
 var SPAWN_P={x:415,y:1380}, SPAWN_B={x:650,y:320};
-var PSPEED=260, B_IDLE=90, B_BASE=205, B_PER_ITEM=8, B_CAP=253;
+/* Bully speed curve, cut 30% across the board (was 90/205/8/253). At the old
+   numbers he topped out at 253 against the player's 260 - 97% of your speed
+   with a full cart, which is why a full list felt unescapable rather than
+   tense. Every term is scaled by 0.70 so the whole curve slows, not just the
+   opening: idle 35%->24% of player speed, base hunt 79%->55%, capped chase
+   97%->68%. Raise B_CAP first if he ever needs teeth back; it is the term that
+   decides how the last two pickups feel. */
+var PSPEED=260, B_IDLE=63, B_BASE=143, B_PER_ITEM=5.6, B_CAP=177;
 var CATCH_R=30, PICK_R=36;
 var BULLY_LINES=["HEY! YOU!","GIMME THAT!","GET BACK HERE!","THOSE ARE MINE!"];
 
