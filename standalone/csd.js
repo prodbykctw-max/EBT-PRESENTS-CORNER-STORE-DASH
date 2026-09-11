@@ -13,14 +13,21 @@ var GC=16, GW=Math.ceil(IW/GC), GH=Math.ceil(IH/GC);  // nav cells (16px)
 
 var PAL={pink:"#E85D9E",magenta:"#C2255C",gold:"#F5C518",cream:"#FFF3E0",coral:"#F08C4B",navy:"#1E2340"};
 
+// x/y are each item's true shelf position (checked walkable with boxFree
+// before committing — see corner-store-dash-character/items_sheet.json for
+// the matching 3D icon atlas). CHICKEN and MILK moved off their old
+// off-shelf placeholder spots onto the actual Meat and Dairy Aisle shelves.
 var ITEMS=[
- {id:"APPLE",       x:395,y:972, rows:[160], pts:100, icon:"APPLE"},
- {id:"CHIPS",       x:395,y:790, rows:[188], pts:100, icon:"CHIPS"},
- {id:"CHICKEN",     x:530,y:858, rows:[215], pts:100, icon:"CHICKEN"},
- {id:"LEMONADE",    x:395,y:608, rows:[243], pts:100, icon:"LEMONADE"},
- {id:"BREAD",       x:410,y:440, rows:[271], pts:100, icon:"BREAD"},
- {id:"MILK",        x:480,y:320, rows:[299], pts:100, icon:"MILK"},
- {id:"RICE & BEANS",x:530,y:292, rows:[327,355], pts:200, icon:"BEANS"}
+ {id:"APPLE",       x:395,y:972, rows:[160], pts:100, icon:"apple"},
+ {id:"CHIPS",       x:395,y:790, rows:[188], pts:100, icon:"chips"},
+ // (452,935) sits right at the open mouth of the Meat aisle's shelf-front
+ // lane rather than deep inside it — that lane is a dead-end pocket only
+ // reachable/exitable from this one side, which reads as an unfair trap.
+ {id:"CHICKEN",     x:452,y:935, rows:[215], pts:100, icon:"chicken"},
+ {id:"LEMONADE",    x:395,y:608, rows:[243], pts:100, icon:"lemonade"},
+ {id:"BREAD",       x:410,y:440, rows:[271], pts:100, icon:"bread"},
+ {id:"MILK",        x:395,y:230, rows:[299], pts:100, icon:"milk"},
+ {id:"RICE & BEANS",x:530,y:292, rows:[327,355], pts:200, icon:"beans"}
 ];
 var PADS=[[402,390,430,465],[402,550,430,635],[402,728,430,812]];
 var SPAWN_P={x:415,y:1380}, SPAWN_B={x:650,y:320};
@@ -380,23 +387,33 @@ function updateBully(dt){
   }
   var ddx=tx-b.x, ddy=ty-b.y, d=Math.sqrt(ddx*ddx+ddy*ddy)||1;
   b.vx=ddx/d*speed; b.vy=ddy/d*speed;
-  var px0=b.x, py0=b.y;
   moveEntity(b,dt);
-  // stuck watchdog: wedged on a corner → skip waypoint + force repath
+  // Stuck watchdog: wedged on a corner → skip waypoint + force repath.
+  // This checks NET displacement over a rolling ~0.4s window, not the
+  // per-frame delta the old version used — a per-frame check can be fooled
+  // by a bully that's oscillating a few px back and forth against a wall
+  // every single frame (always "moving" that frame) while making zero net
+  // progress for many seconds straight, which is exactly the wedge this is
+  // meant to catch. Escape probes now include diagonals since a purely
+  // cardinal nudge can fail to find the one open corner of a tight pocket.
   if(S.active){
-    if(Math.abs(b.x-px0)+Math.abs(b.y-py0) < speed*dt*0.15){
-      b.stuck=(b.stuck||0)+dt;
-      if(b.stuck>0.4){
-        b.stuck=0; b.noLos=1.0;
-        var side=[[0,-8],[0,8],[-8,0],[8,0]];
-        for(var si=0;si<4;si++){
-          var nx2=b.x+side[si][0], ny2=b.y+side[si][1];
-          if(boxFree(nx2,ny2)){ b.x=nx2; b.y=ny2; break; }
+    if(b.stuckT===undefined || b.stuckT<=0){ b.stuckRefX=b.x; b.stuckRefY=b.y; b.stuckT=0.4; }
+    else{
+      b.stuckT-=dt;
+      if(b.stuckT<=0){
+        if(Math.hypot(b.x-b.stuckRefX,b.y-b.stuckRefY) < 10){
+          b.noLos=1.0;
+          var side=[[0,-10],[0,10],[-10,0],[10,0],[-10,-10],[10,10],[-10,10],[10,-10]];
+          for(var si=0;si<side.length;si++){
+            var nx2=b.x+side[si][0], ny2=b.y+side[si][1];
+            if(boxFree(nx2,ny2)){ b.x=nx2; b.y=ny2; break; }
+          }
+          b.repath=0; b.path=null;
         }
-        b.repath=0; b.path=null;
+        b.stuckRefX=b.x; b.stuckRefY=b.y; b.stuckT=0.4;
       }
-    } else b.stuck=0;
-  }
+    }
+  } else b.stuckT=0;
   // taunt bubbles when hunting nearby
   if(S.active){
     b.taunt-=dt;
@@ -412,9 +429,26 @@ function updateBully(dt){
 /* ---------- flow ---------- */
 function addScore(n){ S.score+=n; }
 function bubble(x,y,text,ttl){ bubbles.push({x:x,y:y,text:text,ttl:ttl||1.2,max:ttl||1.2}); }
+function currentItem(){
+  return (S.order && S.activeIdx<S.order.length) ? ITEMS[S.order[S.activeIdx]] : null;
+}
+// Each reveal picks where the item actually shows up: 60% of the time at its
+// own real shelf (it.sx/sy), 40% of the time out in the main center aisle at
+// the same shelf height — so a run can't be solved by memorizing "always
+// check the shelves," it has to watch the floor too.
+var CENTER_X=415;
+function pickSpawnPos(it){
+  if(!it) return null;
+  if(Math.random()<0.6) return {x:it.sx, y:it.sy};
+  return snapToField(CENTER_X, it.sy);
+}
 function collect(it){
+  var pickedX=S.curPos.x, pickedY=S.curPos.y;
   S.got[it.id]=1; S.nGot++; addScore(it.pts);
-  bubble(it.sx,it.sy-40,"+"+it.pts+" "+it.id,1.2);
+  S.cartTrail.push(it.icon);
+  S.activeIdx++;
+  S.curPos=pickSpawnPos(currentItem());
+  bubble(pickedX,pickedY-40,"+"+it.pts+" "+it.id,1.2);
   sfx.pick(); haptic(HAP.pick);
   if(!S.active){ S.active=true; bubble(bully.x,bully.y-92,"HEY! MY SNACKS!",1.4); sfx.alert(); haptic(HAP.alert); }
   if(S.nGot===ITEMS.length){ bubble(player.x,player.y-96,"CHECKOUT! →",1.6); sfx.register(); haptic(HAP.listDone); }
@@ -429,7 +463,7 @@ function useContinue(){
   S.continues--;
   player.x=SPAWN_P.x; player.y=SPAWN_P.y; player.vx=0; player.vy=0;
   bully.x=SPAWN_B.x; bully.y=SPAWN_B.y; bully.vx=0; bully.vy=0;
-  bully.path=null; bully.pi=0; bully.stuck=0; bully.noLos=0; bully.taunt=2.5; bully.repath=0;
+  bully.path=null; bully.pi=0; bully.stuckT=0; bully.noLos=0; bully.taunt=2.5; bully.repath=0;
   hide("ovEnd"); S.mode="play"; last=0;
 }
 function goMenu(){
@@ -480,6 +514,13 @@ function endScreen(won){
 function startRun(){
   hide("ovEnd"); hide("ovTitle"); hide("ovHow");
   S.mode="play"; S.score=0; S.got={}; S.nGot=0; S.active=false; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
+  // one item live on the board at a time, in a fresh random order each run —
+  // you can't memorize a route, and the bully's position matters more.
+  S.order=ITEMS.map(function(_,i){return i;});
+  for(var oi=S.order.length-1; oi>0; oi--){ var oj=Math.floor(Math.random()*(oi+1)); var ot=S.order[oi]; S.order[oi]=S.order[oj]; S.order[oj]=ot; }
+  S.activeIdx=0;
+  S.cartTrail=[];
+  S.curPos=pickSpawnPos(currentItem());
   player={x:SPAWN_P.x,y:SPAWN_P.y,vx:0,vy:0,face:"U",anim:0};
   bully={x:SPAWN_B.x,y:SPAWN_B.y,vx:0,vy:0,face:"D",anim:0,repath:0,path:null,pi:0,taunt:2,wander:null};
   bubbles=[];
@@ -603,6 +644,21 @@ var playerImg=new Image(), playerReady=false;
 var BULLY_CELL=96, BULLY_DISPLAY=76;
 var BULLY_ROWS={D:0,U:1,R:2};
 var bullyImg=new Image(), bullyReady=false;
+// Item/cart atlas: high-res 3D renders (AutoSprite), packed left-to-right,
+// bottom-aligned, each already scaled to its real-world size relative to the
+// others (see corner-store-dash-character/items_sheet.json for the recipe).
+// Replaces the old hand-drawn 5x5 pixel ICONS + solid yellow pulse-circle.
+var itemsImg=new Image(), itemsReady=false;
+var ITEM_ATLAS={
+  apple:   {x:2,  y:36, w:20, h:22},
+  chips:   {x:24, y:24, w:23, h:34},
+  chicken: {x:49, y:28, w:36, h:30},
+  lemonade:{x:87, y:18, w:23, h:40},
+  bread:   {x:112,y:28, w:14, h:30},
+  milk:    {x:128,y:22, w:22, h:36},
+  beans:   {x:152,y:28, w:35, h:30},
+  cart:    {x:189,y:0,  w:32, h:58}
+};
 var SP={
  pD:[ "....kkkkkkk....","...kkkkkkkkk...","...kkkkkkkkk...","...kssssssnk...".replace("n","s"),
       "...ksskssksk...","...kssssssk....","....ssssss.....","...wwwwwwww....",
@@ -673,6 +729,32 @@ function drawPlayerSprite(g,e){
     g.drawImage(playerImg, sx, sy, PLAYER_CELL, PLAYER_CELL, ox, oy, w, h);
   }
 }
+// Cart pushed in front of the player in their facing direction; each
+// collected item's icon rides along, piled into a fixed set of basket slots
+// (small bodega cart — no need for it to hold more than the 7-item list).
+var CART_SLOTS=[[0.30,0.22],[0.55,0.20],[0.75,0.25],[0.35,0.38],[0.60,0.40],[0.45,0.30],[0.70,0.42]];
+function drawCart(g){
+  if(!itemsReady) return;
+  var reg=ITEM_ATLAS.cart;
+  var dist=34, dx=0, dy=0;
+  if(player.face==="U") dy=-dist;
+  else if(player.face==="D") dy=dist*0.55;
+  else if(player.face==="L") dx=-dist;
+  else dx=dist;
+  var cx=player.x+dx, footY=player.y+dy+6;
+  var w=reg.w, h=reg.h;
+  var ox=Math.round(cx-w/2), oy=Math.round(footY-h);
+  g.fillStyle="rgba(20,16,20,0.22)";
+  g.beginPath(); g.ellipse(cx,footY-2,w*0.4,h*0.10,0,0,6.2832); g.fill();
+  g.drawImage(itemsImg, reg.x,reg.y,reg.w,reg.h, ox,oy,w,h);
+  var trail=S.cartTrail||[];
+  for(var i=0;i<trail.length && i<CART_SLOTS.length;i++){
+    var ir=ITEM_ATLAS[trail[i]]; if(!ir) continue;
+    var maxDim=9, sc=Math.min(maxDim/ir.w, maxDim/ir.h);
+    var iw=ir.w*sc, ih=ir.h*sc;
+    g.drawImage(itemsImg, ir.x,ir.y,ir.w,ir.h, ox+w*CART_SLOTS[i][0]-iw/2, oy+h*CART_SLOTS[i][1]-ih/2, iw, ih);
+  }
+}
 var ICONS={
  APPLE:[".rrr.","rrrrr","rrrrr",".rrr.","..g.."],
  CHIPS:["yyyyy","yryry","yyyyy","yryry","yyyyy"],
@@ -708,22 +790,28 @@ function draw(){
     }
   }
   if(S.mode==="play"||S.mode==="end"){
-    // item pickups
+    // the one active pickup: a real floating 3D item, no pixel art, no yellow
+    // pulse-ball — a soft ground shadow plus a gentle bob sells "floating".
     var t=S.t;
-    for(var j=0;j<ITEMS.length;j++){
-      var it2=ITEMS[j];
-      if(S.got[it2.id]) continue;
-      var pulse=1+0.15*Math.sin(t*5+j);
-      g.fillStyle="rgba(245,197,24,0.28)";
-      g.beginPath(); g.arc(it2.sx,it2.sy,20*pulse,0,6.2832); g.fill();
-      g.fillStyle="rgba(245,197,24,0.9)";
-      g.beginPath(); g.arc(it2.sx,it2.sy,14,0,6.2832); g.fill();
-      drawGridPx(g,ICONS[it2.icon||it2.id],ICON_PAL,it2.sx-7,it2.sy-8,3,false);
+    var it2=currentItem();
+    if(it2 && itemsReady && S.curPos){
+      var reg=ITEM_ATLAS[it2.icon];
+      var bob=Math.sin(t*2.2)*3;
+      var cx=S.curPos.x, baseY=S.curPos.y+bob;
+      g.fillStyle="rgba(10,10,14,0.30)";
+      g.beginPath(); g.ellipse(cx,S.curPos.y+reg.h*0.42,reg.w*0.42,reg.w*0.16,0,0,6.2832); g.fill();
+      var glowR=Math.max(reg.w,reg.h)*0.9;
+      var glow=g.createRadialGradient(cx,baseY,0,cx,baseY,glowR);
+      glow.addColorStop(0,"rgba(255,241,199,0.35)");
+      glow.addColorStop(1,"rgba(255,241,199,0)");
+      g.fillStyle=glow;
+      g.beginPath(); g.arc(cx,baseY,glowR,0,6.2832); g.fill();
+      g.drawImage(itemsImg, reg.x,reg.y,reg.w,reg.h, Math.round(cx-reg.w/2), Math.round(baseY-reg.h), reg.w, reg.h);
       g.font="bold 17px ui-monospace,monospace";
       g.fillStyle="#FFFFFF"; g.strokeStyle=PAL.navy; g.lineWidth=4;
       var tw=g.measureText(it2.id).width;
-      g.strokeText(it2.id,it2.sx-tw/2,it2.sy-26);
-      g.fillText(it2.id,it2.sx-tw/2,it2.sy-26);
+      g.strokeText(it2.id,cx-tw/2,baseY-reg.h-14);
+      g.fillText(it2.id,cx-tw/2,baseY-reg.h-14);
     }
     // checkout pads
     if(S.nGot===ITEMS.length){
@@ -738,9 +826,15 @@ function draw(){
       g.fillStyle="#3ADB76";
       g.fillText("PAY \u2192", 340, 470);
     }
-    // actors: draw upper first for overlap
+    // actors: draw upper first for overlap. The cart is pushed in front of
+    // the player in whichever direction they're facing, so it has to slot
+    // into the same depth order — behind the player when they face away
+    // (U), in front when they face the viewer (D).
+    var cartBehind=(player.face==="U");
+    if(cartBehind) drawCart(g);
     var actors=[player,bully].sort(function(a,b){return a.y-b.y;});
     for(var a2=0;a2<actors.length;a2++) drawActor(g,actors[a2],actors[a2]===bully);
+    if(!cartBehind) drawCart(g);
     // joystick indicator while dragging
     if(drag&&drag.on&&S.mode==="play"){
       var rc=view.getBoundingClientRect();
@@ -854,10 +948,8 @@ function update(dt){
     var v=inputVec();
     player.vx=v.x*PSPEED; player.vy=v.y*PSPEED;
     moveEntity(player,dt);
-    for(var i=0;i<ITEMS.length;i++){
-      var it=ITEMS[i];
-      if(!S.got[it.id] && Math.hypot(player.x-it.sx,player.y-it.sy)<PICK_R) collect(it);
-    }
+    var curIt=currentItem();
+    if(curIt && S.curPos && Math.hypot(player.x-S.curPos.x,player.y-S.curPos.y)<PICK_R) collect(curIt);
     winCheck();
     if(!S.freezeBully) updateBully(dt);
     for(var b3=bubbles.length-1;b3>=0;b3--){ bubbles[b3].ttl-=dt; if(bubbles[b3].ttl<=0) bubbles.splice(b3,1); }
@@ -879,7 +971,7 @@ function init(){
   var img=new Image();
   var boardReady=false;
   function tryStart(){
-    if(!boardReady||!playerReady||!bullyReady) return;
+    if(!boardReady||!playerReady||!bullyReady||!itemsReady) return;
     S.mode="title"; show("ovTitle");
     el("loading").style.display="none";
   }
@@ -899,6 +991,8 @@ function init(){
   playerImg.src=PLAYER_SRC;
   bullyImg.onload=function(){ bullyReady=true; tryStart(); };
   bullyImg.src=BULLY_SRC;
+  itemsImg.onload=function(){ itemsReady=true; tryStart(); };
+  itemsImg.src=ITEMS_SRC;
   fit();
   window.addEventListener("resize",fit);
   setTimeout(fit,300); setTimeout(fit,1000);

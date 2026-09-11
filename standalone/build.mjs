@@ -18,12 +18,14 @@ const game = readFileSync(here('csd.js'), 'utf8');
 const b64 = readFileSync(here('board.b64'), 'utf8').trim();
 const playerB64 = readFileSync(here('player.b64'), 'utf8').trim();
 const bullyB64 = readFileSync(here('bully.b64'), 'utf8').trim();
+const itemsB64 = readFileSync(here('items.b64'), 'utf8').trim();
 
 // shell2.html carries literal \u escapes for a few glyphs; unescape after substitution.
 const out = shell
   .replace('%%B64%%', b64)
   .replace('%%PLAYER%%', playerB64)
   .replace('%%BULLY%%', bullyB64)
+  .replace('%%ITEMS%%', itemsB64)
   .replace('%%GAME%%', game)
   .replaceAll('\\u2026', '…')
   .replaceAll('\\uD83D\\uDD0A', '🔊')
