@@ -1,5 +1,5 @@
 /**
- * Assemble the standalone game: shell2.html + csd.js + board.b64 -> index.html.
+ * Assemble the standalone game: shell2.html + csd.js + board.b64 + player.b64 -> index.html.
  * Node port of the recipe in corner-store-dash-handoff.md ("Rebuilding index.html").
  *
  *   node standalone/build.mjs
@@ -16,10 +16,14 @@ const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const shell = readFileSync(here('shell2.html'), 'utf8');
 const game = readFileSync(here('csd.js'), 'utf8');
 const b64 = readFileSync(here('board.b64'), 'utf8').trim();
+const playerB64 = readFileSync(here('player.b64'), 'utf8').trim();
+const bullyB64 = readFileSync(here('bully.b64'), 'utf8').trim();
 
 // shell2.html carries literal \u escapes for a few glyphs; unescape after substitution.
 const out = shell
   .replace('%%B64%%', b64)
+  .replace('%%PLAYER%%', playerB64)
+  .replace('%%BULLY%%', bullyB64)
   .replace('%%GAME%%', game)
   .replaceAll('\\u2026', '…')
   .replaceAll('\\uD83D\\uDD0A', '🔊')

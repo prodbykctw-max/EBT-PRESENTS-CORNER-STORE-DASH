@@ -469,6 +469,21 @@ function drawGridPx(g,rows,pal,ox,oy,sc,flip){
 }
 var P_PAL={k:"#14100E",s:"#7A4E2B",w:"#F2F0EA",t:"#D8D4CC",p:"#23283E",h:"#101010"};
 var B_PAL={c:"#181820",s:"#8A5A32",r:"#A62633",m:"#7E1C28",p:"#2C2118",h:"#0E0E0E",e:"#FFFFFF",k:"#14100E"};
+// Player sprite sheet: 3 rows (D=front, U=back, R=right; L is R mirrored at draw time) x
+// 4 walk-cycle columns, baked from the 3D character model (see
+// corner-store-dash-character/character.blend). pD/pU/pR pixel-grids below are now unused
+// by the player (kept only because bD/bR still reference the shared SP table / drawGridPx).
+var PLAYER_CELL=96, PLAYER_COLS=4, PLAYER_DISPLAY=72;
+var PLAYER_ROWS={D:0,U:1,R:2};
+var playerImg=new Image(), playerReady=false;
+// Bully sprite sheet: same 3-row (D/U/R) layout as the player, but a single static
+// pose per row (no baked walk cycle — the auto-rig on this model didn't come out
+// usable) rendered from the bully 3D model (see corner-store-dash-character/bully/bully.blend).
+// Movement still gets a subtle step wobble via a 1px draw-offset, matching the feel
+// the old hand-drawn bully sprite had.
+var BULLY_CELL=96, BULLY_DISPLAY=76;
+var BULLY_ROWS={D:0,U:1,R:2};
+var bullyImg=new Image(), bullyReady=false;
 var SP={
  pD:[ "....kkkkkkk....","...kkkkkkkkk...","...kkkkkkkkk...","...kssssssnk...".replace("n","s"),
       "...ksskssksk...","...kssssssk....","....ssssss.....","...wwwwwwww....",
@@ -497,22 +512,46 @@ var SP={
       "....ppp..ppp.....","....ppp..ppp.....","....hhh..hhh....."]
 };
 function drawActor(g,e,isBully){
-  var sc=3, flip=(e.face==="L");
-  var rows = isBully ? (e.face==="D"||e.face==="U" ? SP.bD : SP.bR)
-                     : (e.face==="U" ? SP.pU : (e.face==="D" ? SP.pD : SP.pR));
-  var pal=isBully?B_PAL:P_PAL;
-  var w=rows[0].length*sc, h=rows.length*sc;
+  if(!isBully){ drawPlayerSprite(g,e); return; }
+  var w=BULLY_DISPLAY, h=BULLY_DISPLAY;
   var ox=Math.round(e.x-w/2), oy=Math.round(e.y-h+4);
-  var step=Math.floor(e.anim*3)%2;
   // shadow
   g.fillStyle="rgba(20,16,20,0.25)";
   g.fillRect(Math.round(e.x-w/2+4), Math.round(e.y-2), w-8, 6);
-  if(step&&(e.vx||e.vy)){
-    // simple leg swap: shift bottom 4 rows 1px
-    drawGridPx(g,rows.slice(0,rows.length-4),pal,ox,oy,sc,flip);
-    drawGridPx(g,rows.slice(rows.length-4),pal,ox+ (flip?-sc:sc), oy+(rows.length-4)*sc, sc, flip);
+  if(!bullyReady) return; // first frame or two before the sheet decodes
+  var row = e.face==="U" ? BULLY_ROWS.U : (e.face==="D" ? BULLY_ROWS.D : BULLY_ROWS.R);
+  var sx=0, sy=row*BULLY_CELL;
+  // no baked walk cycle for the bully — reuse the old sprite's 1px step wobble instead
+  var step=Math.floor(e.anim*3)%2;
+  var bob=(step&&(e.vx||e.vy))?1:0;
+  if(e.face==="L"){
+    g.save();
+    g.translate(e.x,0);
+    g.scale(-1,1);
+    g.drawImage(bullyImg, sx, sy, BULLY_CELL, BULLY_CELL, Math.round(-w/2)-bob, oy, w, h);
+    g.restore();
   } else {
-    drawGridPx(g,rows,pal,ox,oy,sc,flip);
+    g.drawImage(bullyImg, sx, sy, BULLY_CELL, BULLY_CELL, ox+bob, oy, w, h);
+  }
+}
+function drawPlayerSprite(g,e){
+  var w=PLAYER_DISPLAY, h=PLAYER_DISPLAY;
+  var ox=Math.round(e.x-w/2), oy=Math.round(e.y-h+4);
+  // shadow
+  g.fillStyle="rgba(20,16,20,0.25)";
+  g.fillRect(Math.round(e.x-w/2+4), Math.round(e.y-2), w-8, 6);
+  if(!playerReady) return; // first frame or two before the sheet decodes
+  var row = e.face==="U" ? PLAYER_ROWS.U : (e.face==="D" ? PLAYER_ROWS.D : PLAYER_ROWS.R);
+  var frame = (e.vx||e.vy) ? Math.floor(e.anim*2)%PLAYER_COLS : 0;
+  var sx=frame*PLAYER_CELL, sy=row*PLAYER_CELL;
+  if(e.face==="L"){
+    g.save();
+    g.translate(e.x,0);
+    g.scale(-1,1);
+    g.drawImage(playerImg, sx, sy, PLAYER_CELL, PLAYER_CELL, Math.round(-w/2), oy, w, h);
+    g.restore();
+  } else {
+    g.drawImage(playerImg, sx, sy, PLAYER_CELL, PLAYER_CELL, ox, oy, w, h);
   }
 }
 var ICONS={
@@ -715,6 +754,12 @@ function init(){
   view=el("view"); vctx=view.getContext("2d");
   view.width=IW; view.height=IH;
   var img=new Image();
+  var boardReady=false;
+  function tryStart(){
+    if(!boardReady||!playerReady||!bullyReady) return;
+    S.mode="title"; show("ovTitle");
+    el("loading").style.display="none";
+  }
   img.onload=function(){
     board=document.createElement("canvas"); board.width=IW; board.height=IH;
     board.getContext("2d").drawImage(img,0,0);
@@ -724,10 +769,13 @@ function init(){
     ITEMS.forEach(function(it){ var s2=snapToField(it.x,it.y); it.sx=s2.x; it.sy=s2.y; });
     player={x:SPAWN_P.x,y:SPAWN_P.y,vx:0,vy:0,face:"U",anim:0};
     bully={x:SPAWN_B.x,y:SPAWN_B.y,vx:0,vy:0,face:"D",anim:0,repath:0,path:null,pi:0,taunt:2,wander:null};
-    S.mode="title"; show("ovTitle");
-    el("loading").style.display="none";
+    boardReady=true; tryStart();
   };
   img.src=BOARD_SRC;
+  playerImg.onload=function(){ playerReady=true; tryStart(); };
+  playerImg.src=PLAYER_SRC;
+  bullyImg.onload=function(){ bullyReady=true; tryStart(); };
+  bullyImg.src=BULLY_SRC;
   fit();
   window.addEventListener("resize",fit);
   setTimeout(fit,300); setTimeout(fit,1000);
