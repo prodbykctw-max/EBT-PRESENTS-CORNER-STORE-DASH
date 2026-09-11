@@ -17,18 +17,45 @@
   canvas#view{ image-rendering:pixelated; image-rendering:crisp-edges; touch-action:none; display:block; }
   #loading{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
     font-weight:900; letter-spacing:.2em; color:var(--gold); z-index:30; background:var(--ink); }
-  .sideBtns{ position:fixed; right:14px; bottom:16px; z-index:12; display:flex; flex-direction:column; gap:10px; opacity:.85; }
-  .sideBtns button{ width:52px; height:52px; background:rgba(30,35,64,.8); border:3px solid var(--gold);
-    border-radius:12px; color:var(--gold); font-size:20px; cursor:pointer; }
-  .sideBtns button:active{ background:var(--gold); color:var(--ink); }
-  .dpad{ position:fixed; left:14px; bottom:16px; z-index:12; display:grid;
-    grid-template-columns:56px 56px 56px; grid-template-rows:56px 56px 56px; gap:4px; opacity:.46; }
-  .dpad:active{ opacity:.85; }
+  /* Controls sit in the two bottom corners and stay out of the drag zone in
+     the middle. Both clusters share one bottom baseline and respect the phone's
+     safe-area inset so nothing lands under a home indicator. */
+  .sideBtns{ position:fixed; right:calc(10px + env(safe-area-inset-right)); z-index:12;
+    bottom:calc(12px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:6px; opacity:.8; }
+  .sideBtns button{ width:44px; height:44px; background:rgba(30,35,64,.82); border:3px solid var(--gold);
+    border-radius:12px; color:var(--gold); font-size:17px; line-height:1; cursor:pointer; }
+  .sideBtns button:active{ background:var(--gold); color:var(--ink); transform:translateY(1px); }
+  /* D-pad sits bottom-CENTRE, over the entrance mat, so either thumb reaches it
+     without stretching across the phone the way the old bottom-left corner did.
+     186px of cross with 60px keys: bigger targets, and centred means the travel
+     from rest to any arrow is the same in every direction.
+     Direction is computed from where the thumb sits relative to the pad's
+     centre, not from which key it lands on. That does three things: a thumb on
+     a corner resolves to the nearer axis instead of falling in a dead gap,
+     sliding across the pad re-aims continuously, and the centre is a real dead
+     zone - there is no direction to give there, so it does nothing at all.
+     Every child is pointer-events:none so the container owns the whole gesture
+     and nothing inside is independently clickable. */
+  .dpad{ position:fixed; left:50%; transform:translateX(-50%); z-index:12;
+    bottom:calc(10px + env(safe-area-inset-bottom)); display:grid; touch-action:none;
+    grid-template-columns:repeat(3,60px); grid-template-rows:repeat(3,60px); gap:3px;
+    opacity:.5; transition:opacity .12s ease; }
+  .dpad.live{ opacity:.96; }
+  .dpad > *{ pointer-events:none; }
   .dpad button{ background:rgba(30,35,64,.85); border:3px solid var(--gold); color:var(--gold);
-    font-size:20px; font-weight:900; cursor:pointer; border-radius:10px; }
-  .dpad button:active{ background:var(--gold); color:var(--ink); }
+    font-size:20px; line-height:1; font-weight:900; border-radius:8px; }
+  .dpad button.on{ background:var(--gold); color:var(--ink); }
+  .dpad #padU{ border-radius:15px 15px 5px 5px; }
+  .dpad #padD{ border-radius:5px 5px 15px 15px; }
+  .dpad #padL{ border-radius:15px 5px 5px 15px; }
+  .dpad #padR{ border-radius:5px 15px 15px 5px; }
   .dpad .blank{ visibility:hidden; }
+  /* The hub is decoration, not a control - a dashed ring reads as "nothing to
+     press here", and it is a div so it can never take a click or a tab stop. */
+  .dpad .hub{ background:rgba(30,35,64,.38); border:2px dashed rgba(245,197,24,.30);
+    border-radius:50%; }
   @media (min-width:700px){ .dpad{ display:none; } }
+  @media (prefers-reduced-motion:reduce){ .dpad{ transition:none; } }
   .ov{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
     background:rgba(10,10,14,.9); z-index:20; text-align:center; padding:20px; gap:14px; }
   .ov.on{ display:flex; }
@@ -69,13 +96,13 @@
   <div id="loading">LOADING…</div>
   <canvas id="view" width="853" height="1844"></canvas>
   <div class="sideBtns">
-    <button id="btnPause">⏸</button>
-    <button id="btnMute">🔊</button>
+    <button id="btnPause" aria-label="Pause">⏸</button>
+    <button id="btnMute" aria-label="Mute sound">🔊</button>
   </div>
   <div class="dpad" id="dpadBox">
-    <button class="blank"></button><button id="padU">▲</button><button class="blank"></button>
-    <button id="padL">◀</button><button class="blank"></button><button id="padR">▶</button>
-    <button class="blank"></button><button id="padD">▼</button><button class="blank"></button>
+    <button class="blank"></button><button id="padU" aria-label="Move up">▲</button><button class="blank"></button>
+    <button id="padL" aria-label="Move left">◀</button><div class="hub" aria-hidden="true"></div><button id="padR" aria-label="Move right">▶</button>
+    <button class="blank"></button><button id="padD" aria-label="Move down">▼</button><button class="blank"></button>
   </div>
 
   <div class="ov" id="ovTitle">
@@ -151,12 +178,48 @@ var ITEMS=[
 ];
 var PADS=[[402,390,430,465],[402,550,430,635],[402,728,430,812]];
 var SPAWN_P={x:415,y:1380}, SPAWN_B={x:650,y:320};
-var PSPEED=260, B_IDLE=90, B_BASE=205, B_PER_ITEM=8, B_CAP=253;
+/* Bully speed curve, cut 30% across the board (was 90/205/8/253). At the old
+   numbers he topped out at 253 against the player's 260 - 97% of your speed
+   with a full cart, which is why a full list felt unescapable rather than
+   tense. Every term is scaled by 0.70 so the whole curve slows, not just the
+   opening: idle 35%->24% of player speed, base hunt 79%->55%, capped chase
+   97%->68%. Raise B_CAP first if he ever needs teeth back; it is the term that
+   decides how the last two pickups feel. */
+var PSPEED=260, B_IDLE=63, B_BASE=143, B_PER_ITEM=5.6, B_CAP=177;
 var CATCH_R=30, PICK_R=36;
 var BULLY_LINES=["HEY! YOU!","GIMME THAT!","GET BACK HERE!","THOSE ARE MINE!"];
 
 /* ---------- state ---------- */
 var S={mode:"boot",score:0,got:{},nGot:0,active:false,t:0,runT:0,muted:false,line:0};
+
+/* ---------- haptics ----------------------------------------------------
+   Every touch the player makes answers back. Patterns are deliberately
+   short — a tick you feel and don't notice — except the three moments that
+   should land in your hand: bagging an item, the list going complete, and
+   getting caught.
+   Independent of the mute button on purpose: mute is about not making noise
+   in public, which is exactly when you still want the feel. iOS Safari does
+   not implement the Vibration API, so this is a no-op there and the game is
+   built to be complete without it. */
+var HAPTICS = typeof navigator !== "undefined" && typeof navigator.vibrate === "function";
+var hapLast = 0;
+function haptic(pattern, minGapMs){
+  if(!HAPTICS) return;
+  var now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+  if(minGapMs && now - hapLast < minGapMs) return;
+  hapLast = now;
+  try{ navigator.vibrate(pattern); }catch(e){}
+}
+var HAP = {
+  tap:      12,                    // any button
+  turn:     16,                    // d-pad / joystick changes direction
+  pick:     [0,22,45,22],          // item bagged
+  listDone: [0,30,55,30,55,60],    // checkout just unlocked
+  alert:    [0,45,70,45],          // the bully clocks you
+  near:     9,                     // he is right behind you (throttled)
+  caught:   [0,110,70,180],        // run over
+  win:      [0,45,60,45,60,150]
+};
 var player=null, bully=null, bubbles=[];
 var board=null, bctx=null, view=null, vctx=null;
 var walk=null, field=null, nav=null;   // Uint8Array masks
@@ -217,13 +280,58 @@ function buildMasks(imgCanvas){
                [481,912,724,945],[72,918,391,951],[60,1095,388,1129],[456,1100,738,1133],
                [48,1285,376,1318],[449,1285,747,1320]];
   for(var bi=0;bi<BANNERS.length;bi++){ var bn=BANNERS[bi]; setRect(bn[0],bn[1],bn[2],bn[3],1); }
-  setRect(728,575,800,845,1);   // ENTRANCE sign — overlay
+  // ENTRANCE sign overlay. Left edge pulled 728 -> 710: a 10px grid read puts
+  // the checkout counter's dark edge at x=707-709 and the sign's border at
+  // x=730, so x 710..729 is clean tile. The classifier lost that strip to the
+  // counter's shadow, leaving a visible band of floor you could not stand on
+  // right where the aisle passes the sign. 710 sits tight to the counter.
+  // Bottom edge 845 -> 858. The decal has a painted dark border, and its bottom
+  // one occupies y=847..852. The overlay stopped at 845, so that border stayed
+  // classified as not-floor and became a 5px fence running x=737..792 straight
+  // across the corridor between the registers and the mat - walk down that side
+  // and you stop dead at y=846. It is paint on a floor mat, not an obstacle.
+  setRect(710,575,800,858,1);   // ENTRANCE mat — overlay, borders included
+  // Checkout counters cast a shadow to their right that the colour classifier
+  // reads as not-floor, so a ~6px band of tile beside each counter was dead.
+  // The counters' dark bodies all end at x=707-709 (10px grid read), so opening
+  // from 709 leaves them solid while giving the lane back its full width.
+  setRect(709,326,732,575,1);   // counter shadow strip, checkout 1 + the gap
   setRect(752,272,786,402,1);   // corner planter — overlay
-  // entry / welcome mat / doorway: fully open floor, only the cart corrals block
-  setRect(14,1470,840,1650,1);
-  setRect(18,1478,215,1615,0); setRect(588,1478,808,1615,0);   // cart corrals
-  setRect(0,1650,IW,IH,0);
-  setRect(0,0,10,IH,0); setRect(IW-8,0,IW,IH,0);
+  // entry / welcome mat / doorway: fully open floor, only the cart corrals block.
+  // The band stops at y=1610 where the storefront floor actually ends. It used
+  // to run to 1650, which opened a ~30px strip of pavement BELOW the corrals —
+  // outside the store, shorter than the sprite, and the thing that made the
+  // welcome mat feel like it grabbed you.
+  // Measured off the art: the cream interior floor ends at y~1555, the WELCOME
+  // mat runs y=1560..1630, and navy street pavement starts at y=1640. So the
+  // vestibule is walkable THROUGH the bottom of the mat, and the hard edge goes
+  // at 1634 - the threshold, not the middle of the mat. (v2.3 cut this at 1610,
+  // which sliced the mat in half and stopped you dead halfway across it. v2.2
+  // cut it at 1650, which opened a strip of street below the corrals. The
+  // corrals are now blocked to the same 1634 so neither pocket can come back.)
+  setRect(14,1470,840,1634,1);
+  // Cart corrals, re-measured off the art with a 10px grid overlay rather than
+  // eyeballed: both top rails start at y~1498 and the posts span x 41..227 and
+  // x 600..790. The old rects started at y=1478 and ran x 18..215 / 588..808,
+  // which ate a ~25px band of real tile above each corral (624 + 490 mask cells
+  // of floor you could see and not walk on) while missing the posts' outer edge.
+  setRect(39,1497,229,1634,0); setRect(598,1497,792,1634,0);   // cart corrals
+  setRect(0,1634,IW,IH,0);
+  // Top-left lane: the strip between the left wall and the Dairy shelf is real
+  // floor, but a few small props sitting on it broke the color run into
+  // fragments, so the flood fill dropped the whole lane and the top-left corner
+  // was sealed. Props are overlays (see the ground rule above) — open the lane.
+  setRect(108,100,138,300,1);
+  // Board-edge guards. The store's tile genuinely runs to x=0 and x=852 along
+  // the lower half, so the old 10px/8px guards were clipping real floor at both
+  // edges. 4px is enough to keep the footprint off the image border.
+  setRect(0,0,4,IH,0); setRect(IW-4,0,IW,IH,0);
+  // The top-right wall face reads as floor to the colour classifier: it is the
+  // pale painted wall under the LOW PRICES sign, drawn in perspective, not
+  // ground. The measured floor edge at y=292 is x=760 and the wall leans further
+  // left as it goes up, so nothing at or right of 760 in the top band is floor.
+  // Blocking it kills the walkable island that sat up there.
+  setRect(760,96,IW,300,0);
   // light despeckle: fill single-cell pits only (classifier + wall clip already leave a clean edge)
   var w2=new Uint8Array(walk);
   for(var y2=1;y2<MH-1;y2++)for(var x2=1;x2<MW-1;x2++){
@@ -259,8 +367,26 @@ function fieldAt(x,y){
   if(cx<0||cy<0||cx>=MW||cy>=MH) return 0;
   return field[cy*MW+cx];
 }
+/* Collision FOOTPRINT - the feet, not the body. 18px wide originally, then 14,
+   then 10; now three samples across the feet plus one just in front.
+
+   The mask (`field`) already covers the tile right up to every fixture base.
+   `boxFree` asks where the player's CENTRE may sit, which is that mask inset by
+   the footprint - so a fat box paints a dead gutter around every shelf, and you
+   see tile you cannot stand on. The old +-9/-6/+3 box left 6px of dead tile on
+   the sides of a shelf and 4-5px above and below it. This leaves 4px at the
+   sides and 1-2px front and back, which is the mask's own 4px cell - you cannot
+   get closer without rebuilding the masks at finer resolution.
+
+   The centre sample matters: x-3 and x+3 straddle 6px, so without it a lone 4px
+   wall cell sitting exactly at x would pass unnoticed.
+
+   The sprite is much wider than this footprint and will overlap fixture art when
+   you stand against one. That is correct for a flat-drawn top-down game - actors
+   render above the board, so it reads as standing in front of the shelf. Feet
+   collide; bodies overlap. Do not "fix" it by widening this back out. */
 function boxFree(x,y){
-  return fieldAt(x-9,y)&&fieldAt(x+9,y)&&fieldAt(x-9,y-6)&&fieldAt(x+9,y-6)&&fieldAt(x,y+3);
+  return fieldAt(x-3,y)&&fieldAt(x+3,y)&&fieldAt(x,y)&&fieldAt(x,y+1);
 }
 function snapToField(x,y){
   if(boxFree(x,y)) return {x:x,y:y};
@@ -321,14 +447,14 @@ function los(x0,y0,x1,y1){
 
 /* ---------- movement ---------- */
 function nudgeY(nx,y){
-  for(var k=3;k<=10;k+=3){
+  for(var k=3;k<=15;k+=3){
     if(boxFree(nx,y-k)) return -1;
     if(boxFree(nx,y+k)) return 1;
   }
   return 0;
 }
 function nudgeX(x,ny){
-  for(var k=3;k<=10;k+=3){
+  for(var k=3;k<=15;k+=3){
     if(boxFree(x-k,ny)) return -1;
     if(boxFree(x+k,ny)) return 1;
   }
@@ -443,13 +569,13 @@ function bubble(x,y,text,ttl){ bubbles.push({x:x,y:y,text:text,ttl:ttl||1.2,max:
 function collect(it){
   S.got[it.id]=1; S.nGot++; addScore(it.pts);
   bubble(it.sx,it.sy-40,"+"+it.pts+" "+it.id,1.2);
-  sfx.pick();
-  if(!S.active){ S.active=true; bubble(bully.x,bully.y-92,"HEY! MY SNACKS!",1.4); sfx.alert(); }
-  if(S.nGot===ITEMS.length){ bubble(player.x,player.y-96,"CHECKOUT! →",1.6); sfx.register(); }
+  sfx.pick(); haptic(HAP.pick);
+  if(!S.active){ S.active=true; bubble(bully.x,bully.y-92,"HEY! MY SNACKS!",1.4); sfx.alert(); haptic(HAP.alert); }
+  if(S.nGot===ITEMS.length){ bubble(player.x,player.y-96,"CHECKOUT! →",1.6); sfx.register(); haptic(HAP.listDone); }
 }
 function caught(){
   if(S.mode!=="play") return;
-  S.mode="end"; sfx.death();
+  S.mode="end"; sfx.death(); haptic(HAP.caught);
   bubble(bully.x,bully.y-92,"GOTCHA!",1.6);
   setTimeout(function(){ endScreen(false); },900);
 }
@@ -485,7 +611,7 @@ function winCheck(){
       var timeBonus=Math.max(0,1500-Math.floor(S.runT)*15);
       addScore(500+timeBonus);
       S.timeBonus=timeBonus;
-      sfx.win();
+      sfx.win(); haptic(HAP.win);
       setTimeout(function(){ endScreen(true); },500);
       return;
     }
@@ -553,32 +679,52 @@ function bindTouch(){
     drag.cx=t.clientX; drag.cy=t.clientY;
     var dx=drag.cx-drag.ax, dy=drag.cy-drag.ay, m=Math.hypot(dx,dy);
     if(m>44){ drag.ax=drag.cx-dx/m*44; drag.ay=drag.cy-dy/m*44; dx=drag.cx-drag.ax; dy=drag.cy-drag.ay; m=44; }
-    if(m>10){ drag.on=true; drag.x=dx/m; drag.y=dy/m; }
+    if(m>10){
+      var q=(Math.abs(dx)>Math.abs(dy)) ? (dx>0?"R":"L") : (dy>0?"D":"U");
+      if(!drag.on || drag.q!==q){ drag.q=q; haptic(HAP.turn,60); }
+      drag.on=true; drag.x=dx/m; drag.y=dy/m;
+    }
     else drag.on=false;
   },{passive:true});
   c.addEventListener("touchend",function(){ drag=null; },{passive:true});
   c.addEventListener("touchcancel",function(){ drag=null; },{passive:true});
-  // d-pad: container-level tracking so sliding between arrows re-aims instantly
-  var padMap={padU:[0,-1],padD:[0,1],padL:[-1,0],padR:[1,0]};
+  /* D-pad. Direction comes from where the thumb sits relative to the pad's
+     centre, not from which key it happens to land on. A thumb on a corner
+     resolves to the nearer axis instead of falling into a dead gap, sliding
+     across the pad re-aims continuously, and the middle is a genuine dead zone:
+     there is no direction to give at the centre, so a touch there does nothing
+     rather than pretending to be a button. The pad's children are
+     pointer-events:none, so the container sees the whole gesture. */
+  var PADV={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
   var box=el("dpadBox");
-  function aim(ev){
+  var padKey={up:el("padU"),down:el("padD"),left:el("padL"),right:el("padR")};
+  function padLight(name){
+    for(var k in padKey) padKey[k].classList.toggle("on", k===name);
+    box.classList.toggle("live", !!name);
+  }
+  function padAim(cx,cy){
+    var r=box.getBoundingClientRect();
+    var dx=cx-(r.left+r.width/2), dy=cy-(r.top+r.height/2);
+    if(Math.hypot(dx,dy) < r.width*0.17) return;   // dead centre: hold, don't steer
+    var name = Math.abs(dx)>Math.abs(dy) ? (dx>0?"right":"left") : (dy>0?"down":"up");
+    var d=PADV[name];
+    if(!padDir || padDir.x!==d[0] || padDir.y!==d[1]) haptic(HAP.turn);
+    padDir={x:d[0],y:d[1]};
+    padLight(name);
+  }
+  function padRelease(){ padDir=null; padLight(null); }
+  function padTouch(ev){
     var t=ev.touches[0];
-    if(!t){ padDir=null; return; }
-    var elm=document.elementFromPoint(t.clientX,t.clientY);
-    var d=elm&&padMap[elm.id];
-    padDir=d?{x:d[0],y:d[1]}:padDir;
+    if(t) padAim(t.clientX,t.clientY);
     ev.preventDefault();
   }
-  box.addEventListener("touchstart",aim,{passive:false});
-  box.addEventListener("touchmove",aim,{passive:false});
-  box.addEventListener("touchend",function(ev){ padDir=null; ev.preventDefault(); },{passive:false});
-  box.addEventListener("touchcancel",function(){ padDir=null; });
-  Object.keys(padMap).forEach(function(id){
-    var b=el(id);
-    b.addEventListener("mousedown",function(){ padDir={x:padMap[id][0],y:padMap[id][1]}; });
-    b.addEventListener("mouseup",function(){ padDir=null; });
-    b.addEventListener("mouseleave",function(){ if(padDir) padDir=null; });
-  });
+  box.addEventListener("touchstart",padTouch,{passive:false});
+  box.addEventListener("touchmove",padTouch,{passive:false});
+  box.addEventListener("touchend",function(ev){ padRelease(); ev.preventDefault(); },{passive:false});
+  box.addEventListener("touchcancel",padRelease);
+  box.addEventListener("mousedown",function(ev){ padAim(ev.clientX,ev.clientY); ev.preventDefault(); });
+  box.addEventListener("mousemove",function(ev){ if(ev.buttons) padAim(ev.clientX,ev.clientY); });
+  window.addEventListener("mouseup",padRelease);
 }
 
 /* ---------- sprites ---------- */
@@ -800,8 +946,12 @@ var BASS=[0,0,3,5,0,0,7,5], BASS_HOT=[12,10,8,7,12,10,7,5], ROOT=98;
 function startMusic(){
   if(musicTimer) return;
   musicTimer=setInterval(function(){
-    if(S.muted||S.mode!=="play") return;
+    if(S.mode!=="play") return;
     var hot = bully && player && Math.hypot(player.x-bully.x,player.y-bully.y)<280 && S.active;
+    // he is on you: a low pulse in the hand, throttled so it reads as tension
+    // rather than a buzz. Deliberately outside the mute check.
+    if(hot && Math.hypot(player.x-bully.x,player.y-bully.y)<190) haptic(HAP.near,620);
+    if(S.muted) return;
     var pat=hot?BASS_HOT:BASS, st=pat[mStep%pat.length];
     tone(ROOT*Math.pow(2,st/12),0,hot?0.09:0.12,"triangle",0.05);
     if(mStep%4===0) tone(ROOT*2*Math.pow(2,st/12),0,0.05,"square",0.02);
@@ -914,6 +1064,11 @@ function init(){
   el("btnPause").addEventListener("click",function(ev){ ev.stopPropagation(); togglePause(); });
   el("btnMenu2").addEventListener("click",function(ev){ ev.stopPropagation(); goMenu(); });
   el("btnSubmit").addEventListener("click",submitScore);
+  // one delegated tick for every button; the d-pad has its own turn haptic
+  document.addEventListener("pointerdown",function(ev){
+    var t=ev.target;
+    if(t&&t.tagName==="BUTTON"&&!(t.closest&&t.closest(".dpad"))) haptic(HAP.tap);
+  },{passive:true});
   el("btnMute").addEventListener("click",function(){ S.muted=!S.muted; el("btnMute").textContent=S.muted?"\uD83D\uDD07":"🔊"; });
   [0,1,2].forEach(function(s){
     el("up"+s).addEventListener("click",function(){cycleInit(s,1);});

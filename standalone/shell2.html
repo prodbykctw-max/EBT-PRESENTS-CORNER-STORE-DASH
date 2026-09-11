@@ -17,18 +17,45 @@
   canvas#view{ image-rendering:pixelated; image-rendering:crisp-edges; touch-action:none; display:block; }
   #loading{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
     font-weight:900; letter-spacing:.2em; color:var(--gold); z-index:30; background:var(--ink); }
-  .sideBtns{ position:fixed; right:14px; bottom:16px; z-index:12; display:flex; flex-direction:column; gap:10px; opacity:.85; }
-  .sideBtns button{ width:52px; height:52px; background:rgba(30,35,64,.8); border:3px solid var(--gold);
-    border-radius:12px; color:var(--gold); font-size:20px; cursor:pointer; }
-  .sideBtns button:active{ background:var(--gold); color:var(--ink); }
-  .dpad{ position:fixed; left:14px; bottom:16px; z-index:12; display:grid;
-    grid-template-columns:56px 56px 56px; grid-template-rows:56px 56px 56px; gap:4px; opacity:.46; }
-  .dpad:active{ opacity:.85; }
+  /* Controls sit in the two bottom corners and stay out of the drag zone in
+     the middle. Both clusters share one bottom baseline and respect the phone's
+     safe-area inset so nothing lands under a home indicator. */
+  .sideBtns{ position:fixed; right:calc(10px + env(safe-area-inset-right)); z-index:12;
+    bottom:calc(12px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:6px; opacity:.8; }
+  .sideBtns button{ width:44px; height:44px; background:rgba(30,35,64,.82); border:3px solid var(--gold);
+    border-radius:12px; color:var(--gold); font-size:17px; line-height:1; cursor:pointer; }
+  .sideBtns button:active{ background:var(--gold); color:var(--ink); transform:translateY(1px); }
+  /* D-pad sits bottom-CENTRE, over the entrance mat, so either thumb reaches it
+     without stretching across the phone the way the old bottom-left corner did.
+     186px of cross with 60px keys: bigger targets, and centred means the travel
+     from rest to any arrow is the same in every direction.
+     Direction is computed from where the thumb sits relative to the pad's
+     centre, not from which key it lands on. That does three things: a thumb on
+     a corner resolves to the nearer axis instead of falling in a dead gap,
+     sliding across the pad re-aims continuously, and the centre is a real dead
+     zone - there is no direction to give there, so it does nothing at all.
+     Every child is pointer-events:none so the container owns the whole gesture
+     and nothing inside is independently clickable. */
+  .dpad{ position:fixed; left:50%; transform:translateX(-50%); z-index:12;
+    bottom:calc(10px + env(safe-area-inset-bottom)); display:grid; touch-action:none;
+    grid-template-columns:repeat(3,60px); grid-template-rows:repeat(3,60px); gap:3px;
+    opacity:.5; transition:opacity .12s ease; }
+  .dpad.live{ opacity:.96; }
+  .dpad > *{ pointer-events:none; }
   .dpad button{ background:rgba(30,35,64,.85); border:3px solid var(--gold); color:var(--gold);
-    font-size:20px; font-weight:900; cursor:pointer; border-radius:10px; }
-  .dpad button:active{ background:var(--gold); color:var(--ink); }
+    font-size:20px; line-height:1; font-weight:900; border-radius:8px; }
+  .dpad button.on{ background:var(--gold); color:var(--ink); }
+  .dpad #padU{ border-radius:15px 15px 5px 5px; }
+  .dpad #padD{ border-radius:5px 5px 15px 15px; }
+  .dpad #padL{ border-radius:15px 5px 5px 15px; }
+  .dpad #padR{ border-radius:5px 15px 15px 5px; }
   .dpad .blank{ visibility:hidden; }
+  /* The hub is decoration, not a control - a dashed ring reads as "nothing to
+     press here", and it is a div so it can never take a click or a tab stop. */
+  .dpad .hub{ background:rgba(30,35,64,.38); border:2px dashed rgba(245,197,24,.30);
+    border-radius:50%; }
   @media (min-width:700px){ .dpad{ display:none; } }
+  @media (prefers-reduced-motion:reduce){ .dpad{ transition:none; } }
   .ov{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
     background:rgba(10,10,14,.9); z-index:20; text-align:center; padding:20px; gap:14px; }
   .ov.on{ display:flex; }
@@ -69,13 +96,13 @@
   <div id="loading">LOADING\u2026</div>
   <canvas id="view" width="853" height="1844"></canvas>
   <div class="sideBtns">
-    <button id="btnPause">\u23F8</button>
-    <button id="btnMute">\uD83D\uDD0A</button>
+    <button id="btnPause" aria-label="Pause">\u23F8</button>
+    <button id="btnMute" aria-label="Mute sound">\uD83D\uDD0A</button>
   </div>
   <div class="dpad" id="dpadBox">
-    <button class="blank"></button><button id="padU">\u25B2</button><button class="blank"></button>
-    <button id="padL">\u25C0</button><button class="blank"></button><button id="padR">\u25B6</button>
-    <button class="blank"></button><button id="padD">\u25BC</button><button class="blank"></button>
+    <button class="blank"></button><button id="padU" aria-label="Move up">\u25B2</button><button class="blank"></button>
+    <button id="padL" aria-label="Move left">\u25C0</button><div class="hub" aria-hidden="true"></div><button id="padR" aria-label="Move right">\u25B6</button>
+    <button class="blank"></button><button id="padD" aria-label="Move down">\u25BC</button><button class="blank"></button>
   </div>
 
   <div class="ov" id="ovTitle">
