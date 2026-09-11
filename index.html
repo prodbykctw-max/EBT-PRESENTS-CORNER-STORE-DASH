@@ -168,21 +168,21 @@ var GC=16, GW=Math.ceil(IW/GC), GH=Math.ceil(IH/GC);  // nav cells (16px)
 
 var PAL={pink:"#E85D9E",magenta:"#C2255C",gold:"#F5C518",cream:"#FFF3E0",coral:"#F08C4B",navy:"#1E2340"};
 
-// x/y are each item's true shelf position (checked walkable with boxFree
-// before committing — see corner-store-dash-character/items_sheet.json for
-// the matching 3D icon atlas). CHICKEN and MILK moved off their old
-// off-shelf placeholder spots onto the actual Meat and Dairy Aisle shelves.
+// x/y are each item's real shelf-front spot: walked out from the exact pixel
+// position of that product's art on the board (produce apples, the snack
+// bags, the meat tray, etc.) down to the nearest walkable floor cell with
+// boxFree/snapToField, so the pickup floats right at the edge of ITS OWN
+// shelf in ITS OWN aisle — not a shared spot in the center walkway. shelf
+// is the on-board bounding box of that same product art, used to draw a
+// highlight around it while it's the active pickup (see drawShelfHighlight).
 var ITEMS=[
- {id:"APPLE",       x:395,y:972, rows:[160], pts:100, icon:"apple"},
- {id:"CHIPS",       x:395,y:790, rows:[188], pts:100, icon:"chips"},
- // (452,935) sits right at the open mouth of the Meat aisle's shelf-front
- // lane rather than deep inside it — that lane is a dead-end pocket only
- // reachable/exitable from this one side, which reads as an unfair trap.
- {id:"CHICKEN",     x:452,y:935, rows:[215], pts:100, icon:"chicken"},
- {id:"LEMONADE",    x:395,y:608, rows:[243], pts:100, icon:"lemonade"},
- {id:"BREAD",       x:410,y:440, rows:[271], pts:100, icon:"bread"},
- {id:"MILK",        x:395,y:230, rows:[299], pts:100, icon:"milk"},
- {id:"RICE & BEANS",x:530,y:292, rows:[327,355], pts:200, icon:"beans"}
+ {id:"APPLE",       x:228,y:1070, shelf:{x:175,y:963,w:108,h:52},  rows:[160], pts:100, icon:"apple"},
+ {id:"CHIPS",       x:244,y:889,  shelf:{x:125,y:760,w:240,h:70},  rows:[188], pts:100, icon:"chips"},
+ {id:"CHICKEN",     x:599,y:1083, shelf:{x:495,y:950,w:210,h:70},  rows:[215], pts:100, icon:"chicken"},
+ {id:"LEMONADE",    x:239,y:699,  shelf:{x:212,y:578,w:55, h:62},  rows:[243], pts:100, icon:"lemonade"},
+ {id:"BREAD",       x:209,y:519,  shelf:{x:125,y:395,w:170,h:65},  rows:[271], pts:100, icon:"bread"},
+ {id:"MILK",        x:133,y:225,  shelf:{x:128,y:160,w:122,h:70},  rows:[299], pts:100, icon:"milk"},
+ {id:"RICE & BEANS",x:612,y:280,  shelf:{x:492,y:155,w:242,h:70},  rows:[327,355], pts:200, icon:"beans"}
 ];
 var PADS=[[402,390,430,465],[402,550,430,635],[402,728,430,812]];
 var SPAWN_P={x:415,y:1380}, SPAWN_B={x:650,y:320};
@@ -364,10 +364,21 @@ function buildMasks(imgCanvas){
       field[n2]=1; q.push(n2);
     }
   }
-  // nav grid (16px): cell ok only if the actor box fits at its center
+  // nav grid (16px): cell ok only if the actor box fits across a small
+  // cross-pattern spanning most of the cell, not just its dead center. A
+  // thin wall (e.g. a shelf's base trim, 1-2 mask rows thick) can sit
+  // entirely inside one 16px cell and dodge a center-only sample — BFS then
+  // approves a "straight through the shelf" hop that moveEntity physically
+  // can't complete, so the chaser rams the trim, gets wall-slid back,
+  // reads the same (wrongly-approved) hop as still the way forward, and
+  // repeats forever. This is the meat-aisle stuck loop. Sampling ±6px off
+  // center on both axes catches a thin obstruction hiding anywhere in the
+  // cell without needing a full sub-grid scan.
   nav=new Uint8Array(GW*GH);
+  var NK=6;
   for(var gy=0;gy<GH;gy++)for(var gx=0;gx<GW;gx++){
-    nav[gy*GW+gx]=boxFree(gx*GC+GC/2, gy*GC+GC/2)?1:0;
+    var ncx=gx*GC+GC/2, ncy=gy*GC+GC/2;
+    nav[gy*GW+gx]=(boxFree(ncx,ncy)&&boxFree(ncx-NK,ncy)&&boxFree(ncx+NK,ncy)&&boxFree(ncx,ncy-NK)&&boxFree(ncx,ncy+NK))?1:0;
   }
 }
 function fieldAt(x,y){
@@ -445,8 +456,16 @@ function nearNav(x,y){
   }
   return -1;
 }
+// Sampled every ~3px — matching moveEntity's own step size (see below) —
+// not the old ~8px. An 8px gap let this line-of-sight check see clean past
+// a corner that moveEntity's finer stepping actually collides with: the
+// bully would then drop its path (b.path=null, "I can see him, go direct"),
+// slam into that same corner, get wall-slid back out, "see" the same false
+// clear line again, and repeat forever — the exact meat-aisle-corner stuck
+// loop this fixes. Costs more boxFree calls per frame; trivial at this grid
+// size for a single chaser.
 function los(x0,y0,x1,y1){
-  var dx=x1-x0, dy=y1-y0, d=Math.sqrt(dx*dx+dy*dy), steps=Math.max(1,d/8|0);
+  var dx=x1-x0, dy=y1-y0, d=Math.sqrt(dx*dx+dy*dy), steps=Math.max(1,d/3|0);
   for(var i=1;i<=steps;i++){
     if(!boxFree(x0+dx*i/steps, y0+dy*i/steps)) return false;
   }
@@ -587,15 +606,14 @@ function bubble(x,y,text,ttl){ bubbles.push({x:x,y:y,text:text,ttl:ttl||1.2,max:
 function currentItem(){
   return (S.order && S.activeIdx<S.order.length) ? ITEMS[S.order[S.activeIdx]] : null;
 }
-// Each reveal picks where the item actually shows up: 60% of the time at its
-// own real shelf (it.sx/sy), 40% of the time out in the main center aisle at
-// the same shelf height — so a run can't be solved by memorizing "always
-// check the shelves," it has to watch the floor too.
-var CENTER_X=415;
+// Each reveal shows up right at that item's own real shelf (it.sx/sy) — in
+// front of the actual product art in that product's own aisle, never in the
+// shared center walkway. Order is still reshuffled every run (see
+// startRun), so the route can't be memorized even though each item always
+// lives at the same spot on its shelf.
 function pickSpawnPos(it){
   if(!it) return null;
-  if(Math.random()<0.6) return {x:it.sx, y:it.sy};
-  return snapToField(CENTER_X, it.sy);
+  return {x:it.sx, y:it.sy};
 }
 function collect(it){
   var pickedX=S.curPos.x, pickedY=S.curPos.y;
@@ -922,11 +940,29 @@ var ICONS={
 };
 var ICON_PAL={r:"#D0342C",g:"#2F9E44",y:"#F5C518",b:"#B4763B",w:"#F5F2EA",o:"#C98235",m:"#8A2A2A"};
 
+// Outlines the active pickup's real product art on the shelf — e.g. while
+// CHIPS is live, the chip bags themselves get a pulsing gold box — so the
+// floating item below reads as "that shelf spot" rather than a disconnected
+// icon. Drawn straight onto the board, before any actor/UI layer.
+function drawShelfHighlight(g,t){
+  var it=currentItem();
+  if(!it || !it.shelf) return;
+  var b=it.shelf;
+  var pulse=0.55+0.35*Math.sin(t*4.2);
+  g.save();
+  g.shadowColor="rgba(245,197,24,0.9)";
+  g.shadowBlur=14;
+  g.strokeStyle="rgba(245,197,24,"+pulse.toFixed(2)+")";
+  g.lineWidth=4;
+  g.strokeRect(b.x-5,b.y-5,b.w+10,b.h+10);
+  g.restore();
+}
 /* ---------- render ---------- */
 function draw(){
   var g=vctx;
   g.imageSmoothingEnabled=false;
   g.drawImage(board,0,0);
+  if(S.mode==="play"||S.mode==="end") drawShelfHighlight(g,S.t);
   // score
   g.font="bold 30px ui-monospace,Menlo,monospace";
   g.fillStyle=PAL.gold;
