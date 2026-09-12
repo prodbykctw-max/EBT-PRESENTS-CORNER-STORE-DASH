@@ -194,6 +194,13 @@ var SPAWN_P={x:415,y:1380}, SPAWN_B={x:650,y:320};
    97%->68%. Raise B_CAP first if he ever needs teeth back; it is the term that
    decides how the last two pickups feel. */
 var PSPEED=260, B_IDLE=63, B_BASE=143, B_PER_ITEM=5.6, B_CAP=177;
+// Scripted playtests (real BFS pathing, no cheating) kept ending 2-3 items
+// in, 6-13s in: grabbing item #1 flips S.active straight to full hunt speed
+// with zero warning, and a continue drops the player back in at the same
+// instant hunt speed too - no beat to get your bearings either time. These
+// don't change steady-state difficulty (by AGGRO_RAMP seconds in, speed is
+// identical to before) - they only soften the two "surprise" transitions.
+var AGGRO_RAMP=2.2, CONTINUE_GRACE=1.2;
 var CATCH_R=30, PICK_R=36;
 var BULLY_LINES=["HEY! YOU!","GIMME THAT!","GET BACK HERE!","THOSE ARE MINE!"];
 
@@ -536,7 +543,14 @@ function updateBully(dt){
   var b=bully;
   b.repath-=dt;
   if(b.noLos>0) b.noLos-=dt;
-  var speed = S.active ? Math.min(B_CAP, B_BASE + B_PER_ITEM*S.nGot) : B_IDLE;
+  var speed;
+  if(S.active){
+    var huntSpeed=Math.min(B_CAP, B_BASE + B_PER_ITEM*S.nGot);
+    if(S.aggroT>0){
+      speed = B_IDLE + (huntSpeed-B_IDLE)*(1-S.aggroT/AGGRO_RAMP);
+      S.aggroT-=dt;
+    } else speed = huntSpeed;
+  } else speed = B_IDLE;
   var tx,ty;
   if(!S.active){
     if(!b.wander || b.repath<=0){
@@ -623,7 +637,7 @@ function collect(it){
   S.curPos=pickSpawnPos(currentItem());
   bubble(pickedX,pickedY-40,"+"+it.pts+" "+it.id,1.2);
   sfx.pick(); haptic(HAP.pick);
-  if(!S.active){ S.active=true; bubble(bully.x,bully.y-92,"HEY! MY SNACKS!",1.4); sfx.alert(); haptic(HAP.alert); }
+  if(!S.active){ S.active=true; S.aggroT=AGGRO_RAMP; bubble(bully.x,bully.y-92,"HEY! MY SNACKS!",1.4); sfx.alert(); haptic(HAP.alert); }
   if(S.nGot===ITEMS.length){ bubble(player.x,player.y-96,"CHECKOUT! →",1.6); sfx.register(); haptic(HAP.listDone); }
 }
 function caught(){
@@ -637,6 +651,7 @@ function useContinue(){
   player.x=SPAWN_P.x; player.y=SPAWN_P.y; player.vx=0; player.vy=0;
   bully.x=SPAWN_B.x; bully.y=SPAWN_B.y; bully.vx=0; bully.vy=0;
   bully.path=null; bully.pi=0; bully.stuckT=0; bully.noLos=0; bully.taunt=2.5; bully.repath=0;
+  if(S.active) S.aggroT=Math.max(S.aggroT||0, CONTINUE_GRACE);
   hide("ovEnd"); S.mode="play"; last=0;
 }
 function goMenu(){
@@ -686,7 +701,7 @@ function endScreen(won){
 }
 function startRun(){
   hide("ovEnd"); hide("ovTitle"); hide("ovHow");
-  S.mode="play"; S.score=0; S.got={}; S.nGot=0; S.active=false; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
+  S.mode="play"; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
   // one item live on the board at a time, in a fresh random order each run —
   // you can't memorize a route, and the bully's position matters more.
   S.order=ITEMS.map(function(_,i){return i;});
