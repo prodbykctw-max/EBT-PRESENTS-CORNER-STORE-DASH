@@ -192,6 +192,27 @@ function buildMasks(imgCanvas){
   // left as it goes up, so nothing at or right of 760 in the top band is floor.
   // Blocking it kills the walkable island that sat up there.
   setRect(760,96,IW,300,0);
+  // The same wall-face-reads-as-floor problem continues past y=300: the LOW
+  // PRICES sign and the storefront windows below it are painted on the same
+  // pale wall, and CLIP_R (plus the corner-planter overlay at x1=786) was
+  // measured/opened generously enough that the player could walk onto the
+  // sign itself and partway into the glass — user-reported and confirmed by
+  // sampling the actual art: the sign's dark border sits at x~780-790 through
+  // this range and the window glass starts at x~792-800 by y~460-500, both
+  // well inside what was previously walkable (up to x~840 at y~440). This
+  // runs last, after CLIP_R/the planter rect/banners, specifically so it
+  // can't be re-opened by any of them. Staircased rather than per-row since a
+  // wall boundary doesn't need 4px precision — each step leaves 15-20px of
+  // margin before the sign/glass's actual dark edge, erring toward blocking
+  // a sliver of real floor over ever standing on the glass. Past y=660 the
+  // existing curve already tracks the true trim line correctly (checked
+  // against the art), so this stops there.
+  setRect(765,300,IW,350,0);
+  setRect(768,350,IW,410,0);
+  setRect(772,410,IW,470,0);
+  setRect(777,470,IW,530,0);
+  setRect(782,530,IW,590,0);
+  setRect(788,590,IW,660,0);
   // light despeckle: fill single-cell pits only (classifier + wall clip already leave a clean edge)
   var w2=new Uint8Array(walk);
   for(var y2=1;y2<MH-1;y2++)for(var x2=1;x2<MW-1;x2++){
