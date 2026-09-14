@@ -189,14 +189,15 @@ var PAL={pink:"#E85D9E",magenta:"#C2255C",gold:"#F5C518",cream:"#FFF3E0",coral:"
 // shelf in ITS OWN aisle — not a shared spot in the center walkway. shelf
 // is the on-board bounding box of that same product art, used to draw a
 // highlight around it while it's the active pickup (see drawShelfHighlight).
+// The EBT LIST panel rows are NOT fixed per item — see drawList.
 var ITEMS=[
- {id:"APPLE",       x:228,y:1070, shelf:{x:175,y:963,w:108,h:52},  rows:[160], pts:100, icon:"apple"},
- {id:"CHIPS",       x:244,y:889,  shelf:{x:125,y:760,w:240,h:70},  rows:[188], pts:100, icon:"chips"},
- {id:"CHICKEN",     x:599,y:1083, shelf:{x:495,y:950,w:210,h:70},  rows:[215], pts:100, icon:"chicken"},
- {id:"LEMONADE",    x:239,y:699,  shelf:{x:212,y:578,w:55, h:62},  rows:[243], pts:100, icon:"lemonade"},
- {id:"BREAD",       x:209,y:519,  shelf:{x:125,y:395,w:170,h:65},  rows:[271], pts:100, icon:"bread"},
- {id:"MILK",        x:133,y:225,  shelf:{x:128,y:160,w:122,h:70},  rows:[299], pts:100, icon:"milk"},
- {id:"RICE & BEANS",x:612,y:280,  shelf:{x:492,y:155,w:242,h:70},  rows:[327,355], pts:200, icon:"beans"}
+ {id:"APPLE",       x:228,y:1070, shelf:{x:175,y:963,w:108,h:52},  pts:100, icon:"apple"},
+ {id:"CHIPS",       x:244,y:889,  shelf:{x:125,y:760,w:240,h:70},  pts:100, icon:"chips"},
+ {id:"CHICKEN",     x:599,y:1083, shelf:{x:495,y:950,w:210,h:70},  pts:100, icon:"chicken"},
+ {id:"LEMONADE",    x:239,y:699,  shelf:{x:212,y:578,w:55, h:62},  pts:100, icon:"lemonade"},
+ {id:"BREAD",       x:209,y:519,  shelf:{x:125,y:395,w:170,h:65},  pts:100, icon:"bread"},
+ {id:"MILK",        x:190,y:292,  shelf:{x:128,y:160,w:122,h:70},  pts:100, icon:"milk"},
+ {id:"RICE & BEANS",x:612,y:280,  shelf:{x:492,y:155,w:242,h:70},  pts:200, icon:"beans"}
 ];
 var PADS=[[402,390,430,465],[402,550,430,635],[402,728,430,812]];
 var SPAWN_P={x:415,y:1380}, SPAWN_B={x:650,y:320};
@@ -667,7 +668,6 @@ function pickSpawnPos(it){
 function collect(it){
   var pickedX=S.curPos.x, pickedY=S.curPos.y;
   S.got[it.id]=1; S.nGot++; addScore(it.pts);
-  S.cartTrail.push(it.icon);
   S.activeIdx++;
   S.curPos=pickSpawnPos(currentItem());
   bubble(pickedX,pickedY-40,"+"+it.pts+" "+it.id,1.2);
@@ -742,7 +742,6 @@ function startRun(){
   S.order=ITEMS.map(function(_,i){return i;});
   for(var oi=S.order.length-1; oi>0; oi--){ var oj=Math.floor(Math.random()*(oi+1)); var ot=S.order[oi]; S.order[oi]=S.order[oj]; S.order[oj]=ot; }
   S.activeIdx=0;
-  S.cartTrail=[];
   S.curPos=pickSpawnPos(currentItem());
   player={x:SPAWN_P.x,y:SPAWN_P.y,vx:0,vy:0,face:"U",anim:0};
   bully={x:SPAWN_B.x,y:SPAWN_B.y,vx:0,vy:0,face:"D",anim:0,repath:0,path:null,pi:0,taunt:2,wander:null};
@@ -952,32 +951,6 @@ function drawPlayerSprite(g,e){
     g.drawImage(playerImg, sx, sy, PLAYER_CELL, PLAYER_CELL, ox, oy, w, h);
   }
 }
-// Cart pushed in front of the player in their facing direction; each
-// collected item's icon rides along, piled into a fixed set of basket slots
-// (small bodega cart — no need for it to hold more than the 7-item list).
-var CART_SLOTS=[[0.30,0.22],[0.55,0.20],[0.75,0.25],[0.35,0.38],[0.60,0.40],[0.45,0.30],[0.70,0.42]];
-function drawCart(g){
-  if(!itemsReady) return;
-  var reg=ITEM_ATLAS.cart;
-  var dist=34, dx=0, dy=0;
-  if(player.face==="U") dy=-dist;
-  else if(player.face==="D") dy=dist*0.55;
-  else if(player.face==="L") dx=-dist;
-  else dx=dist;
-  var cx=player.x+dx, footY=player.y+dy+6;
-  var w=reg.w, h=reg.h;
-  var ox=Math.round(cx-w/2), oy=Math.round(footY-h);
-  g.fillStyle="rgba(20,16,20,0.22)";
-  g.beginPath(); g.ellipse(cx,footY-2,w*0.4,h*0.10,0,0,6.2832); g.fill();
-  g.drawImage(itemsImg, reg.x,reg.y,reg.w,reg.h, ox,oy,w,h);
-  var trail=S.cartTrail||[];
-  for(var i=0;i<trail.length && i<CART_SLOTS.length;i++){
-    var ir=ITEM_ATLAS[trail[i]]; if(!ir) continue;
-    var maxDim=9, sc=Math.min(maxDim/ir.w, maxDim/ir.h);
-    var iw=ir.w*sc, ih=ir.h*sc;
-    g.drawImage(itemsImg, ir.x,ir.y,ir.w,ir.h, ox+w*CART_SLOTS[i][0]-iw/2, oy+h*CART_SLOTS[i][1]-ih/2, iw, ih);
-  }
-}
 var ICONS={
  APPLE:[".rrr.","rrrrr","rrrrr",".rrr.","..g.."],
  CHIPS:["yyyyy","yryry","yyyyy","yryry","yyyyy"],
@@ -990,22 +963,66 @@ var ICONS={
 };
 var ICON_PAL={r:"#D0342C",g:"#2F9E44",y:"#F5C518",b:"#B4763B",w:"#F5F2EA",o:"#C98235",m:"#8A2A2A"};
 
-// Outlines the active pickup's real product art on the shelf — e.g. while
-// CHIPS is live, the chip bags themselves get a pulsing gold box — so the
+// One shared strobe for the active pickup and its shelf: a sharp 0..1 blink
+// (~3 flashes a second, squared so it snaps bright then falls off) so the
+// floating item and the products it came from flash in step and read as one
+// signal — "that item, that shelf".
+function strobe(t){ var v=0.5+0.5*Math.sin(t*7.5); return v*v; }
+// Lights up the active pickup's real product art on the shelf — e.g. while
+// CHIPS is live, the chip bags themselves strobe with a gold glow — so the
 // floating item below reads as "that shelf spot" rather than a disconnected
 // icon. Drawn straight onto the board, before any actor/UI layer.
 function drawShelfHighlight(g,t){
   var it=currentItem();
   if(!it || !it.shelf) return;
-  var b=it.shelf;
-  var pulse=0.55+0.35*Math.sin(t*4.2);
+  var b=it.shelf, s=strobe(t);
+  // brighten the products themselves: an additive gold wash over the art
   g.save();
-  g.shadowColor="rgba(245,197,24,0.9)";
-  g.shadowBlur=14;
-  g.strokeStyle="rgba(245,197,24,"+pulse.toFixed(2)+")";
+  g.globalCompositeOperation="lighter";
+  g.fillStyle="rgba(255,225,120,"+(0.08+0.40*s).toFixed(2)+")";
+  g.fillRect(b.x,b.y,b.w,b.h);
+  g.restore();
+  // and a glowing frame that flares with the same strobe
+  g.save();
+  g.shadowColor="rgba(245,197,24,"+(0.5+0.5*s).toFixed(2)+")";
+  g.shadowBlur=10+18*s;
+  g.strokeStyle="rgba(245,197,24,"+(0.35+0.65*s).toFixed(2)+")";
   g.lineWidth=4;
   g.strokeRect(b.x-5,b.y-5,b.w+10,b.h+10);
   g.restore();
+}
+// The EBT LIST panel is baked into the board art in one fixed order, but
+// every run reshuffles the pickup order (S.order). So the rows get repainted
+// in THIS run's order and the list doubles as a key: top to bottom is the
+// order the items will appear. Gold = the one that's live right now,
+// green + struck through = bagged, white = still to come. RICE & BEANS is
+// one pickup that keeps its two lines. Only the rows are repainted; the
+// panel frame and the EBT LIST title stay as drawn on the board.
+var LIST_ROWS=[160,188,215,243,271,299,327,355];
+var LIST_FONT="bold 16px ui-monospace,Menlo,monospace";
+function drawList(g){
+  if(!S.order) return;
+  g.fillStyle="#020204";
+  g.fillRect(16,146,80,224);
+  g.font=LIST_FONT;
+  var r=0;
+  for(var oi=0;oi<S.order.length;oi++){
+    var it=ITEMS[S.order[oi]];
+    var lines=it.id.split(" & ");
+    var done=!!S.got[it.id], live=(oi===S.activeIdx);
+    for(var li=0;li<lines.length && r<LIST_ROWS.length;li++,r++){
+      var ry=LIST_ROWS[r];
+      g.fillStyle=done?"#3ADB76":(live?PAL.gold:"#FFFFFF");
+      g.fillText(lines[li],18,ry+6);
+      if(done){
+        g.strokeStyle="#3ADB76"; g.lineWidth=3;
+        g.beginPath(); g.moveTo(12,ry); g.lineTo(92,ry); g.stroke();
+        g.font="bold 20px ui-monospace,monospace";
+        g.fillText("\u2713",95,ry+7);
+        g.font=LIST_FONT;
+      }
+    }
+  }
 }
 /* ---------- render ---------- */
 function draw(){
@@ -1017,37 +1034,40 @@ function draw(){
   g.font="bold 30px ui-monospace,Menlo,monospace";
   g.fillStyle=PAL.gold;
   g.fillText(String(S.score).padStart(4,"0"), 118, 42);
-  // list checkmarks
-  for(var i=0;i<ITEMS.length;i++){
-    var it=ITEMS[i];
-    if(S.got[it.id]){
-      for(var rI=0;rI<it.rows.length;rI++){
-        var ry=it.rows[rI];
-        g.strokeStyle="#3ADB76"; g.lineWidth=3;
-        g.beginPath(); g.moveTo(12,ry); g.lineTo(92,ry); g.stroke();
-        g.fillStyle="#3ADB76"; g.font="bold 20px ui-monospace,monospace";
-        g.fillText("\u2713", 95, ry+7);
-      }
-    }
-  }
+  // EBT list, in this run's pickup order, with checkmarks
+  drawList(g);
   if(S.mode==="play"||S.mode==="end"){
-    // the one active pickup: a real floating 3D item, no pixel art, no yellow
-    // pulse-ball — a soft ground shadow plus a gentle bob sells "floating".
+    // the one active pickup: a real floating 3D item that bobs and strobes —
+    // a soft ground shadow sells "floating", and a gold glow that flares in
+    // step with its shelf (see strobe()) sells "this is the one".
     var t=S.t;
     var it2=currentItem();
     if(it2 && itemsReady && S.curPos){
       var reg=ITEM_ATLAS[it2.icon];
-      var bob=Math.sin(t*2.2)*3;
-      var cx=S.curPos.x, baseY=S.curPos.y+bob;
+      var bob=Math.sin(t*2.2)*3, s=strobe(t);
+      var cx=S.curPos.x, baseY=S.curPos.y+bob, midY=baseY-reg.h/2;
       g.fillStyle="rgba(10,10,14,0.30)";
       g.beginPath(); g.ellipse(cx,S.curPos.y+reg.h*0.42,reg.w*0.42,reg.w*0.16,0,0,6.2832); g.fill();
-      var glowR=Math.max(reg.w,reg.h)*0.9;
-      var glow=g.createRadialGradient(cx,baseY,0,cx,baseY,glowR);
-      glow.addColorStop(0,"rgba(255,241,199,0.35)");
-      glow.addColorStop(1,"rgba(255,241,199,0)");
+      var glowR=Math.max(reg.w,reg.h)*(0.8+0.5*s);
+      var glow=g.createRadialGradient(cx,midY,0,cx,midY,glowR);
+      glow.addColorStop(0,"rgba(255,225,120,"+(0.20+0.45*s).toFixed(2)+")");
+      glow.addColorStop(0.6,"rgba(255,225,120,"+(0.06+0.18*s).toFixed(2)+")");
+      glow.addColorStop(1,"rgba(255,225,120,0)");
       g.fillStyle=glow;
-      g.beginPath(); g.arc(cx,baseY,glowR,0,6.2832); g.fill();
-      g.drawImage(itemsImg, reg.x,reg.y,reg.w,reg.h, Math.round(cx-reg.w/2), Math.round(baseY-reg.h), reg.w, reg.h);
+      g.beginPath(); g.arc(cx,midY,glowR,0,6.2832); g.fill();
+      var ix=Math.round(cx-reg.w/2), iy=Math.round(baseY-reg.h);
+      // the item itself: a gold rim glow that flares with the strobe...
+      g.save();
+      g.shadowColor="rgba(245,197,24,"+(0.4+0.6*s).toFixed(2)+")";
+      g.shadowBlur=6+22*s;
+      g.drawImage(itemsImg, reg.x,reg.y,reg.w,reg.h, ix, iy, reg.w, reg.h);
+      g.restore();
+      // ...and an additive flash of the sprite so the item brightens, not just its halo
+      g.save();
+      g.globalCompositeOperation="lighter";
+      g.globalAlpha=0.45*s;
+      g.drawImage(itemsImg, reg.x,reg.y,reg.w,reg.h, ix, iy, reg.w, reg.h);
+      g.restore();
       g.font="bold 17px ui-monospace,monospace";
       g.fillStyle="#FFFFFF"; g.strokeStyle=PAL.navy; g.lineWidth=4;
       var tw=g.measureText(it2.id).width;
@@ -1067,15 +1087,9 @@ function draw(){
       g.fillStyle="#3ADB76";
       g.fillText("PAY \u2192", 340, 470);
     }
-    // actors: draw upper first for overlap. The cart is pushed in front of
-    // the player in whichever direction they're facing, so it has to slot
-    // into the same depth order — behind the player when they face away
-    // (U), in front when they face the viewer (D).
-    var cartBehind=(player.face==="U");
-    if(cartBehind) drawCart(g);
+    // actors: draw upper first for overlap.
     var actors=[player,bully].sort(function(a,b){return a.y-b.y;});
     for(var a2=0;a2<actors.length;a2++) drawActor(g,actors[a2],actors[a2]===bully);
-    if(!cartBehind) drawCart(g);
     // joystick indicator while dragging
     if(drag&&drag.on&&S.mode==="play"){
       var rc=view.getBoundingClientRect();
