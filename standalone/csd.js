@@ -20,14 +20,15 @@ var PAL={pink:"#E85D9E",magenta:"#C2255C",gold:"#F5C518",cream:"#FFF3E0",coral:"
 // shelf in ITS OWN aisle — not a shared spot in the center walkway. shelf
 // is the on-board bounding box of that same product art, used to draw a
 // highlight around it while it's the active pickup (see drawShelfHighlight).
+// The EBT LIST panel rows are NOT fixed per item — see drawList.
 var ITEMS=[
- {id:"APPLE",       x:228,y:1070, shelf:{x:175,y:963,w:108,h:52},  rows:[160], pts:100, icon:"apple"},
- {id:"CHIPS",       x:244,y:889,  shelf:{x:125,y:760,w:240,h:70},  rows:[188], pts:100, icon:"chips"},
- {id:"CHICKEN",     x:599,y:1083, shelf:{x:495,y:950,w:210,h:70},  rows:[215], pts:100, icon:"chicken"},
- {id:"LEMONADE",    x:239,y:699,  shelf:{x:212,y:578,w:55, h:62},  rows:[243], pts:100, icon:"lemonade"},
- {id:"BREAD",       x:209,y:519,  shelf:{x:125,y:395,w:170,h:65},  rows:[271], pts:100, icon:"bread"},
- {id:"MILK",        x:190,y:292,  shelf:{x:128,y:160,w:122,h:70},  rows:[299], pts:100, icon:"milk"},
- {id:"RICE & BEANS",x:612,y:280,  shelf:{x:492,y:155,w:242,h:70},  rows:[327,355], pts:200, icon:"beans"}
+ {id:"APPLE",       x:228,y:1070, shelf:{x:175,y:963,w:108,h:52},  pts:100, icon:"apple"},
+ {id:"CHIPS",       x:244,y:889,  shelf:{x:125,y:760,w:240,h:70},  pts:100, icon:"chips"},
+ {id:"CHICKEN",     x:599,y:1083, shelf:{x:495,y:950,w:210,h:70},  pts:100, icon:"chicken"},
+ {id:"LEMONADE",    x:239,y:699,  shelf:{x:212,y:578,w:55, h:62},  pts:100, icon:"lemonade"},
+ {id:"BREAD",       x:209,y:519,  shelf:{x:125,y:395,w:170,h:65},  pts:100, icon:"bread"},
+ {id:"MILK",        x:190,y:292,  shelf:{x:128,y:160,w:122,h:70},  pts:100, icon:"milk"},
+ {id:"RICE & BEANS",x:612,y:280,  shelf:{x:492,y:155,w:242,h:70},  pts:200, icon:"beans"}
 ];
 var PADS=[[402,390,430,465],[402,550,430,635],[402,728,430,812]];
 var SPAWN_P={x:415,y:1380}, SPAWN_B={x:650,y:320};
@@ -821,6 +822,39 @@ function drawShelfHighlight(g,t){
   g.strokeRect(b.x-5,b.y-5,b.w+10,b.h+10);
   g.restore();
 }
+// The EBT LIST panel is baked into the board art in one fixed order, but
+// every run reshuffles the pickup order (S.order). So the rows get repainted
+// in THIS run's order and the list doubles as a key: top to bottom is the
+// order the items will appear. Gold = the one that's live right now,
+// green + struck through = bagged, white = still to come. RICE & BEANS is
+// one pickup that keeps its two lines. Only the rows are repainted; the
+// panel frame and the EBT LIST title stay as drawn on the board.
+var LIST_ROWS=[160,188,215,243,271,299,327,355];
+var LIST_FONT="bold 16px ui-monospace,Menlo,monospace";
+function drawList(g){
+  if(!S.order) return;
+  g.fillStyle="#020204";
+  g.fillRect(16,146,80,224);
+  g.font=LIST_FONT;
+  var r=0;
+  for(var oi=0;oi<S.order.length;oi++){
+    var it=ITEMS[S.order[oi]];
+    var lines=it.id.split(" & ");
+    var done=!!S.got[it.id], live=(oi===S.activeIdx);
+    for(var li=0;li<lines.length && r<LIST_ROWS.length;li++,r++){
+      var ry=LIST_ROWS[r];
+      g.fillStyle=done?"#3ADB76":(live?PAL.gold:"#FFFFFF");
+      g.fillText(lines[li],18,ry+6);
+      if(done){
+        g.strokeStyle="#3ADB76"; g.lineWidth=3;
+        g.beginPath(); g.moveTo(12,ry); g.lineTo(92,ry); g.stroke();
+        g.font="bold 20px ui-monospace,monospace";
+        g.fillText("\u2713",95,ry+7);
+        g.font=LIST_FONT;
+      }
+    }
+  }
+}
 /* ---------- render ---------- */
 function draw(){
   var g=vctx;
@@ -831,19 +865,8 @@ function draw(){
   g.font="bold 30px ui-monospace,Menlo,monospace";
   g.fillStyle=PAL.gold;
   g.fillText(String(S.score).padStart(4,"0"), 118, 42);
-  // list checkmarks
-  for(var i=0;i<ITEMS.length;i++){
-    var it=ITEMS[i];
-    if(S.got[it.id]){
-      for(var rI=0;rI<it.rows.length;rI++){
-        var ry=it.rows[rI];
-        g.strokeStyle="#3ADB76"; g.lineWidth=3;
-        g.beginPath(); g.moveTo(12,ry); g.lineTo(92,ry); g.stroke();
-        g.fillStyle="#3ADB76"; g.font="bold 20px ui-monospace,monospace";
-        g.fillText("\u2713", 95, ry+7);
-      }
-    }
-  }
+  // EBT list, in this run's pickup order, with checkmarks
+  drawList(g);
   if(S.mode==="play"||S.mode==="end"){
     // the one active pickup: a real floating 3D item that bobs and strobes —
     // a soft ground shadow sells "floating", and a gold glow that flares in
