@@ -181,7 +181,7 @@ var ITEMS=[
  {id:"CHICKEN",     x:599,y:1083, shelf:{x:495,y:950,w:210,h:70},  rows:[215], pts:100, icon:"chicken"},
  {id:"LEMONADE",    x:239,y:699,  shelf:{x:212,y:578,w:55, h:62},  rows:[243], pts:100, icon:"lemonade"},
  {id:"BREAD",       x:209,y:519,  shelf:{x:125,y:395,w:170,h:65},  rows:[271], pts:100, icon:"bread"},
- {id:"MILK",        x:133,y:225,  shelf:{x:128,y:160,w:122,h:70},  rows:[299], pts:100, icon:"milk"},
+ {id:"MILK",        x:190,y:292,  shelf:{x:128,y:160,w:122,h:70},  rows:[299], pts:100, icon:"milk"},
  {id:"RICE & BEANS",x:612,y:280,  shelf:{x:492,y:155,w:242,h:70},  rows:[327,355], pts:200, icon:"beans"}
 ];
 var PADS=[[402,390,430,465],[402,550,430,635],[402,728,430,812]];
@@ -948,19 +948,30 @@ var ICONS={
 };
 var ICON_PAL={r:"#D0342C",g:"#2F9E44",y:"#F5C518",b:"#B4763B",w:"#F5F2EA",o:"#C98235",m:"#8A2A2A"};
 
-// Outlines the active pickup's real product art on the shelf — e.g. while
-// CHIPS is live, the chip bags themselves get a pulsing gold box — so the
+// One shared strobe for the active pickup and its shelf: a sharp 0..1 blink
+// (~3 flashes a second, squared so it snaps bright then falls off) so the
+// floating item and the products it came from flash in step and read as one
+// signal — "that item, that shelf".
+function strobe(t){ var v=0.5+0.5*Math.sin(t*7.5); return v*v; }
+// Lights up the active pickup's real product art on the shelf — e.g. while
+// CHIPS is live, the chip bags themselves strobe with a gold glow — so the
 // floating item below reads as "that shelf spot" rather than a disconnected
 // icon. Drawn straight onto the board, before any actor/UI layer.
 function drawShelfHighlight(g,t){
   var it=currentItem();
   if(!it || !it.shelf) return;
-  var b=it.shelf;
-  var pulse=0.55+0.35*Math.sin(t*4.2);
+  var b=it.shelf, s=strobe(t);
+  // brighten the products themselves: an additive gold wash over the art
   g.save();
-  g.shadowColor="rgba(245,197,24,0.9)";
-  g.shadowBlur=14;
-  g.strokeStyle="rgba(245,197,24,"+pulse.toFixed(2)+")";
+  g.globalCompositeOperation="lighter";
+  g.fillStyle="rgba(255,225,120,"+(0.08+0.40*s).toFixed(2)+")";
+  g.fillRect(b.x,b.y,b.w,b.h);
+  g.restore();
+  // and a glowing frame that flares with the same strobe
+  g.save();
+  g.shadowColor="rgba(245,197,24,"+(0.5+0.5*s).toFixed(2)+")";
+  g.shadowBlur=10+18*s;
+  g.strokeStyle="rgba(245,197,24,"+(0.35+0.65*s).toFixed(2)+")";
   g.lineWidth=4;
   g.strokeRect(b.x-5,b.y-5,b.w+10,b.h+10);
   g.restore();
@@ -989,23 +1000,37 @@ function draw(){
     }
   }
   if(S.mode==="play"||S.mode==="end"){
-    // the one active pickup: a real floating 3D item, no pixel art, no yellow
-    // pulse-ball — a soft ground shadow plus a gentle bob sells "floating".
+    // the one active pickup: a real floating 3D item that bobs and strobes —
+    // a soft ground shadow sells "floating", and a gold glow that flares in
+    // step with its shelf (see strobe()) sells "this is the one".
     var t=S.t;
     var it2=currentItem();
     if(it2 && itemsReady && S.curPos){
       var reg=ITEM_ATLAS[it2.icon];
-      var bob=Math.sin(t*2.2)*3;
-      var cx=S.curPos.x, baseY=S.curPos.y+bob;
+      var bob=Math.sin(t*2.2)*3, s=strobe(t);
+      var cx=S.curPos.x, baseY=S.curPos.y+bob, midY=baseY-reg.h/2;
       g.fillStyle="rgba(10,10,14,0.30)";
       g.beginPath(); g.ellipse(cx,S.curPos.y+reg.h*0.42,reg.w*0.42,reg.w*0.16,0,0,6.2832); g.fill();
-      var glowR=Math.max(reg.w,reg.h)*0.9;
-      var glow=g.createRadialGradient(cx,baseY,0,cx,baseY,glowR);
-      glow.addColorStop(0,"rgba(255,241,199,0.35)");
-      glow.addColorStop(1,"rgba(255,241,199,0)");
+      var glowR=Math.max(reg.w,reg.h)*(0.8+0.5*s);
+      var glow=g.createRadialGradient(cx,midY,0,cx,midY,glowR);
+      glow.addColorStop(0,"rgba(255,225,120,"+(0.20+0.45*s).toFixed(2)+")");
+      glow.addColorStop(0.6,"rgba(255,225,120,"+(0.06+0.18*s).toFixed(2)+")");
+      glow.addColorStop(1,"rgba(255,225,120,0)");
       g.fillStyle=glow;
-      g.beginPath(); g.arc(cx,baseY,glowR,0,6.2832); g.fill();
-      g.drawImage(itemsImg, reg.x,reg.y,reg.w,reg.h, Math.round(cx-reg.w/2), Math.round(baseY-reg.h), reg.w, reg.h);
+      g.beginPath(); g.arc(cx,midY,glowR,0,6.2832); g.fill();
+      var ix=Math.round(cx-reg.w/2), iy=Math.round(baseY-reg.h);
+      // the item itself: a gold rim glow that flares with the strobe...
+      g.save();
+      g.shadowColor="rgba(245,197,24,"+(0.4+0.6*s).toFixed(2)+")";
+      g.shadowBlur=6+22*s;
+      g.drawImage(itemsImg, reg.x,reg.y,reg.w,reg.h, ix, iy, reg.w, reg.h);
+      g.restore();
+      // ...and an additive flash of the sprite so the item brightens, not just its halo
+      g.save();
+      g.globalCompositeOperation="lighter";
+      g.globalAlpha=0.45*s;
+      g.drawImage(itemsImg, reg.x,reg.y,reg.w,reg.h, ix, iy, reg.w, reg.h);
+      g.restore();
       g.font="bold 17px ui-monospace,monospace";
       g.fillStyle="#FFFFFF"; g.strokeStyle=PAL.navy; g.lineWidth=4;
       var tw=g.measureText(it2.id).width;
