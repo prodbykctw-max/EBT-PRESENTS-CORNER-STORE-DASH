@@ -667,7 +667,6 @@ function pickSpawnPos(it){
 function collect(it){
   var pickedX=S.curPos.x, pickedY=S.curPos.y;
   S.got[it.id]=1; S.nGot++; addScore(it.pts);
-  S.cartTrail.push(it.icon);
   S.activeIdx++;
   S.curPos=pickSpawnPos(currentItem());
   bubble(pickedX,pickedY-40,"+"+it.pts+" "+it.id,1.2);
@@ -742,7 +741,6 @@ function startRun(){
   S.order=ITEMS.map(function(_,i){return i;});
   for(var oi=S.order.length-1; oi>0; oi--){ var oj=Math.floor(Math.random()*(oi+1)); var ot=S.order[oi]; S.order[oi]=S.order[oj]; S.order[oj]=ot; }
   S.activeIdx=0;
-  S.cartTrail=[];
   S.curPos=pickSpawnPos(currentItem());
   player={x:SPAWN_P.x,y:SPAWN_P.y,vx:0,vy:0,face:"U",anim:0};
   bully={x:SPAWN_B.x,y:SPAWN_B.y,vx:0,vy:0,face:"D",anim:0,repath:0,path:null,pi:0,taunt:2,wander:null};
@@ -952,32 +950,6 @@ function drawPlayerSprite(g,e){
     g.drawImage(playerImg, sx, sy, PLAYER_CELL, PLAYER_CELL, ox, oy, w, h);
   }
 }
-// Cart pushed in front of the player in their facing direction; each
-// collected item's icon rides along, piled into a fixed set of basket slots
-// (small bodega cart — no need for it to hold more than the 7-item list).
-var CART_SLOTS=[[0.30,0.22],[0.55,0.20],[0.75,0.25],[0.35,0.38],[0.60,0.40],[0.45,0.30],[0.70,0.42]];
-function drawCart(g){
-  if(!itemsReady) return;
-  var reg=ITEM_ATLAS.cart;
-  var dist=34, dx=0, dy=0;
-  if(player.face==="U") dy=-dist;
-  else if(player.face==="D") dy=dist*0.55;
-  else if(player.face==="L") dx=-dist;
-  else dx=dist;
-  var cx=player.x+dx, footY=player.y+dy+6;
-  var w=reg.w, h=reg.h;
-  var ox=Math.round(cx-w/2), oy=Math.round(footY-h);
-  g.fillStyle="rgba(20,16,20,0.22)";
-  g.beginPath(); g.ellipse(cx,footY-2,w*0.4,h*0.10,0,0,6.2832); g.fill();
-  g.drawImage(itemsImg, reg.x,reg.y,reg.w,reg.h, ox,oy,w,h);
-  var trail=S.cartTrail||[];
-  for(var i=0;i<trail.length && i<CART_SLOTS.length;i++){
-    var ir=ITEM_ATLAS[trail[i]]; if(!ir) continue;
-    var maxDim=9, sc=Math.min(maxDim/ir.w, maxDim/ir.h);
-    var iw=ir.w*sc, ih=ir.h*sc;
-    g.drawImage(itemsImg, ir.x,ir.y,ir.w,ir.h, ox+w*CART_SLOTS[i][0]-iw/2, oy+h*CART_SLOTS[i][1]-ih/2, iw, ih);
-  }
-}
 var ICONS={
  APPLE:[".rrr.","rrrrr","rrrrr",".rrr.","..g.."],
  CHIPS:["yyyyy","yryry","yyyyy","yryry","yyyyy"],
@@ -1067,15 +1039,9 @@ function draw(){
       g.fillStyle="#3ADB76";
       g.fillText("PAY \u2192", 340, 470);
     }
-    // actors: draw upper first for overlap. The cart is pushed in front of
-    // the player in whichever direction they're facing, so it has to slot
-    // into the same depth order — behind the player when they face away
-    // (U), in front when they face the viewer (D).
-    var cartBehind=(player.face==="U");
-    if(cartBehind) drawCart(g);
+    // actors: draw upper first for overlap.
     var actors=[player,bully].sort(function(a,b){return a.y-b.y;});
     for(var a2=0;a2<actors.length;a2++) drawActor(g,actors[a2],actors[a2]===bully);
-    if(!cartBehind) drawCart(g);
     // joystick indicator while dragging
     if(drag&&drag.on&&S.mode==="play"){
       var rc=view.getBoundingClientRect();
