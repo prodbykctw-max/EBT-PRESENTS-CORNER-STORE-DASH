@@ -1,0 +1,39 @@
+# Corner Store Dash — full reference
+
+Last updated: 2026-09-13
+Canonical URL: https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/
+
+## TL;DR
+
+Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand: grab everything on the EBT list, dodge the bully, and make it to checkout. Standalone, plays on phone or desktop, no download.
+
+Developer: PRODBYKCTW LLC (Melvin D. Brown III, @prodbyKCTW) / RARƎ AGENCY. Genre: Arcade / chase. Platform: Web browser (mobile and desktop). Price: free.
+
+## What it is
+A standalone arcade game presented by EBT (Everything But Trapped), the Atlanta brand run by Kema. Inside the corner store you race to collect every item on the EBT list, dodge the bully, and reach checkout before you get caught. Scores post to an online leaderboard.
+
+## How to play
+Move with the on-screen pad or keyboard, collect every listed item, avoid the bully, and reach the register.
+
+## Tech
+Vanilla JavaScript + HTML5 canvas front end on GitHub Pages; leaderboard on a Cloudflare Worker.
+
+## Frequently asked questions
+
+Q: What is Corner Store Dash?
+A: A free browser arcade game from the EBT (Everything But Trapped) brand: collect everything on the EBT list, dodge the bully, make it to checkout.
+
+Q: What is EBT?
+A: EBT — Everything But Trapped — is an Atlanta brand run by Kema; Corner Store Dash is its standalone game.
+
+Q: Who built it?
+A: RARƎ AGENCY / PRODBYKCTW (Melvin D. Brown III, @prodbyKCTW) with partner Kema.
+
+Q: Is it free?
+A: Yes — no download, no sign-up, plays on phone or desktop.
+
+## Links
+
+- Play: https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/
+- Developer GitHub: https://github.com/prodbykctw-max
+- Developer Instagram: https://www.instagram.com/prodbykctw/

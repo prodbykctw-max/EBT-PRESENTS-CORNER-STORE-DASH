@@ -1,0 +1,22 @@
+# Corner Store Dash — https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/
+# Search engines and AI assistants are welcome to index this site. See /llms.txt.
+
+User-agent: *
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+Sitemap: https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/sitemap.xml
