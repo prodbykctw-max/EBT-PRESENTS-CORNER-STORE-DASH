@@ -97,6 +97,7 @@ if (puppeteer) {
   const { createServer } = await import('node:http');
   const { readFile } = await import('node:fs/promises');
   const { extname, join, normalize } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
   const root = new URL('../public/', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
   const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webmanifest': 'application/manifest+json', '.png': 'image/png' };
 
@@ -116,8 +117,18 @@ if (puppeteer) {
   const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
   const page = await browser.newPage();
   const errors = [];
+  // Two kinds of 404 are expected here and must not fail the run: the art in
+  // public/assets is optional by design (see public/assets/README.md — the game
+  // falls back to vector rendering, and the PWA manifest icons just go unused),
+  // and this static server has no /api, so the leaderboard client falls back to
+  // localStorage exactly as it does when the Worker is down. The browser logs
+  // each of those as a console error; they are ignored here. Any other 404, and
+  // any real page or console error, still fails the check.
+  const EXPECTED_404 = /\/assets\/(board|icon-192|icon-512)\.png$|\/api\//;
+  const EXPECTED_NOISE = /^Failed to load resource|icon from the Manifest/;
   page.on('pageerror', (e) => errors.push(String(e)));
-  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  page.on('response', (r) => r.status() === 404 && !EXPECTED_404.test(r.url()) && errors.push(`404 ${r.url()}`));
+  page.on('console', (m) => m.type() === 'error' && !EXPECTED_NOISE.test(m.text()) && errors.push(m.text()));
   await page.goto('http://localhost:5199/', { waitUntil: 'networkidle0' });
   await page.keyboard.press('Space');
   await page.keyboard.press('ArrowLeft');
@@ -137,7 +148,8 @@ if (puppeteer) {
   check('SPACE starts the run', state.state === 'playing', state.state);
   check('arrow keys move the shopper', state.moved);
 
-  await page.screenshot({ path: new URL('../qa-screenshot.png', import.meta.url) });
+  // puppeteer wants a filesystem path string here, not a URL object
+  await page.screenshot({ path: fileURLToPath(new URL('../qa-screenshot.png', import.meta.url)) });
   console.log('  screenshot -> qa-screenshot.png');
 
   await browser.close();
