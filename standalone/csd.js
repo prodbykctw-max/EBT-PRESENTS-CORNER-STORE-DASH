@@ -596,6 +596,7 @@ document.addEventListener("keydown",function(ev){
   var k=ev.key;
   if(k==="f"||k==="F"){ fxCycle(); return; }
   if(k==="t"||k==="T"){ fxTogglePanel(); return; }
+  if(k==="g"||k==="G"){ dbgCycle(); return; }
   if(k==="p"||k==="P"||k==="Escape"){ togglePause(); return; }
   if(k==="ArrowUp"||k==="w"||k==="W"){keys.u=1;ev.preventDefault();}
   if(k==="ArrowDown"||k==="s"||k==="S"){keys.d=1;ev.preventDefault();}
@@ -1356,6 +1357,101 @@ function fxTogglePanel(){
   fxPanel.style.display = fxPanel.style.display==="none" ? "block" : "none";
 }
 
+/* ---------- collision inspector -----------------------------------------
+   The board is a pre-rendered background: the store art IS the level, and
+   walk/field/nav are derived from its pixels at load rather than authored.
+   That is cheap to build and very hard to see, which is why buildMasks()
+   above carries a long tail of hand-measured correction rects — each one a
+   bug someone hit by walking into it.
+
+   G cycles a view onto those layers so the next one is visible instead of
+   felt. The layer that earns its keep is WALKABLE-ISLAND: cells the colour
+   classifier called floor but the flood fill never reached. Those are the
+   pockets you can see and not stand on, and they are invisible from inside
+   the game — you just bump into nothing.
+
+   Masks are static once built, so each layer bakes into a canvas on first
+   use and costs one drawImage per frame after that. Drawn to the visible
+   canvas AFTER the FX pass, so the lighting never dims the diagnostic. */
+var DBG={layer:0,cache:{}};
+var DBG_NAMES=["OFF","COLLISION","NAV GRID","ROUTES"];
+function dbgCycle(){
+  DBG.layer=(DBG.layer+1)%DBG_NAMES.length;
+  if(player) bubble(player.x,player.y-70,"DEBUG: "+DBG_NAMES[DBG.layer],1.1);
+}
+function dbgBake(layer){
+  if(DBG.cache[layer]) return DBG.cache[layer];
+  var c=document.createElement("canvas"); c.width=IW; c.height=IH;
+  var g=c.getContext("2d");
+  if(layer===1){
+    var island=0;
+    for(var cy=0;cy<MH;cy++)for(var cx=0;cx<MW;cx++){
+      var i=cy*MW+cx, w=walk[i], f=field[i];
+      if(w&&f)       g.fillStyle="rgba(58,219,118,0.13)";   // reachable floor
+      else if(w&&!f){g.fillStyle="rgba(255,142,24,0.62)"; island++;} // sealed-off
+      else           g.fillStyle="rgba(214,42,58,0.24)";    // blocked
+      g.fillRect(cx*MC,cy*MC,MC,MC);
+    }
+    try{ console.log("[dbg] walkable-but-unreachable cells:",island); }catch(e){}
+  }else if(layer===2){
+    for(var gy=0;gy<GH;gy++)for(var gx=0;gx<GW;gx++){
+      g.fillStyle=nav[gy*GW+gx]?"rgba(64,190,255,0.16)":"rgba(140,0,40,0.30)";
+      g.fillRect(gx*GC,gy*GC,GC-1,GC-1);
+    }
+  }
+  DBG.cache[layer]=c;
+  return c;
+}
+function drawDebug(g){
+  if(!DBG.layer||!walk||!field||!nav) return;
+  if(DBG.layer===1||DBG.layer===2) g.drawImage(dbgBake(DBG.layer),0,0);
+  if(DBG.layer===3){
+    g.drawImage(dbgBake(1),0,0);
+    // every item's shelf box and the floor spot it was walked out to
+    g.lineWidth=2;
+    for(var i=0;i<ITEMS.length;i++){
+      var it=ITEMS[i];
+      if(it.shelf){ g.strokeStyle="rgba(245,197,24,0.85)"; g.strokeRect(it.shelf.x,it.shelf.y,it.shelf.w,it.shelf.h); }
+      if(it.sx!=null){
+        g.strokeStyle="rgba(255,255,255,0.9)";
+        g.beginPath(); g.moveTo(it.x,it.y); g.lineTo(it.sx,it.sy); g.stroke();
+        g.fillStyle="rgba(245,197,24,0.95)";
+        g.beginPath(); g.arc(it.sx,it.sy,6,0,6.2832); g.fill();
+      }
+    }
+    // the bully's live BFS route — the thing that used to loop in the meat aisle
+    if(bully&&bully.path&&bully.path.length){
+      g.strokeStyle="rgba(255,64,58,0.9)"; g.lineWidth=3;
+      g.beginPath();
+      for(var p=bully.pi||0;p<bully.path.length;p++){
+        var cell=bully.path[p], gx2=cell%GW, gy2=(cell/GW)|0;
+        var px=gx2*GC+GC/2, py=gy2*GC+GC/2;
+        if(p===(bully.pi||0)) g.moveTo(px,py); else g.lineTo(px,py);
+      }
+      g.stroke();
+    }
+    // spawns
+    g.fillStyle="rgba(58,219,118,0.95)";
+    g.beginPath(); g.arc(SPAWN_P.x,SPAWN_P.y,9,0,6.2832); g.fill();
+    g.fillStyle="rgba(255,64,58,0.95)";
+    g.beginPath(); g.arc(SPAWN_B.x,SPAWN_B.y,9,0,6.2832); g.fill();
+  }
+  // legend
+  g.font="bold 15px ui-monospace,Menlo,monospace";
+  var rows=(DBG.layer===2)
+    ? [["#40BEFF","nav cell OK"],["#8C0028","nav blocked"]]
+    : [["#3ADB76","floor, reachable"],["#FF8E18","floor, UNREACHABLE"],["#D62A3A","blocked"]];
+  if(DBG.layer===3) rows=rows.concat([["#F5C518","shelf box / spawn spot"],["#FF403A","bully route"]]);
+  var bw=270, bh=24+rows.length*20;
+  g.fillStyle="rgba(8,10,16,0.88)"; g.fillRect(12,IH-bh-12,bw,bh);
+  g.strokeStyle="#F5C518"; g.lineWidth=2; g.strokeRect(12,IH-bh-12,bw,bh);
+  g.fillStyle="#F5C518"; g.fillText("DEBUG — "+DBG_NAMES[DBG.layer]+"  (G)",22,IH-bh+6);
+  for(var r=0;r<rows.length;r++){
+    g.fillStyle=rows[r][0]; g.fillRect(22,IH-bh+14+r*20,12,12);
+    g.fillStyle="#FFF3E0"; g.fillText(rows[r][1],42,IH-bh+25+r*20);
+  }
+}
+
 function draw(){
   var g=fxBegin();
   g.imageSmoothingEnabled=false;
@@ -1445,6 +1541,7 @@ function draw(){
     }
   }
   fxEnd();
+  drawDebug(vctx);
 }
 
 /* ---------- audio ---------- */
