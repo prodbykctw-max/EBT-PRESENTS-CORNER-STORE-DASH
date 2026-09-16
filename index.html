@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="Corner Store Dash — grab everything on the EBT list, dodge the bully, make it to checkout. A standalone EBT game.">
 <meta name="theme-color" content="#0A0A0C">
-<title>Corner Store Dash — the EBT browser game</title>
+<title>CORNER STORE DASH · an EBT game</title>
 <style>
   :root{ --pink:#E85D9E; --magenta:#C2255C; --gold:#F5C518; --cream:#FFF3E0; --coral:#F08C4B; --navy:#1E2340; --ink:#0A0A0C; }
   *{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
@@ -90,21 +91,6 @@
   #lbList li.me{ color:var(--gold); background:rgba(245,197,24,.1); }
   #lbNote{ font-size:8.5px; letter-spacing:.1em; opacity:.7; }
 </style>
-<!-- ai-seo:v1 -->
-<meta name="description" content="Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand: grab everything on the EBT list, dodge the bully, and make it to checkout. Standalone, plays on phone or desktop, no download." />
-<meta name="keywords" content="Corner Store Dash, EBT game, Everything But Trapped, EBT Presents, browser game, bully chase game, free arcade game, RARE Agency, PRODBYKCTW" />
-<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large" />
-<link rel="canonical" href="https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/" />
-<link rel="alternate" type="text/plain" href="https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/llms.txt" title="llms.txt" />
-<meta property="og:type" content="website" />
-<meta property="og:site_name" content="Corner Store Dash" />
-<meta property="og:url" content="https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/" />
-<meta property="og:title" content="Corner Store Dash — the EBT browser game" />
-<meta property="og:description" content="Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand: grab everything on the EBT list, dodge the bully, and make it to checkout. Standalone, plays on phone or desktop, no download." />
-<meta name="twitter:card" content="summary" />
-<meta name="twitter:title" content="Corner Store Dash — the EBT browser game" />
-<meta name="twitter:description" content="Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand: grab everything on the EBT list, dodge the bully, and make it to checkout. Standalone, plays on phone or desktop, no download." />
-<script type="application/ld+json">[{"@context": "https://schema.org", "@type": "VideoGame", "name": "Corner Store Dash", "url": "https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/", "description": "Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand: grab everything on the EBT list, dodge the bully, and make it to checkout. Standalone, plays on phone or desktop, no download.", "genre": "Arcade / chase", "gamePlatform": "Web browser", "applicationCategory": "Game", "operatingSystem": "Any", "playMode": "SinglePlayer", "isAccessibleForFree": true, "author": {"@type": "Organization", "name": "PRODBYKCTW LLC", "url": "https://www.instagram.com/prodbykctw/", "founder": {"@type": "Person", "name": "Melvin D. Brown III"}}, "about": {"@type": "MusicGroup", "name": "EBT (Everything But Trapped)"}, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}}, {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What is Corner Store Dash?", "acceptedAnswer": {"@type": "Answer", "text": "A free browser arcade game from the EBT (Everything But Trapped) brand: collect everything on the EBT list, dodge the bully, make it to checkout."}}, {"@type": "Question", "name": "What is EBT?", "acceptedAnswer": {"@type": "Answer", "text": "EBT — Everything But Trapped — is an Atlanta brand run by Kema; Corner Store Dash is its standalone game."}}, {"@type": "Question", "name": "Who built it?", "acceptedAnswer": {"@type": "Answer", "text": "RARƎ AGENCY / PRODBYKCTW (Melvin D. Brown III, @prodbyKCTW) with partner Kema."}}, {"@type": "Question", "name": "Is it free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes — no download, no sign-up, plays on phone or desktop."}}]}]</script>
 </head>
 <body>
   <div id="loading">LOADING…</div>
@@ -763,6 +749,8 @@ function inputVec(){
 }
 document.addEventListener("keydown",function(ev){
   var k=ev.key;
+  if(k==="f"||k==="F"){ fxCycle(); return; }
+  if(k==="t"||k==="T"){ fxTogglePanel(); return; }
   if(k==="p"||k==="P"||k==="Escape"){ togglePause(); return; }
   if(k==="ArrowUp"||k==="w"||k==="W"){keys.u=1;ev.preventDefault();}
   if(k==="ArrowDown"||k==="s"||k==="S"){keys.d=1;ev.preventDefault();}
@@ -918,6 +906,7 @@ function drawActor(g,e,isBully){
   if(!bullyReady) return; // first frame or two before the sheet decodes
   var row = e.face==="U" ? BULLY_ROWS.U : (e.face==="D" ? BULLY_ROWS.D : BULLY_ROWS.R);
   var sx=0, sy=row*BULLY_CELL;
+  fxReflect(g,bullyImg,sx,sy,BULLY_CELL,e,w,h,e.face==="L");
   // no baked walk cycle for the bully — reuse the old sprite's 1px step wobble instead
   var step=Math.floor(e.anim*3)%2;
   var bob=(step&&(e.vx||e.vy))?1:0;
@@ -941,6 +930,7 @@ function drawPlayerSprite(g,e){
   var row = e.face==="U" ? PLAYER_ROWS.U : (e.face==="D" ? PLAYER_ROWS.D : PLAYER_ROWS.R);
   var frame = (e.vx||e.vy) ? Math.floor(e.anim*2)%PLAYER_COLS : 0;
   var sx=frame*PLAYER_CELL, sy=row*PLAYER_CELL;
+  fxReflect(g,playerImg,sx,sy,PLAYER_CELL,e,w,h,e.face==="L");
   if(e.face==="L"){
     g.save();
     g.translate(e.x,0);
@@ -1025,8 +1015,504 @@ function drawList(g){
   }
 }
 /* ---------- render ---------- */
+/* ============================================================
+   FX — "after hours" HD-2D post stack
+   ------------------------------------------------------------
+   The board art is already pixel art, so nothing here repaints
+   it. What separates a flat sprite render from the HD-2D look
+   in the reference reels is entirely light, and it is applied
+   as a post pass over the finished frame:
+
+     scene  -> x light buffer (multiply)   darkness + coloured pools
+            -> + bloom        (lighter)    bright things bleed
+            -> tilt-shift blur             sharp band tracks the player
+            -> saturation + grade          pull the cartoon out of it
+            -> vignette + grain + dust
+
+   The light buffer is deliberately rendered at 1/LD scale and
+   upscaled with smoothing OFF, so the pools have chunky stepped
+   edges on the same grid as the art instead of smooth CSS-looking
+   gradients. That single detail is most of what reads as "the
+   lighting is part of the pixel art" rather than a filter laid
+   on top of it.
+
+   Everything is toggleable and live-tunable: F cycles presets,
+   T opens a slider panel. FX.on=false restores the original
+   renderer exactly — no drawing code above this point changed
+   except which canvas it targets.
+   ============================================================ */
+var FX={
+  on:true,
+  auto:true,
+  preset:"night",
+  ambient:0.82,      // how far the unlit store falls toward black
+  tintR:26,tintG:28,tintB:34,   // ambient colour  (#1A1C22, measured off the refs)
+  bloom:0.55,
+  dof:true, dofAmt:0.62, dofBand:300,
+  desat:0.45,
+  vignette:0.55,
+  grain:0.05,
+  dust:true,
+  reflect:true,
+  pixelLight:true,   // chunky stepped light edges instead of smooth gradients
+  torch:0.55         // the soft pool the player carries
+};
+var FX_PRESETS={
+  off:   {on:false},
+  night: {on:true, ambient:0.82,bloom:0.55,dof:true, dofAmt:0.62,desat:0.45,vignette:0.55,grain:0.05,dust:true, reflect:true, torch:0.55},
+  dusk:  {on:true, ambient:0.55,bloom:0.42,dof:true, dofAmt:0.40,desat:0.28,vignette:0.40,grain:0.03,dust:true, reflect:true, torch:0.40},
+  blackout:{on:true,ambient:0.94,bloom:0.70,dof:true,dofAmt:0.75,desat:0.55,vignette:0.70,grain:0.07,dust:true, reflect:true, torch:0.85}
+};
+var FX_ORDER=["off","dusk","night","blackout"];
+
+/* Light rigs, in board pixels, measured off the board art.
+   t:"strip" = a rectangular fixture (ceiling fluorescent, neon sign)
+   t:"pt"    = a point/pool (a screen, a sign glow)
+   flick     = amplitude of a slow mains flicker, 0 = rock steady */
+var LIGHTS=[
+  // ceiling fluorescents down the middle of each walkway. These sit in the
+  // gaps between shelf runs — the same lanes the item pickups spawn in
+  // (MILK y=292, BREAD y=519, LEMONADE y=699, CHIPS y=889, APPLE y=1070),
+  // so the aisle you are shopping is always the aisle that is lit.
+  {t:"strip",x:430,y:300, w:620,h:16,ry:54,c:[255,238,206],i:0.92,flick:0.00},
+  {t:"strip",x:430,y:520, w:620,h:16,ry:54,c:[255,236,202],i:0.62,flick:0.05},
+  {t:"strip",x:430,y:700, w:620,h:16,ry:54,c:[255,238,206],i:0.92,flick:0.00},
+  {t:"strip",x:430,y:890, w:620,h:16,ry:54,c:[255,236,202],i:0.62,flick:0.00},
+  {t:"strip",x:430,y:1075,w:620,h:16,ry:54,c:[255,238,206],i:0.88,flick:0.09},
+  {t:"strip",x:430,y:1262,w:620,h:16,ry:54,c:[255,236,202],i:0.58,flick:0.00},
+  {t:"strip",x:430,y:1450,w:620,h:16,ry:54,c:[255,238,206],i:0.80,flick:0.00},
+  // entrance / cart corral apron — wider and cooler, so the way out reads
+  // as daylight bleeding in rather than more of the same store light
+  {t:"strip",x:420,y:1580,w:700,h:30,ry:80,c:[214,230,255],i:0.72,flick:0.00},
+  // checkout terminal screens — the cool half of the warm/cool split
+  {t:"pt",x:648,y:348,r:135,c:[120,190,255],i:0.60,flick:0.07},
+  {t:"pt",x:648,y:534,r:135,c:[120,190,255],i:0.60,flick:0.07},
+  {t:"pt",x:648,y:706,r:135,c:[120,190,255],i:0.60,flick:0.07},
+  // ENTRANCE vertical neon on the right wall
+  {t:"strip",x:762,y:712,w:26,h:200,ry:150,c:[255,105,185],i:0.80,flick:0.03},
+  // EXIT sign over the top doorway
+  {t:"pt",x:440,y:175,r:120,c:[255,132,84],i:0.55,flick:0.00},
+  // storefront glass, bottom right and left of the doors
+  {t:"pt",x:820,y:470,r:200,c:[150,190,255],i:0.40,flick:0.00}
+];
+/* The HUD is painted into the board art (score bar, EBT LIST panel, the
+   objective strip along the bottom). Those bands get their own full-strength
+   lights so the darkness pass never eats the text — same mechanism as every
+   other light, no special-casing downstream. */
+var HUD_LIGHTS=[
+  {x:0,y:0,   w:853,h:78,  },
+  {x:0,y:78,  w:150,h:250, },
+  {x:0,y:1742,w:853,h:102, }
+];
+
+/* Adaptive quality. This stack is ~6 full-frame composites and a phone GPU is
+   not a desktop one, so rather than pick a fixed budget and hope, measure the
+   pass and shed the cheapest-to-lose stages first: grain, then dust, then
+   tilt-shift, then bloom. Light is never shed — it IS the effect. The panel
+   sliders keep controlling intensity; this only gates whether a stage runs,
+   and FX.auto=false hands control back. */
+var fxPerf={acc:0,n:0,lvl:4,cool:0};
+function fxBudget(ms){
+  if(!FX.auto) return;
+  fxPerf.acc+=ms; fxPerf.n++;
+  if(fxPerf.n<40) return;
+  var avg=fxPerf.acc/fxPerf.n; fxPerf.acc=0; fxPerf.n=0;
+  if(fxPerf.cool>0){ fxPerf.cool--; return; }
+  if(avg>11.5 && fxPerf.lvl>1){ fxPerf.lvl--; fxPerf.cool=2; }
+  else if(avg<5.0 && fxPerf.lvl<4){ fxPerf.lvl++; fxPerf.cool=3; }
+}
+var LD=6;                        // light buffer divisor
+var BD=7;                        // bloom buffer divisor
+var DD=3;                        // depth-of-field divisor — a blur does not
+                                 // need full resolution, and ctx.filter cost
+                                 // scales with area, so running the tilt-shift
+                                 // at 1/3 is ~9x cheaper and visually identical
+var fxScene=null,fxS=null, fxLight=null,fxL=null, fxBloom=null,fxB=null,
+    fxTmp=null,fxT=null, fxBTmp=null,fxBT=null, fxVig=null, fxGrain=null,
+    fxReady=false, fxCanFilter=true;
+var DUST=[];
+
+function fxInit(){
+  function mk(w,h){ var c=document.createElement("canvas"); c.width=Math.max(1,Math.round(w)); c.height=Math.max(1,Math.round(h)); return c; }
+  fxScene=mk(IW,IH);            fxS=fxScene.getContext("2d");
+  fxLight=mk(IW/LD,IH/LD);      fxL=fxLight.getContext("2d");
+  fxBloom=mk(IW/BD,IH/BD);      fxB=fxBloom.getContext("2d");
+  fxBTmp=mk(IW/BD,IH/BD);       fxBT=fxBTmp.getContext("2d");
+  fxTmp=mk(IW/DD,IH/DD);        fxT=fxTmp.getContext("2d");
+  // ctx.filter is what does the blurring; Firefox shipped it late and some
+  // embedded webviews still lack it. Detect once and fall back to no blur
+  // rather than silently rendering an un-blurred bloom at full strength.
+  try{ fxT.filter="blur(2px)"; fxCanFilter=(fxT.filter!=="none"); fxT.filter="none"; }catch(e){ fxCanFilter=false; }
+  // vignette + grain are static — bake them once instead of per frame
+  fxVig=mk(IW/LD,IH/LD);
+  var vg=fxVig.getContext("2d");
+  var gr=vg.createRadialGradient(IW/LD/2,IH/LD*0.5,IH/LD*0.18, IW/LD/2,IH/LD*0.5,IH/LD*0.62);
+  gr.addColorStop(0,"rgba(255,255,255,1)");
+  gr.addColorStop(0.65,"rgba(255,255,255,0.80)");
+  gr.addColorStop(1,"rgba(255,255,255,0.18)");
+  vg.fillStyle=gr; vg.fillRect(0,0,IW/LD,IH/LD);
+  fxGrain=mk(128,128);
+  var gc=fxGrain.getContext("2d"), id=gc.createImageData(128,128);
+  for(var i=0;i<id.data.length;i+=4){
+    var v=180+Math.random()*150;
+    id.data[i]=id.data[i+1]=id.data[i+2]=v; id.data[i+3]=255;
+  }
+  gc.putImageData(id,0,0);
+  for(var d=0;d<70;d++) DUST.push({x:Math.random()*IW,y:Math.random()*IH,vx:(Math.random()-0.5)*7,vy:-4-Math.random()*9,s:Math.random()<0.25?4:2,a:0.12+Math.random()*0.3,ph:Math.random()*6.28});
+  fxReady=true;
+}
+function fxApplyPreset(name){
+  var p=FX_PRESETS[name]; if(!p) return;
+  FX.preset=name;
+  for(var k in p){ if(Object.prototype.hasOwnProperty.call(p,k)) FX[k]=p[k]; }
+  if(name!=="off") FX.on=true;
+  fxSyncPanel();
+}
+function fxCycle(){
+  var i=FX_ORDER.indexOf(FX.preset);
+  fxApplyPreset(FX_ORDER[(i+1)%FX_ORDER.length]);
+  bubble(player?player.x:IW/2, player?player.y-70:IH/2, "FX: "+FX.preset.toUpperCase(), 1.1);
+}
+
+/* the context every draw() call targets: the offscreen scene when FX is on,
+   the visible canvas when it is off (so off is bit-for-bit the old renderer) */
+function fxBegin(){
+  if(!FX.on||!fxReady) return vctx;
+  fxS.globalCompositeOperation="source-over";
+  fxS.globalAlpha=1; fxS.filter="none";
+  fxS.imageSmoothingEnabled=false;
+  return fxS;
+}
+
+function fxLightPass(t){
+  var w=fxLight.width,h=fxLight.height,k=1/LD;
+  fxL.globalCompositeOperation="source-over"; fxL.globalAlpha=1;
+  // ambient floor: how dark the store gets where no fixture reaches
+  var a=1-FX.ambient;
+  fxL.fillStyle="rgb("+Math.round(FX.tintR+ (255-FX.tintR)*a)+","+
+                       Math.round(FX.tintG+ (255-FX.tintG)*a)+","+
+                       Math.round(FX.tintB+ (255-FX.tintB)*a)+")";
+  fxL.fillRect(0,0,w,h);
+  fxL.globalCompositeOperation="lighter";
+  for(var i=0;i<LIGHTS.length;i++){
+    var L=LIGHTS[i];
+    var f=L.flick?1-L.flick*(0.5+0.5*Math.sin(t*(11+i*2.7))*Math.sin(t*(3.1+i))):1;
+    var inten=L.i*f;
+    var cr=L.c[0],cg=L.c[1],cb=L.c[2];
+    if(L.t==="strip"){
+      // A ceiling tube is an ELLIPSE, not a disc: wide along the fixture,
+      // shallow across it. The first pass here used a circular radial of
+      // radius max(w,h)*0.62 — ~400px for a 650px strip — so seven fixtures
+      // spaced 190px apart overlapped into a single wash and the store came
+      // out uniformly lit no matter what `ambient` was set to (measured:
+      // blackout meanLum 97 vs night 101, i.e. the darkness dial did nothing).
+      // Scaling y by ry/rx before filling a circular gradient gives the real
+      // shape, and the dark bands between walkways come back.
+      var rx=L.w*0.55, ry=L.ry||62;
+      fxL.save();
+      fxL.translate(L.x*k,L.y*k);
+      fxL.scale(1,ry/rx);
+      var g2=fxL.createRadialGradient(0,0,0,0,0,rx*k);
+      g2.addColorStop(0,   "rgba("+cr+","+cg+","+cb+","+(0.82*inten).toFixed(3)+")");
+      g2.addColorStop(0.30,"rgba("+cr+","+cg+","+cb+","+(0.30*inten).toFixed(3)+")");
+      g2.addColorStop(0.62,"rgba("+cr+","+cg+","+cb+","+(0.07*inten).toFixed(3)+")");
+      g2.addColorStop(1,   "rgba("+cr+","+cg+","+cb+",0)");
+      fxL.fillStyle=g2;
+      fxL.fillRect(-rx*k,-rx*k,rx*2*k,rx*2*k);
+      fxL.restore();
+      // the fixture itself, hard-edged so it reads as a tube
+      fxL.fillStyle="rgba("+cr+","+cg+","+cb+","+(0.80*inten).toFixed(3)+")";
+      fxL.fillRect((L.x-L.w/2)*k,(L.y-L.h/2)*k,L.w*k,L.h*k);
+    }else{
+      var g3=fxL.createRadialGradient(L.x*k,L.y*k,0,L.x*k,L.y*k,L.r*k);
+      g3.addColorStop(0,"rgba("+cr+","+cg+","+cb+","+(0.95*inten).toFixed(3)+")");
+      g3.addColorStop(0.5,"rgba("+cr+","+cg+","+cb+","+(0.32*inten).toFixed(3)+")");
+      g3.addColorStop(1,"rgba("+cr+","+cg+","+cb+",0)");
+      fxL.fillStyle=g3;
+      fxL.fillRect((L.x-L.r)*k,(L.y-L.r)*k,L.r*2*k,L.r*2*k);
+    }
+  }
+  // the pool the player carries, so you are never standing in the dark
+  if(player&&FX.torch>0){
+    var pr=190*k;
+    var gp=fxL.createRadialGradient(player.x*k,player.y*k,0,player.x*k,player.y*k,pr);
+    gp.addColorStop(0,"rgba(255,232,190,"+(0.62*FX.torch).toFixed(3)+")");
+    gp.addColorStop(0.55,"rgba(255,224,176,"+(0.22*FX.torch).toFixed(3)+")");
+    gp.addColorStop(1,"rgba(255,220,170,0)");
+    fxL.fillStyle=gp;
+    fxL.fillRect((player.x-190)*k,(player.y-190)*k,380*k,380*k);
+  }
+  // the live pickup lights its own shelf — reuses the existing strobe() so the
+  // lighting pulses in step with the gold highlight the game already draws
+  var it=(typeof currentItem==="function")?currentItem():null;
+  if(it&&S.curPos&&(S.mode==="play"||S.mode==="end")){
+    var s=strobe(t), rr=150*k;
+    var gi=fxL.createRadialGradient(S.curPos.x*k,S.curPos.y*k,0,S.curPos.x*k,S.curPos.y*k,rr);
+    gi.addColorStop(0,"rgba(255,214,110,"+(0.35+0.45*s).toFixed(3)+")");
+    gi.addColorStop(1,"rgba(255,214,110,0)");
+    fxL.fillStyle=gi;
+    fxL.fillRect((S.curPos.x-150)*k,(S.curPos.y-150)*k,300*k,300*k);
+  }
+  // the bully throws a red wash that grows as he closes — readable threat
+  // information you feel before you consciously read it
+  if(bully&&player&&S.mode==="play"&&S.active){
+    var dist=Math.hypot(player.x-bully.x,player.y-bully.y);
+    var heat=Math.max(0,1-dist/520);
+    if(heat>0.01){
+      var br=(140+120*heat)*k, pulse=0.6+0.4*Math.sin(t*9);
+      var gb=fxL.createRadialGradient(bully.x*k,bully.y*k,0,bully.x*k,bully.y*k,br);
+      gb.addColorStop(0,"rgba(255,64,58,"+(0.50*heat*pulse).toFixed(3)+")");
+      gb.addColorStop(1,"rgba(255,64,58,0)");
+      fxL.fillStyle=gb;
+      fxL.fillRect(bully.x*k-br,bully.y*k-br,br*2,br*2);
+    }
+  }
+  // vignette, folded in here rather than as its own full-size pass
+  if(FX.vignette>0){
+    fxL.globalCompositeOperation="multiply";
+    fxL.globalAlpha=FX.vignette;
+    fxL.drawImage(fxVig,0,0);
+    fxL.globalAlpha=1;
+  }
+  // HUD bands stay at full brightness (after the vignette, so the score and
+  // objective strips are never dimmed by it)
+  fxL.globalCompositeOperation="source-over";
+  fxL.fillStyle="rgb(255,255,255)";
+  for(var q=0;q<HUD_LIGHTS.length;q++){
+    var H=HUD_LIGHTS[q];
+    fxL.fillRect(H.x*k,H.y*k,H.w*k,H.h*k);
+  }
+}
+
+function fxEnd(){
+  if(!FX.on||!fxReady){ return; }
+  var t=S.t, t0=(typeof performance!=="undefined")?performance.now():0;
+  // ---- 1. light -------------------------------------------------------
+  fxLightPass(t);
+  fxS.globalCompositeOperation="multiply";
+  fxS.imageSmoothingEnabled=!FX.pixelLight;   // off => chunky stepped pools
+  fxS.drawImage(fxLight,0,0,IW,IH);
+  fxS.imageSmoothingEnabled=false;
+  fxS.globalCompositeOperation="source-over";
+
+  // ---- 2. bloom -------------------------------------------------------
+  if(FX.bloom>0&&fxPerf.lvl>=2){
+    var bw=fxBloom.width,bh=fxBloom.height;
+    fxB.globalCompositeOperation="source-over"; fxB.globalAlpha=1; fxB.filter="none";
+    fxB.clearRect(0,0,bw,bh);
+    fxB.drawImage(fxScene,0,0,bw,bh);
+    // square the buffer against itself: midtones fall away, only the genuinely
+    // bright survive. Cheaper and steadier than a per-pixel threshold.
+    fxB.globalCompositeOperation="multiply";
+    fxB.drawImage(fxBloom,0,0);
+    fxB.drawImage(fxBloom,0,0);
+    fxB.globalCompositeOperation="source-over";
+    if(fxCanFilter){
+      fxBT.clearRect(0,0,bw,bh);
+      fxBT.filter="blur(3px)";
+      fxBT.drawImage(fxBloom,0,0,bw,bh);
+      fxBT.filter="none";
+      fxB.clearRect(0,0,bw,bh);
+      fxB.drawImage(fxBTmp,0,0);
+    }
+    fxS.globalCompositeOperation="lighter";
+    fxS.globalAlpha=FX.bloom;
+    fxS.imageSmoothingEnabled=true;          // bloom is the one smooth layer
+    fxS.drawImage(fxBloom,0,0,IW,IH);
+    fxS.imageSmoothingEnabled=false;
+    fxS.globalAlpha=1;
+    fxS.globalCompositeOperation="source-over";
+  }
+
+  // ---- 3. tilt-shift --------------------------------------------------
+  // The sharp band tracks the player, so whatever you are actually doing is
+  // in focus and the rest of the store falls away. The HUD strips are pinned
+  // sharp regardless — a blurred score is just a bug that looks arty.
+  if(FX.dof&&FX.dofAmt>0&&fxCanFilter&&fxPerf.lvl>=3){
+    var py=player?player.y:IH/2, band=FX.dofBand;
+    var dw=fxTmp.width, dh=fxTmp.height, dk=1/DD;
+    fxT.globalCompositeOperation="source-over"; fxT.globalAlpha=1;
+    fxT.clearRect(0,0,dw,dh);
+    fxT.filter="blur("+(1+3.2*FX.dofAmt).toFixed(1)+"px)";
+    fxT.drawImage(fxScene,0,0,dw,dh);
+    fxT.filter="none";
+    // punch the in-focus band (and the HUD) out of the blurred copy
+    fxT.globalCompositeOperation="destination-out";
+    var mg=fxT.createLinearGradient(0,0,0,dh);
+    function stop(y,a){ mg.addColorStop(Math.max(0,Math.min(1,(y*dk)/dh)),"rgba(0,0,0,"+a+")"); }
+    stop(0,0); stop(py-band*1.7,0); stop(py-band,1); stop(py+band,1); stop(py+band*1.7,0); stop(IH,0);
+    fxT.fillStyle=mg; fxT.fillRect(0,0,dw,dh);
+    fxT.fillStyle="rgba(0,0,0,1)";
+    for(var hq=0;hq<HUD_LIGHTS.length;hq++){ var HH=HUD_LIGHTS[hq]; fxT.fillRect(HH.x*dk,HH.y*dk,HH.w*dk,HH.h*dk); }
+    fxT.globalCompositeOperation="source-over";
+    fxS.globalAlpha=FX.dofAmt;
+    fxS.imageSmoothingEnabled=true;
+    fxS.drawImage(fxTmp,0,0,IW,IH);
+    fxS.imageSmoothingEnabled=false;
+    fxS.globalAlpha=1;
+  }
+
+  // ---- 4. grade -------------------------------------------------------
+  // measured mean saturation across the reference frames was 0.20; the board
+  // art sits far above that, so most of the "looks like the reel" is here.
+  if(FX.desat>0){
+    fxS.globalCompositeOperation="saturation";
+    fxS.globalAlpha=FX.desat;
+    fxS.fillStyle="#808080";
+    fxS.fillRect(0,0,IW,IH);
+    fxS.globalAlpha=1;
+    fxS.globalCompositeOperation="source-over";
+  }
+  if(FX.dust&&fxPerf.lvl>=4){
+    fxS.globalCompositeOperation="lighter";
+    for(var d=0;d<DUST.length;d++){
+      var P=DUST[d];
+      P.x+=P.vx*0.016; P.y+=P.vy*0.016;
+      if(P.y<-10){ P.y=IH+10; P.x=Math.random()*IW; }
+      if(P.x<-10) P.x=IW+10; else if(P.x>IW+10) P.x=-10;
+      var tw=P.a*(0.45+0.55*Math.sin(t*2.1+P.ph));
+      fxS.fillStyle="rgba(255,242,214,"+tw.toFixed(3)+")";
+      fxS.fillRect(P.x|0,P.y|0,P.s,P.s);
+    }
+    fxS.globalCompositeOperation="source-over";
+  }
+  if(FX.grain>0&&fxPerf.lvl>=4){
+    fxS.globalCompositeOperation="overlay";
+    fxS.globalAlpha=FX.grain;
+    var ox=-(Math.random()*128|0), oy=-(Math.random()*128|0);
+    var pat=fxS.createPattern(fxGrain,"repeat");
+    fxS.save(); fxS.translate(ox,oy);
+    fxS.fillStyle=pat; fxS.fillRect(0,0,IW+128,IH+128);
+    fxS.restore();
+    fxS.globalAlpha=1;
+    fxS.globalCompositeOperation="source-over";
+  }
+
+  // ---- 5. present -----------------------------------------------------
+  vctx.imageSmoothingEnabled=false;
+  vctx.globalCompositeOperation="source-over";
+  vctx.globalAlpha=1;
+  vctx.drawImage(fxScene,0,0);
+  if(t0) fxBudget(performance.now()-t0);
+}
+
+/* Floor reflection under an actor: the sprite mirrored, squashed and faded.
+   Every reference frame with a hard floor has one, and it is the cheapest
+   thing in this whole file. */
+function fxReflect(g,img,sx,sy,cell,e,w,h,flip){
+  if(!FX.on||!FX.reflect) return;
+  var ox=Math.round(e.x-w/2), oy=Math.round(e.y+2);
+  g.save();
+  g.globalAlpha=0.20;
+  g.translate(0,oy*2);
+  g.scale(1,-1);
+  g.translate(0,-oy);
+  if(flip){ g.translate(e.x,0); g.scale(-1,1); g.drawImage(img,sx,sy,cell,cell,Math.round(-w/2),oy-h*0.55,w,h*0.55); }
+  else    { g.drawImage(img,sx,sy,cell,cell,ox,oy-h*0.55,w,h*0.55); }
+  g.restore();
+  g.globalAlpha=1;
+}
+
+/* ---------- FX tuning panel ----------------------------------------------
+   Art direction is a dial, not a number someone guesses once in a commit.
+   T opens a live panel over the game; every slider writes straight into FX
+   and the next frame shows it. "Copy" prints the current values as a JS
+   literal you can paste over the FX defaults above to make a look permanent.
+   The panel is injected from here rather than added to shell2.html so the
+   standalone build keeps working with no template changes. */
+var fxPanel=null;
+var FX_SLIDERS=[
+  ["ambient",  0,1,0.01,"darkness"],
+  ["torch",    0,1,0.01,"player pool"],
+  ["bloom",    0,1.5,0.01,"bloom"],
+  ["dofAmt",   0,1,0.01,"tilt-shift"],
+  ["dofBand",  80,900,10,"focus band"],
+  ["desat",    0,1,0.01,"desaturate"],
+  ["vignette", 0,1,0.01,"vignette"],
+  ["grain",    0,0.25,0.005,"grain"]
+];
+function fxBuildPanel(){
+  if(fxPanel) return;
+  var d=document.createElement("div");
+  d.id="fxPanel";
+  d.style.cssText="position:fixed;top:8px;right:8px;z-index:99;width:196px;padding:10px 12px;"+
+    "background:rgba(12,14,20,0.93);border:2px solid #F5C518;border-radius:10px;"+
+    "font:11px ui-monospace,Menlo,monospace;color:#FFF3E0;display:none;"+
+    "box-shadow:0 8px 28px rgba(0,0,0,0.6)";
+  var h="<div style='font-weight:900;color:#F5C518;letter-spacing:.08em;margin-bottom:8px'>FX — T to close</div>";
+  h+="<div style='display:flex;gap:4px;margin-bottom:9px'>";
+  for(var p=0;p<FX_ORDER.length;p++){
+    h+="<button data-preset='"+FX_ORDER[p]+"' style='flex:1;padding:4px 0;font:900 9px ui-monospace,monospace;"+
+       "background:#1E2340;color:#FFF3E0;border:1px solid #3a4170;border-radius:5px;cursor:pointer'>"+
+       FX_ORDER[p].slice(0,4).toUpperCase()+"</button>";
+  }
+  h+="</div>";
+  for(var i=0;i<FX_SLIDERS.length;i++){
+    var s=FX_SLIDERS[i];
+    h+="<label style='display:block;margin:0 0 7px'>"+
+       "<span style='display:flex;justify-content:space-between;opacity:.85'>"+
+       "<span>"+s[4]+"</span><b data-out='"+s[0]+"' style='color:#F5C518'></b></span>"+
+       "<input type='range' data-fx='"+s[0]+"' min='"+s[1]+"' max='"+s[2]+"' step='"+s[3]+"' style='width:100%;margin-top:2px'>"+
+       "</label>";
+  }
+  var toggles=[["dof","tilt-shift"],["dust","dust"],["reflect","reflections"],["pixelLight","chunky light"]];
+  for(var q=0;q<toggles.length;q++){
+    h+="<label style='display:block;margin:3px 0'><input type='checkbox' data-fxb='"+toggles[q][0]+"'> "+toggles[q][1]+"</label>";
+  }
+  h+="<button id='fxCopy' style='width:100%;margin-top:9px;padding:5px 0;font:900 10px ui-monospace,monospace;"+
+     "background:#F5C518;color:#1E2340;border:0;border-radius:5px;cursor:pointer'>COPY VALUES</button>"+
+     "<div id='fxMsg' style='margin-top:5px;min-height:12px;opacity:.7;font-size:9px'></div>";
+  d.innerHTML=h;
+  document.body.appendChild(d);
+  fxPanel=d;
+  d.addEventListener("input",function(ev){
+    var k=ev.target.getAttribute("data-fx");
+    if(k){ FX[k]=parseFloat(ev.target.value); fxSyncPanel(); return; }
+    var b=ev.target.getAttribute("data-fxb");
+    if(b){ FX[b]=ev.target.checked; }
+  });
+  d.addEventListener("click",function(ev){
+    var p=ev.target.getAttribute("data-preset");
+    if(p){ fxApplyPreset(p); return; }
+    if(ev.target.id==="fxCopy"){
+      var keep=["on","ambient","torch","bloom","dof","dofAmt","dofBand","desat","vignette","grain","dust","reflect","pixelLight"];
+      var o={}; keep.forEach(function(k){ o[k]=FX[k]; });
+      var txt=JSON.stringify(o,null,1);
+      var msg=el("fxMsg");
+      try{ navigator.clipboard.writeText(txt); msg.textContent="copied to clipboard"; }
+      catch(e){ msg.textContent="see console"; }
+      try{ console.log("FX values:\n"+txt); }catch(e){}
+    }
+  });
+  // keep the panel from stealing movement keys
+  d.addEventListener("keydown",function(ev){ ev.stopPropagation(); });
+  fxSyncPanel();
+}
+function fxSyncPanel(){
+  if(!fxPanel) return;
+  for(var i=0;i<FX_SLIDERS.length;i++){
+    var k=FX_SLIDERS[i][0];
+    var inp=fxPanel.querySelector("[data-fx='"+k+"']");
+    var out=fxPanel.querySelector("[data-out='"+k+"']");
+    if(inp) inp.value=FX[k];
+    if(out) out.textContent=(FX[k]*1).toFixed(k==="dofBand"?0:2);
+  }
+  var bs=fxPanel.querySelectorAll("[data-fxb]");
+  for(var b=0;b<bs.length;b++) bs[b].checked=!!FX[bs[b].getAttribute("data-fxb")];
+  var pb=fxPanel.querySelectorAll("[data-preset]");
+  for(var p=0;p<pb.length;p++){
+    var act=pb[p].getAttribute("data-preset")===FX.preset;
+    pb[p].style.background=act?"#F5C518":"#1E2340";
+    pb[p].style.color=act?"#1E2340":"#FFF3E0";
+  }
+}
+function fxTogglePanel(){
+  fxBuildPanel();
+  fxPanel.style.display = fxPanel.style.display==="none" ? "block" : "none";
+}
+
 function draw(){
-  var g=vctx;
+  var g=fxBegin();
   g.imageSmoothingEnabled=false;
   g.drawImage(board,0,0);
   if(S.mode==="play"||S.mode==="end") drawShelfHighlight(g,S.t);
@@ -1113,6 +1599,7 @@ function draw(){
       g.globalAlpha=1;
     }
   }
+  fxEnd();
 }
 
 /* ---------- audio ---------- */
@@ -1223,6 +1710,7 @@ function loop(ts){
 function init(){
   view=el("view"); vctx=view.getContext("2d");
   view.width=IW; view.height=IH;
+  fxInit();
   var img=new Image();
   var boardReady=false;
   function tryStart(){
@@ -1286,6 +1774,5 @@ window.__csd={ get S(){return S;}, get player(){return player;}, get bully(){ret
 if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded",init); } else { init(); }
 
 </script>
-<noscript><section id="about"><h2>Corner Store Dash</h2><p>Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand: grab everything on the EBT list, dodge the bully, and make it to checkout. Standalone, plays on phone or desktop, no download.</p><h3>FAQ</h3><p><strong>What is Corner Store Dash?</strong><br/>A free browser arcade game from the EBT (Everything But Trapped) brand: collect everything on the EBT list, dodge the bully, make it to checkout.</p><p><strong>What is EBT?</strong><br/>EBT — Everything But Trapped — is an Atlanta brand run by Kema; Corner Store Dash is its standalone game.</p><p><strong>Who built it?</strong><br/>RARƎ AGENCY / PRODBYKCTW (Melvin D. Brown III, @prodbyKCTW) with partner Kema.</p><p><strong>Is it free?</strong><br/>Yes — no download, no sign-up, plays on phone or desktop.</p><p><a href="https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/llms.txt">llms.txt</a></p></section></noscript>
 </body>
 </html>
