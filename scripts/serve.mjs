@@ -22,6 +22,10 @@ const TYPES = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.glb': 'model/gltf-binary',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
   '.ico': 'image/x-icon',
 };
 

@@ -574,10 +574,10 @@ function startWithDrive(){
   if(!driveAvailable()){ startRun(); return; }
   hide("ovTitle"); hide("ovHow"); S.mode="drive";
   import(DRIVE_URL).then(function(m){
-    return m.startDrive({ mount: document.body, onDone: function(r){
+    return m.startDrive({ mount: document.body, muted: !!S.muted, onDone: function(r){
       startRun();
       if(r && r.bonus){ addScore(r.bonus); S.driveBonus=r.bonus;
-        bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus, 2.2); }
+        bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus+(r.tokens? "  ·  "+r.tokens+" EBT":""), 2.2); }
     }});
   }).catch(function(e){ console.warn("drive unavailable, starting the run:", e); startRun(); });
 }

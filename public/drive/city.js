@@ -61,14 +61,14 @@ function drape(pts, ground, onGround) {
   return out;
 }
 
-function buildRoads(W, tex, ground, { bridges = false } = {}) {
+function buildRoads(roads, tex, ground, { bridges = false, dense = false, extraLift = 0, offset = -2 } = {}) {
   const pos = [], uv = [], info = [], idx = [];
   const RANK = { motorway: 6, trunk: 6, primary: 5, secondary: 4, tertiary: 3, residential: 2, unclassified: 2, living_street: 1, service: 0 };
-  for (const rd of W.roads) {
+  for (const rd of roads) {
     if (rd.pts.length < 2 || !!rd.bridge !== bridges) continue;
-    const p = drape(rd.pts, ground, !bridges);
-    const hw = rd.width / 2, base = pos.length / 3;
-    const lift = 0.06 + (rd.bridge ? 7 * (rd.layer || 1) : 0) + (RANK[rd.cls.replace('_link', '')] ?? 1) * 0.004;
+    const p = dense ? rd.pts : drape(rd.pts, ground, !bridges);
+    const base = pos.length / 3;
+    const lift = 0.06 + extraLift + (rd.bridge ? 7 * (rd.layer || 1) : 0) + (RANK[rd.cls.replace('_link', '')] ?? 1) * 0.004;
     const lanes = Math.max(1, Math.round(rd.width / 3.4));
     const kind = rd.cls.startsWith('service') ? 0 : rd.oneway ? 1 : 2; // 0 plain, 1 one-way lanes, 2 two-way
     let along = 0; const segLen = [];
@@ -77,10 +77,10 @@ function buildRoads(W, tex, ground, { bridges = false } = {}) {
     for (let i = 0; i < p.length; i++) {
       const a = p[Math.max(i - 1, 0)], b = p[Math.min(i + 1, p.length - 1)];
       let dx = b[0] - a[0], dy = b[1] - a[1]; const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
-      const nx = -dy, ny = dx, z = p[i][2] + lift;
+      const nx = -dy, ny = dx, z = p[i][2] + lift, w = rd.widths ? rd.widths[i] : rd.width, hw = w / 2;
       pos.push(p[i][0] + nx * hw, z, -(p[i][1] + ny * hw), p[i][0] - nx * hw, z, -(p[i][1] - ny * hw));
       uv.push(0, along, 1, along);
-      info.push(lanes, kind, total, rd.width, lanes, kind, total, rd.width);
+      info.push(lanes, kind, total, w, lanes, kind, total, w);
       if (i < segLen.length) along += segLen[i];
     }
     for (let i = 0; i + 1 < p.length; i++) { const k = base + i * 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
@@ -90,7 +90,7 @@ function buildRoads(W, tex, ground, { bridges = false } = {}) {
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.setAttribute('aRoad', new THREE.Float32BufferAttribute(info, 4));
   g.setIndex(idx); g.computeVertexNormals();
-  const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: offset, polygonOffsetUnits: offset });
   m.userData.wet = { value: 0 };
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uWet = m.userData.wet;
@@ -289,12 +289,23 @@ export function buildCity(W, tex) {
   const b = buildBuildings(W, tex, ground);
   const group = new THREE.Group();
   const asphalt = asphaltTexture();
-  const roads = buildRoads(W, asphalt, ground), bridges = buildRoads(W, asphalt, ground, { bridges: true });
+  const roads = buildRoads(W.roads, asphalt, ground), bridges = buildRoads(W.roads, asphalt, ground, { bridges: true });
   group.add(buildTerrain(W, tex, ground), roads, bridges, b.group);
   // 2D footprint of every deck, so the drive can tell when the car is underneath one
   const decks = [];
   for (const rd of W.roads) if (rd.bridge) for (let i = 0; i + 1 < rd.pts.length; i++) decks.push([rd.pts[i][0], rd.pts[i][1], rd.pts[i + 1][0], rd.pts[i + 1][1], rd.width / 2 + 3]);
   // hero row blocks the lot it stands on
   b.colliders.push([[HERO_BOX.x0, HERO_BOX.y0], [HERO_BOX.x1, HERO_BOX.y0], [HERO_BOX.x1, HERO_BOX.y1], [HERO_BOX.x0, HERO_BOX.y1]]);
-  return { group, colliders: b.colliders, ground, roads: [roads, bridges], bridges, decks };
+  return { group, colliders: b.colliders, ground, roads: [roads, bridges], bridges, decks, asphalt };
+}
+
+/** The drive route as ONE continuous two-lane road on top of the OSM ribbons: unbroken centre line and edge
+ *  lines for the whole run, and exactly the width the gameplay lanes use (route.hw), so what you see is
+ *  what you can drive. */
+export function buildRouteRoad(route, tex) {
+  const pts = [], widths = [];
+  for (let s = 0; s <= route.length; s += 2) { const p = route.at(s); pts.push([p.x, p.y, p.z]); widths.push(route.hw(s) * 2); }
+  const mesh = buildRoads([{ pts, widths, width: widths[0], cls: 'primary', oneway: false }], tex, null, { dense: true, extraLift: 0.03, offset: -4 });
+  mesh.name = 'route_road';
+  return mesh;
 }

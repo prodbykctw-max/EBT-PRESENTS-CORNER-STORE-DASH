@@ -19,11 +19,11 @@
   // ?qa&demo=auburn|arrive: jump to a set piece for screenshots (test harness only)
   const demo = new URLSearchParams(location.search).get('demo');
   if (demo) {
-    const poses = { auburn: { x: -420, y: 16, heading: 0, vx: 18, vy: 0 }, arrive: { x: 0.2, y: 9.1, heading: 0.03, vx: 0, vy: 0 } };
     const wait = setInterval(() => {
       const d = window.__drive; if (!d || d.state !== 'driving') return;
-      clearInterval(wait); Object.assign(d.car, poses[demo], { yawRate: 0 });
-      if (demo === 'auburn') d.keys.add('up');
+      clearInterval(wait);
+      if (demo === 'auburn') Object.assign(d.car, { s: d.spot.s - 330, v: 22 });
+      if (demo === 'arrive') Object.assign(d.car, { s: d.spot.s - 1.5, d: d.spot.d, targetD: d.spot.d, v: 0 });
     }, 50);
   }
   await startDrive({

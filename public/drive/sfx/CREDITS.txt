@@ -1,0 +1,17 @@
+Drive level sound credits
+
+engine_on.wav, engine_off.wav
+  "Generic V8 Engine Sound": sound made by DerMeehdrescher / Meehdrescher Studios
+  https://opengameart.org/content/generic-v8-engine-sound
+  License: CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/)
+  Changes: converted to mono 32 kHz, normalised, loop points crossfaded.
+  These two derived files are shared under the same CC BY-SA 4.0 licence.
+
+squeal_loop.wav, screech.mp3, horn.mp3, horn_far.mp3, coin.mp3
+  BigSoundBank.com (Joseph Sardin, Dorian Clair): "Tire squeal", "Screeching Tires #3",
+  "Recent car horn #1", "Recent Car Horn #2", "Coin in cup #1"
+  License: CC0 (public domain)
+
+crash_metal_1-3.mp3, crash_glass.mp3
+  "75 CC0 breaking / falling / hit sfx" by rubberduck, https://opengameart.org/content/75-cc0-breaking-falling-hit-sfx
+  License: CC0 (public domain)

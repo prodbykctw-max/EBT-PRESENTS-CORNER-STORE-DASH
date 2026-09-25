@@ -17,9 +17,11 @@ const tmp = (n) => path(new URL(n, cache));
 const JOBS = [
   { src: 'hero_raw.glb', dst: 'hero.glb', max: 2048, quality: 80 },
   { src: 'car_raw.glb', dst: 'car.glb', max: 512, quality: 80 },
+  { src: 'props_raw.glb', dst: 'props.glb', max: 256, quality: 80, keepMeshes: true }, // one mesh per prop (runtime instances them by name)
 ];
 for (const j of JOBS) {
-  gt('optimize', tmp(j.src), tmp('_a.glb'), '--compress', 'meshopt', '--texture-compress', 'false', '--simplify', 'false');
+  gt('optimize', tmp(j.src), tmp('_a.glb'), '--compress', 'meshopt', '--texture-compress', 'false', '--simplify', 'false',
+    ...(j.keepMeshes ? ['--join', 'false', '--flatten', 'false', '--instance', 'false'] : []));
   gt('resize', tmp('_a.glb'), tmp('_c.glb'), '--width', String(j.max), '--height', String(j.max));
   gt('webp', tmp('_c.glb'), path(new URL(j.dst, out)), '--quality', String(j.quality));
   for (const f of ['_a.glb', '_c.glb']) fs.rmSync(new URL(f, cache), { force: true });

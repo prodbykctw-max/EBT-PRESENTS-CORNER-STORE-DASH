@@ -42,49 +42,49 @@ through Edgewood Ave or side streets.
 Map: `drive/route_v1.png`. To regenerate it, run `node drive/tools/route.mjs` and
 `node drive/tools/routemap.mjs`.
 
+## Game design: "Temple Run with cars"
+
+The car **auto-drives** the route and speeds up from about 40 to 72 mph. You don't steer the road; you
+**dodge**. Everything runs in route space (s = metres along the route, d = metres across it), so lanes,
+obstacles and collisions line up exactly with what's painted on the road.
+
+- **Road:** one continuous two-lane road is drawn along the whole route (unbroken double-yellow,
+  white edges). Your lane is the right one, and on two-way stretches the left one carries oncoming
+  traffic.
+- **Obstacles** (hitting one costs speed; big hits also cost 1 s):
+  - **Slow cars** (20–29 mph) in your lane. Pass them when the oncoming lane is clear.
+  - **Oncoming traffic** every 5–9 s. It is never spawned so that it meets you beside a blocker.
+  - **Parked cars** at the curb.
+  - **Construction:** a ROAD WORK sign 38 m ahead, a cone taper, cones along the lane line and a
+    barricade. The right lane is closed.
+  - **Panhandlers** working the lane line at the lights. **HORN** sends them back to the curb.
+    Nobody gets hurt: if you clip one, he jumps clear and you just lose the moment.
+- **Scenery** (can't be hit): pedestrians on both sidewalks, cyclists along the curb, and city buses
+  and cars on the cross streets, which wait at the intersections while you pass.
+- **Pickups:** EBT tokens in lines and weaves (+25). A NEAR MISS against oncoming traffic is +50.
+- **Density:** an event every 58–85 m, tightening slightly as the run goes on. At least one lane
+  is always open.
+- **Finish:** the car slows for the store by itself. Pull right to the curb into the P space.
+  bonus = timeLeft × 50 + tokens × 25 + nearMisses × 50 + 500 (clean park) + 300 (no hits).
+- **Balance:** the QA bot parks clean with about 14 s left.
+
 ## Controls (mobile-first: the game is played on phones)
 
 | Phone | Keyboard | Action |
 | --- | --- | --- |
-| Hold anywhere | ↑ / W | Gas |
-| Slide left/right from where you touched | ← → / A D | Analog steering (about 75 px of slide = full lock; the yellow knob shows it) |
-| Lift your thumb | release | Coast |
-| **BRAKE** (big, bottom-right) | ↓ / S | Brake, then reverse |
-| **DRIFT** | Space | Handbrake drift |
-| ↺ R | R | Reset to road (−3 s) |
+| Drag anywhere | ← / → (one lane per tap) | Dodge. The car follows your thumb 1:1 across the road (half the screen width = the full road) on a stiff, critically-damped spring, so it's tight and snappy |
+| **BRAKE** | ↓ / S | Full stop, held until you let go (wait for a gap) |
+| **HORN** | Space / H | Horn: clears panhandlers |
 | SKIP | | Skip the drive |
 
-On phones the renderer caps pixel ratio at 1.5 and shadows at 1024². Portrait widens the FOV
-to keep about 48° of horizontal view, the view shifts up so the car clears the buttons, and crashes
-vibrate (Android).
+## Sound
 
-## Feel
-
-- **Camera:** overhead chase camera (24 m up, rising with speed) that follows your heading.
-  **C** toggles a classic north-up GTA 1 view.
-- **Handling:** arcade but weighty. `physics.js` is a 2D bicycle model with slip-angle tires,
-  speed-scaled steering, a yaw stability assist and a handbrake drift (**Space**). Top speed is
-  about 90 mph. We chose this over Rapier: a top-down game doesn't need a 3D rigid-body engine,
-  and this adds 0 KB instead of about 2 MB of WASM.
-- **Collision:** buildings are solid, using the car's footprint circles against OSM edges in a
-  spatial grid. Canopies and raised floors are drive-under. Hits over about 20 mph cost 1 s.
-  **R** resets you to the road for 3 s.
-- **Overpasses:** the Connector deck fades while you're underneath, so you never lose the car.
-- **Pressure:** traffic on the real lane graph, cross streets, and the clock. Crashes cost
-  time rather than ending the run.
-- **Lighting:** always daytime. Sky, sun, cloud, fog and wet-road state come from live
-  Atlanta weather (Open-Meteo, no API key needed). If the fetch fails, it falls back to a
-  clear afternoon.
-- **Parking (the finish):** GTA 1 just had you drive into a drop-off marker. Here you pull
-  into the painted **P** space at the curb in front of the EBT Corner Store (a nod to the lot in
-  the intro) and stop. A beacon and the route arrow guide you in.
-- **Payoff:** `bonus = timeLeft × 50 + 500 (clean park: straight and centered) + 300 (no
-  crashes)`. It's added to the store level's score, with a "CLEAN PARK +N" bubble.
-- **Arrival:** the camera swings down to the intro's street-level framing of the storefronts,
-  then hands off.
-- **Car:** a Challenger-inspired muscle coupe (plum, twin stripes, hood scoop, quad headlamps,
-  full-width tail bar). It carries our own design and **no Dodge marks**, the way GTA does its
-  car "parodies".
+The engine uses real V8 recordings (on-throttle and off-throttle loops), pitched by rpm and
+crossfaded by throttle, over a 5-speed auto box with audible shifts. The tire squeal, screech,
+horn, token clink and crash (sheet metal, plus glass on big hits, over a low thump) are recordings
+too. Sources and licenses are in `public/drive/sfx/CREDITS.txt`. The V8 is CC BY-SA 4.0
+(DerMeehdrescher / Meehdrescher Studios) and **needs a credit in the game's credits**; the rest is CC0.
+`drive/tools/build_sfx.py` cuts, normalizes and makes the loops seamless (349 KB total).
 
 ## Budgets (hard limits)
 
@@ -117,7 +117,9 @@ board UV-projected from the same facade image, so paint and depth line up.
 | --- | --- |
 | `drive.js` | `startDrive({ mount, onDone })`: loader, scene, loop, HUD, parking, arrival, QA hooks (`window.__drive`) |
 | `city.js` | builds terrain, roads (markings in the shader), and all OSM buildings (procedural window facades, roofs, rooftop units) from `world.json` |
-| `physics.js` | car model + building collision |
+| `runner.js` | route space (RouteFrame), the auto-driving car, obstacle/scenery/traffic population, collisions, instanced rendering |
+| `audio.js`, `sfx/` | recorded engine and effects mix |
+| `props.glb` | traffic, bus, people, cyclist, cones, barricade, sign (vertex colour; white = per-instance tint) |
 | `weather.js` | live Atlanta weather → sky, sun, shadows, haze, wet roads |
 | `hero.glb`, `car.glb` | Blender exports (meshopt + WebP) |
 | `vendor/` | three.js r186 (MIT), imports rewritten to relative paths so no import map is needed |
