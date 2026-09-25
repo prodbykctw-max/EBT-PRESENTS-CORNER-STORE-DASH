@@ -35,6 +35,7 @@ const out = shell
   .replaceAll('\\u25B6', '▶')
   .replaceAll('\\u23F8', '⏸')
   .replaceAll('\\u00b7', '·')
+  .replaceAll('\\u00a9', '©')
   .replaceAll('\\u2014', '—');
 
 writeFileSync(here('index.html'), out);

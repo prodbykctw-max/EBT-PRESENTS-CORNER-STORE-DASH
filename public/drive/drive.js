@@ -9,6 +9,7 @@ import { MeshoptDecoder } from './vendor/meshopt_decoder.module.js';
 import { buildCity, buildRouteRoad, toV3 } from './city.js';
 import { RouteFrame, RunnerCar, World } from './runner.js';
 import { DriveAudio } from './audio.js';
+import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
 
 const BASE = new URL('./', import.meta.url);
@@ -89,6 +90,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   carModel.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   const carRig = new THREE.Group(); carRig.add(carModel); carModel.position.z = REAR_AXLE;
   scene.add(carRig);
+  const fx = new ImpactFX(scene);
 
   // ---------- parking space (painted box + beacon, the drop-off marker) ----------
   const spotGroup = new THREE.Group();
@@ -204,6 +206,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         hits++; car.v *= 1 - 0.65 * h.power; car.stun = 0.5 * h.power; car.invuln = 1.0; shake = Math.min(1, 0.4 + h.power * 0.6);
         if (h.power > 0.9) { t -= 1; flash('−1s  ' + h.label, 700); } else if (h.label) flash(h.label, 700);
         audio.crash(h.power); try { navigator.vibrate?.(h.power > 0.9 ? [30, 40, 60] : 25); } catch {}
+        if (h.e.type !== 'panhandler') { // sparks where the metal meets; plastic chips off cones and barricades
+          const cp = car.pose, ep = route.at(h.e.s, h.e.d);
+          const at = toV3((cp.x + ep.x) / 2, (cp.y + ep.y) / 2, (cp.z + ep.z) / 2 + 0.6);
+          fx.burst(at, new THREE.Vector3(Math.cos(cp.a), 0, -Math.sin(cp.a)), { power: h.power, kind: h.e.solid < 0.8 ? 'plastic' : 'metal', color: h.e.color });
+        }
       }
       if (ev.nearMiss) { nearMisses += ev.nearMiss; pop('NEAR MISS +50'); audio.whoosh(); }
       if (ev.tokens) { tokens += ev.tokens; pop('+' + ev.tokens * 25); audio.token(); }
@@ -225,6 +232,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     carModel.rotation.z = THREE.MathUtils.clamp(-car.dv * 0.012, -0.07, 0.07);   // body roll into the dodge
     carModel.visible = car.invuln <= 0 || Math.floor(car.invuln * 12) % 2 === 0; // blink while recovering
     world.render(car, drove);
+    fx.update(dt, camera, renderer);
     beacon.material.opacity = 0.12 + 0.08 * Math.sin(now / 250);
     spotGroup.visible = state === 'driving' || state === 'countdown';
     // under an overpass? fade the deck so you never lose the car
@@ -280,7 +288,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   root.querySelector('[data-skip]').addEventListener('click', () => { Object.assign(result, { hits, tokens, nearMisses }); finish(); });
   frame();
   // test hooks (drive QA + screenshots)
-  const api = { car, world, route, spot, keys, result, audio, get state() { return state; }, get time() { return t; },
+  const api = { car, world, route, spot, keys, result, audio, fx, get state() { return state; }, get time() { return t; },
     three: { scene, camera, carRig, THREE },
     snapshot: (q = 0.85) => { renderer.render(scene, camera); return renderer.domElement.toDataURL('image/jpeg', q); } };
   window.__drive = api;
@@ -313,4 +321,5 @@ const HUD_HTML = `
   <button class="horn" data-k="horn" aria-label="Horn">HORN</button>
   <button class="brake" data-k="down" aria-label="Brake">BRAKE</button>
 </div>
-<div class="drive-tip">Drag to dodge · grab the EBT tokens</div>`;
+<div class="drive-tip">Drag to dodge · grab the EBT tokens</div>
+<div class="drive-osm">© OpenStreetMap contributors</div>`;

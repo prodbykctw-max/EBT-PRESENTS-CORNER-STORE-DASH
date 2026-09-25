@@ -34,3 +34,4 @@
 .drive-pop b { display: block; font: 900 22px/1.2 system-ui, sans-serif; color: #fff; text-shadow: 0 2px 0 #000, 0 0 12px rgba(0,0,0,.6); animation: popup .9s ease-out forwards; }
 @keyframes popup { from { opacity: 1; transform: translateY(0) scale(1.1); } to { opacity: 0; transform: translateY(-40px) scale(1); } }
 .drive-box.tok b { color: #ffd400; }
+.drive-osm { position: absolute; left: 8px; bottom: max(6px, env(safe-area-inset-bottom)); font-size: 9px; opacity: .6; pointer-events: none; text-shadow: 0 1px 2px #000; }
