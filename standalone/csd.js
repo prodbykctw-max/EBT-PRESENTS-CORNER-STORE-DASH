@@ -565,6 +565,25 @@ function endScreen(won){
   el("btnAgain").style.display = canCont? "none" : "";
   show("ovEnd");
 }
+/* ---------- the drive: 60 s top-down drive to the store, before the first run ----------
+   Lives in /drive/ and loads on demand, so this single-file game gets no bigger. If it can't load
+   (opened from disk, offline, or an old copy with no /drive/ next to it) the run just starts. */
+var DRIVE_URL="./drive/drive.js";
+function driveAvailable(){ return /^https?:$/.test(location.protocol) && !/[?&]nodrive/.test(location.search); }
+function startWithDrive(){
+  if(!driveAvailable()){ startRun(); return; }
+  hide("ovTitle"); hide("ovHow"); S.mode="drive";
+  import(DRIVE_URL).then(function(m){
+    return m.startDrive({ mount: document.body, onDone: function(r){
+      startRun();
+      if(r && r.bonus){ addScore(r.bonus); S.driveBonus=r.bonus;
+        bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus, 2.2); }
+    }});
+  }).catch(function(e){ console.warn("drive unavailable, starting the run:", e); startRun(); });
+}
+// warm the drive's code while the title screen is up, so START feels instant
+function prefetchDrive(){ if(driveAvailable()) setTimeout(function(){ import(DRIVE_URL).catch(function(){}); }, 1200); }
+
 function startRun(){
   hide("ovEnd"); hide("ovTitle"); hide("ovHow");
   S.mode="play"; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
@@ -1083,7 +1102,8 @@ function init(){
   window.addEventListener("resize",fit);
   setTimeout(fit,300); setTimeout(fit,1000);
   el("btnTitle").addEventListener("click",function(){ hide("ovTitle"); show("ovHow"); });
-  el("btnStart").addEventListener("click",function(){ sfx.start(); startRun(); });
+  el("btnStart").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
+  prefetchDrive();
   el("btnAgain").addEventListener("click",startRun);
   el("btnContinue").addEventListener("click",useContinue);
   el("btnMenu").addEventListener("click",goMenu);

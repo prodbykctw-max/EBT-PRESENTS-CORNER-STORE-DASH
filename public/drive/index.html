@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Drive Test: Auburn Ave</title>
+<link rel="stylesheet" href="drive.css" />
+<style>
+  html, body { margin: 0; height: 100%; background: #101318; color: #fff; font-family: system-ui, sans-serif; }
+  #done { position: fixed; inset: 0; display: none; place-items: center; text-align: center; }
+  #done button { margin-top: 16px; padding: 10px 18px; font-weight: 800; border-radius: 8px; border: 0; background: #ffd400; }
+</style>
+</head>
+<body>
+<!-- Standalone test harness for the drive level. The game loads drive.js the same way (dynamic import). -->
+<div id="done"><div><h2 id="dt"></h2><pre id="dr"></pre><button onclick="location.reload()">Drive again</button></div></div>
+<script type="module">
+  const { startDrive } = await import('./drive.js');
+  // ?qa&demo=auburn|arrive: jump to a set piece for screenshots (test harness only)
+  const demo = new URLSearchParams(location.search).get('demo');
+  if (demo) {
+    const poses = { auburn: { x: -420, y: 16, heading: 0, vx: 18, vy: 0 }, arrive: { x: 0.2, y: 9.1, heading: 0.03, vx: 0, vy: 0 } };
+    const wait = setInterval(() => {
+      const d = window.__drive; if (!d || d.state !== 'driving') return;
+      clearInterval(wait); Object.assign(d.car, poses[demo], { yawRate: 0 });
+      if (demo === 'auburn') d.keys.add('up');
+    }, 50);
+  }
+  await startDrive({
+    onDone: (r) => { done.style.display = 'grid'; dt.textContent = r.parked ? 'Parked at the EBT Corner Store' : 'Too late'; dr.textContent = JSON.stringify(r, null, 1); },
+  });
+</script>
+</body>
+</html>
