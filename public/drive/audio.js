@@ -1,6 +1,7 @@
 // Drive audio built on real recordings (see sfx/CREDITS.txt), mixed the way racing games do it:
 //   engine: two looping V8 recordings, on-throttle and off-throttle, both pitched with rpm and
-//           crossfaded by throttle, over a 5-speed automatic you can hear shift
+//           crossfaded by throttle, over an 8-speed automatic that shifts like one: short-shifts at light
+//           throttle, holds gears when you're harder on it, torque-cut upshifts, blipped downshifts
 //   tyres:  a recorded squeal loop that swells with lateral slip; a recorded screech on hard hits
 //   crash:  recorded sheet-metal hit (+ glass on big ones) over a low synthesised body thump
 //   horn / distant horns / token clink: recordings, slightly re-pitched each time so they never repeat
@@ -12,12 +13,13 @@ const FILES = {
   on: 'engine_on.wav', off: 'engine_off.wav', squeal: 'squeal_loop.wav', screech: 'screech.mp3', horn: 'horn.mp3',
   hornFar: 'horn_far.mp3', coin: 'coin.mp3', metal1: 'crash_metal_1.mp3', metal2: 'crash_metal_2.mp3', metal3: 'crash_metal_3.mp3', glass: 'crash_glass.mp3',
 };
-const RATIOS = [0, 3.4, 2.25, 1.62, 1.22, 0.96];   // "gear × speed" → rpm
-const IDLE = 850, REDLINE = 6400, UPSHIFT = 5800, DOWNSHIFT = 2300;
+// 8-speed automatic (modern Challenger-class ratios), final drive and tyre: 65 mph in 8th ≈ 1600 rpm, like the real car
+const RATIOS = [0, 4.71, 3.14, 2.10, 1.67, 1.29, 1.0, 0.84, 0.67], FINAL = 3.09, TYRE = 2 * Math.PI * 0.37;
+const IDLE = 800, REDLINE = 6200;
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export class DriveAudio {
-  constructor({ muted = false } = {}) { this.muted = muted; this.ctx = null; this.buf = {}; this.gear = 1; this.rpm = IDLE; this.shiftT = 0; }
+  constructor({ muted = false } = {}) { Object.assign(this, { muted, ctx: null, buf: {}, gear: 1, rpm: IDLE, shiftT: 0, shiftDir: 0, cool: 0, pedal: 0 }); }
 
   unlock() {
     if (this.ctx) { if (this.ctx.state !== 'running') this.ctx.resume(); return; }
@@ -61,17 +63,27 @@ export class DriveAudio {
 
   setMuted(m) { this.muted = m; if (this.out) this.out.gain.value = m ? 0 : 0.9; }
 
-  /** speed m/s, load 0..1 (throttle), slip 0..1 */
-  update(speed, load, slip, dt) {
+  /** speed m/s, throttle 0..1 (the pedal, from how hard the car is actually accelerating), slip 0..1 */
+  update(speed, throttle, slip, dt) {
     if (!this.ctx || !this.layers) return;
     const t = this.ctx.currentTime;
-    const target = () => IDLE + speed * RATIOS[this.gear] * 60;
-    if (target() > UPSHIFT && this.gear < 5 && this.shiftT <= 0) { this.gear++; this.shiftT = 0.18; }
-    else if (target() < DOWNSHIFT && this.gear > 1) this.gear--;
-    this.shiftT -= dt;
-    const want = Math.min(REDLINE, Math.max(IDLE, target()));
-    this.rpm += (want - this.rpm) * Math.min(1, dt * (this.shiftT > 0 ? 16 : 6));
-    const l = this.shiftT > 0 ? 0 : load;          // lift during the shift: you hear the off-throttle loop
+    this.pedal += (throttle - this.pedal) * Math.min(1, dt * 4);             // a foot, not a switch
+    const P = this.pedal, wheel = speed / TYRE * 60, rpmIn = (g) => wheel * RATIOS[g] * FINAL;
+    // the shift schedule of an automatic: light throttle short-shifts early and settles in top gear; the harder
+    // you're on it the longer it holds each gear; slowing down it steps back down through the box
+    const up = 1500 + P ** 1.5 * 3800, down = 1100 + P * 1600;
+    this.cool -= dt; this.shiftT -= dt;
+    if (this.cool <= 0) {
+      if (this.gear < 8 && rpmIn(this.gear) > up && rpmIn(this.gear + 1) > IDLE + 150) { this.gear++; this.shiftT = 0.26; this.shiftDir = 1; this.cool = 0.7; }
+      else if (this.gear > 1 && rpmIn(this.gear) < down) { this.gear--; this.shiftT = 0.18; this.shiftDir = -1; this.cool = 0.5; }
+    }
+    // torque converter: pulling away the engine flares ahead of the wheels, then locks up
+    const flare = speed < 7 ? (IDLE + 1100 * P) * (1 - speed / 7) : 0;
+    const want = Math.min(REDLINE, Math.max(IDLE, rpmIn(this.gear), flare));
+    const follow = this.shiftT > 0 ? (this.shiftDir > 0 ? 14 : 18) : 7;         // upshift: a quick drop; downshift: a blip
+    this.rpm += (want + (this.shiftT > 0 && this.shiftDir < 0 ? 350 * P + 150 : 0) - this.rpm) * Math.min(1, dt * follow);
+    // what you hear on the on/off crossfade: the pedal, with the torque cut during an upshift
+    const l = this.shiftT > 0 && this.shiftDir > 0 ? P * 0.15 : P;
     // recordings sit around mid revs: idle plays them at ~0.55×, the redline at ~1.7×
     const rate = 0.55 + (this.rpm - IDLE) / (REDLINE - IDLE) * 1.15;
     const [on, off] = this.layers;

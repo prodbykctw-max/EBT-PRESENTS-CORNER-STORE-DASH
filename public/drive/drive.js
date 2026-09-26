@@ -333,7 +333,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     sun.position.copy(carRig.position).add(tmp.copy(sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35)).multiplyScalar(220));
     sun.target.position.copy(carRig.position);
 
-    audio.update(car.v, state === 'driving' && !braking ? (car.v < cruise() - 0.5 ? 1 : 0.45) : 0.1, Math.min(1, Math.abs(car.dv) / 14 + (braking && car.v > 6 ? 0.6 : 0)), dt);
+    // the pedal the engine hears: light throttle to hold speed, more to pull away (never floored for long), none
+    // coasting or on the brakes
+    const pedal = state === 'driving' && !braking ? Math.max(0, Math.min(1, 0.14 + car.accel / 11)) : 0;
+    audio.update(car.v, pedal, Math.min(1, Math.abs(car.dv) / 14 + (braking && car.v > 6 ? 0.6 : 0)), dt);
     hud.time.textContent = t.toFixed(1);
     hud.time.classList.toggle('low', t < 10);
     hud.speed.textContent = Math.round(v * 2.237) + ' mph';
