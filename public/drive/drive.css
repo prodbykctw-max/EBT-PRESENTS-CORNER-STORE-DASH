@@ -37,3 +37,12 @@
 @keyframes popup { from { opacity: 1; transform: translateY(0) scale(1.1); } to { opacity: 0; transform: translateY(-40px) scale(1); } }
 .drive-box.tok b { color: #ffd400; }
 .drive-osm { position: absolute; left: 8px; bottom: max(6px, env(safe-area-inset-bottom)); font-size: 9px; opacity: .6; pointer-events: none; text-shadow: 0 1px 2px #000; }
+
+/* next traffic light (shown within ~110 m): a little three-lamp head, the live aspect lit */
+.drive-light { position: absolute; left: max(12px, env(safe-area-inset-left)); top: calc(max(10px, env(safe-area-inset-top)) + 64px); display: none; flex-direction: column; align-items: center; gap: 5px; padding: 7px 7px 5px; background: rgba(10, 12, 16, .78); border: 1px solid rgba(255, 255, 255, .14); border-radius: 12px; pointer-events: none; }
+.drive-light.on { display: flex; }
+.drive-light i { width: 16px; height: 16px; border-radius: 50%; background: #1a1c20; }
+.drive-light.R i:nth-child(1) { background: #ff2a14; box-shadow: 0 0 10px #ff2a14; }
+.drive-light.Y i:nth-child(2) { background: #ffbe14; box-shadow: 0 0 10px #ffbe14; }
+.drive-light.G i:nth-child(3) { background: #26e070; box-shadow: 0 0 10px #26e070; }
+.drive-light b { font: 700 10px/1 system-ui, sans-serif; opacity: .8; margin-top: 1px; }

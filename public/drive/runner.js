@@ -364,6 +364,8 @@ export class World {
     for (const e of this.ents) if (e.dir === -1 && e.v0) {
       const yieldHere = (waitEnd > 0 && e.s > waitEnd + 8 && e.s - waitEnd < 40) || (zone && e.s > zone[1] + 6 && e.s < zone[1] + 70);
       e.v = yieldHere ? Math.min(0, e.v + 20 * dt) : Math.max(e.v0, e.v - 6 * dt);   // ease to a stop / back up to speed
+      const front = e.s - (e.L || 4.5) / 2, line = this.signals?.stopFor(front, -e.v, -1);     // red light: stop at the line
+      if (line != null) { const gap = front - line; e.v = Math.max(e.v, -(gap < 0.5 ? 0 : Math.sqrt(2 * 3 * gap))); }
     }
     for (const e of this.ents) {
       if (!e.alive) continue;
@@ -418,6 +420,8 @@ export class World {
         else if (ahead) want = isStill(ahead) ? (ahead.s - e.s < 8 ? 0 : Math.min(e.cruise, (ahead.s - e.s - 8) * 1.5)) : Math.min(e.cruise, ahead.v || 0);
         // and never into the back of the player
         if (car.s > e.s && car.s - e.s < 16 && Math.abs(car.d - e.d) < 1.9) want = Math.min(want, car.s - e.s < 9 ? 0 : car.v);
+        const sl = this.signals?.stopFor(e.s + (e.L || 4.5) / 2, e.v, 1);                        // red light
+        if (sl != null) { const gap = sl - (e.s + (e.L || 4.5) / 2); want = Math.min(want, gap < 0.5 ? 0 : Math.sqrt(2 * 3 * gap)); }
         e.v += Math.max(-9 * dt, Math.min(4 * dt, want - e.v));
         e.d += Math.max(-2.5 * dt, Math.min(2.5 * dt, target - e.d));
       }
@@ -476,9 +480,13 @@ export class World {
       // stop line: the vehicle's whole front half stays clear of the route's road (a 12 m bus stops further back)
       const clear = VEHICLE[a.type][0] + (a.type === 'bus' ? 2.6 : 1.2) + 3;
       if (a.dead_end === undefined) { const e = a.pts[a.pts.length - 1]; a.dead_end = r.distTo(e[0], e[1]) < r.hw(r.project(e[0], e[1]).s) + 3 && !this.nextWay(a); }
-      const stopLine = r.distTo(nx, ny) < 20 && r.distTo(nx, ny) < r.hw(r.project(nx, ny).s) + clear && r.distTo(nx, ny) < r.distTo(a.x ?? nx, a.y ?? ny);
+      const dNext = r.distTo(nx, ny), hwHere = dNext < 20 ? r.hw(r.project(nx, ny).s) : 0;
+      // the stop line: approaching our road and not yet in it (a vehicle already in the junction clears it)
+      const stopLine = dNext < 20 && dNext < hwHere + clear && dNext < r.distTo(a.x ?? nx, a.y ?? ny) && dNext > hwHere + 0.3;
+      // a signalised junction: go on ITS green; elsewhere: yield while the player is near
+      const gate = stopLine ? this.signals?.crossGate(nx, ny) ?? null : null, hold = gate === null ? near : !gate;
       if (a.dead_end && stopLine && a.x !== undefined && !this.visible(a.x, a.y, a.zAbs, a.type === 'bus' ? 7 : 3.5)) { a.dead = true; continue; }   // gave up, out of sight
-      if (!((near || a.dead_end) && stopLine)) {
+      if (!((hold || a.dead_end) && stopLine)) {
         a.t = nt; if (a.t >= 1) { a.i++; a.t = 0; }
       }
       a.x = nx; a.y = ny; a.h = Math.atan2(q[1] - p[1], q[0] - p[0]);

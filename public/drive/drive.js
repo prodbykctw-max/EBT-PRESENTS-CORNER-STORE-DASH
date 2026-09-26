@@ -14,6 +14,7 @@ import { RouteFrame, RunnerCar, World } from './runner.js';
 import { DriveAudio } from './audio.js';
 import { Crowd } from './crowd.js';
 import { Streetcars } from './tram.js';
+import { Signals } from './signals.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
 
@@ -102,6 +103,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const spot = { s: spotS, d: route.parkD(spotS, -1) ?? route.lane(spotS, 0) - 0.35 };
   const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks });
   const car = new RunnerCar(route, 4);
+  const signals = world.signals = new Signals({ route, nodes: city.signals, marks: city.streets.routeMarks, scene });
   const trams = world.trams = new Streetcars({ W, route, ground, surfAt, scene, props: props.scene, world, audio });
   const crowd = world.crowd = new Crowd({
     route, ground, surfAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree,
@@ -197,7 +199,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
   // ---------- HUD ----------
   const $ = (s) => root.querySelector(s);
-  const hud = { time: $('.drive-time'), speed: $('.drive-speed'), dist: $('.drive-dist'), tokens: $('.drive-tokens'), msg: $('.drive-msg'), hint: $('.drive-hint'), pop: $('.drive-pop') };
+  const hud = { light: $('.drive-light'), lightDist: $('.drive-light b'), time: $('.drive-time'), speed: $('.drive-speed'), dist: $('.drive-dist'), tokens: $('.drive-tokens'), msg: $('.drive-msg'), hint: $('.drive-hint'), pop: $('.drive-pop') };
   const flash = (text, ms = 1200) => { hud.msg.textContent = text; hud.msg.classList.add('on'); clearTimeout(flash.t); flash.t = setTimeout(() => hud.msg.classList.remove('on'), ms); };
   const pop = (text) => { const el = document.createElement('b'); el.textContent = text; hud.pop.appendChild(el); setTimeout(() => el.remove(), 900); };
   hud.hint.textContent = `${weather.label} in the ATL`;
@@ -295,6 +297,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const steer = THREE.MathUtils.clamp(Math.atan2(car.dv, Math.max(car.v, 4)) * 1.6, -0.5, 0.5);   // fronts lead the dodge
     for (const w of wheelSteer) w.o.quaternion.copy(w.q0).multiply(dq.setFromAxisAngle(Y, steer));
     world.render(car, drove);
+    signals.update(dt);
     if (state !== 'driving') { world.updateFrustum(); trams.render(); }   // (world.update keeps the frustum current while driving)
     crowd.update(dt, car, hornT);
     fx.update(dt, camera, renderer);
@@ -335,6 +338,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     hud.time.classList.toggle('low', t < 10);
     hud.speed.textContent = Math.round(v * 2.237) + ' mph';
     hud.dist.textContent = Math.max(0, Math.round(spot.s - car.s)) + ' m';
+    // the next traffic light, readable on a phone (the real lamps are small from up here)
+    const nl = state === 'driving' ? signals.next(car.s + 2.5) : null;
+    hud.light.className = 'drive-light' + (nl ? ' on ' + nl.aspect : '');
+    if (nl) hud.lightDist.textContent = Math.round(nl.gap) + ' m';
     hud.tokens.textContent = tokens;
     renderer.render(scene, camera);
   }
@@ -376,6 +383,7 @@ const HUD_HTML = `
   <div class="drive-box tok"><span>EBT</span><b class="drive-tokens">0</b></div>
   <div class="drive-box"><span>SPEED</span><b class="drive-speed">0 mph</b></div>
 </div>
+<div class="drive-light"><i></i><i></i><i></i><b></b></div>
 <div class="drive-msg"></div>
 <div class="drive-pop"></div>
 <div class="drive-hint"></div>

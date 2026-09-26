@@ -73,6 +73,16 @@ obstacles and collisions line up exactly with what's painted on the road.
     its track, ringing its bell (synthesised) at the player.
   - Oncoming traffic queues behind it.
   - Each section sits on the track itself, so it bends through curves.
+- **Traffic signals** (`signals.js`): every OSM-signalised intersection on the route (8) runs a real cycle.
+  - Auburn green (20–27 s) → yellow 3 s → all-red 1 s → cross green (8–10 s) → yellow → all-red.
+  - The corridor is a green wave at ~21 m/s: keep pace and you mostly meet greens; get held up and you meet
+    reds.
+  - Our direction, oncoming traffic and the streetcar stop at their stop lines (at the edge of the
+    junction/crosswalk zone). On yellow they only stop if they comfortably can.
+  - Cross traffic moves on its own green, and a vehicle already in the junction clears it.
+  - The mast lamps really light (lit lamp plus glow, dark others). A HUD light on the left shows the next
+    signal and its distance, since lamps are small from overhead.
+  - Running a red means meeting cross traffic.
 - **Work zones** run alternating traffic: as the player comes up to one, a flagger holds oncoming cars and the
   streetcar past its far end, so the open lane is theirs.
 - **Crowd** (`crowd.js`): one parametric low-poly person (~200 tris), drawn as a single InstancedMesh.
@@ -198,6 +208,7 @@ Run it after any change to world building.
 | `levels.js`, `surface.js` | the height stack, `standOn`, `deckTop`, and triangle height queries |
 | `sky.js` | sky dome and generated environment lighting |
 | `crowd.js` | procedural sidewalk crowd: parametric person, GPU walk cycle, group behaviour |
+| `signals.js` | the route's traffic signals: green-wave timing, stop lines, lamp overlays, cross-traffic gates, HUD light |
 | `tram.js` | Atlanta Streetcar: embedded rails from OSM, the westbound car on its real track, platform dwells, bell |
 | `integrity.js`, `autopilot.js` | QA only: world scanner; player-like autopilot with hit and pop-in audits |
 | `runner.js` | route space (RouteFrame), the auto-driving car, obstacle/scenery/traffic population, collisions, instanced rendering |
