@@ -20,3 +20,6 @@ drive/blender/
 drive/route_v1.svg
 drive/cache/
 drive/ref/
+
+# local HTTPS dev certificate (scripts/serve.mjs)
+.certs/

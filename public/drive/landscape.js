@@ -209,5 +209,6 @@ export function buildStreetscape(W, ground, route, streets, props, isFree) {
     im.castShadow = true; im.receiveShadow = true; im.name = 'street_' + type; group.add(im);
   }
   group.userData.counts = Object.fromEntries(Object.entries(put).map(([k, v]) => [k, v.length]));
+  group.userData.placed = put;   // positions of every street prop (the crowd walks round them)
   return group;
 }

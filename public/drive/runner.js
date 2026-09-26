@@ -147,14 +147,15 @@ const SHIRTS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2e2e2e, 0xe8e8e8, 0x3d9a5b, 0x8e
 const BUS_STRIPE = [0x1d5fbf, 0xc62828];
 
 export class World {
-  constructor({ route, props, scene, W, sEnd, audio, surfAt }) {
-    Object.assign(this, { route, scene, W, sEnd, audio, surfAt });
+  constructor({ route, props, scene, W, sEnd, audio, surfAt, camera }) {
+    Object.assign(this, { route, scene, W, sEnd, audio, surfAt, camera });
+    this.frustum = new THREE.Frustum(); this._pm = new THREE.Matrix4(); this._sph = new THREE.Sphere();
     this.ents = []; this.tokens = [];
     this.meshes = {};
     const mat = propMaterial();
-    const CAP = { sedan: 40, suv: 30, cone: 120, barricade: 16, panhandler: 6, bus: 8, worksign: 10, walker: 70, stander: 30, cyclist: 8 };
+    const CAP = { sedan: 40, suv: 30, cone: 120, barricade: 16, panhandler: 6, bus: 8, worksign: 10, cyclist: 8 };   // people on foot: crowd.js
     const GEO = { sedan: 'prop_sedan', suv: 'prop_suv', cone: 'prop_cone', barricade: 'prop_barricade', panhandler: 'prop_panhandler',
-      bus: 'prop_bus', worksign: 'prop_worksign', walker: 'prop_person_walk', stander: 'prop_person_stand', cyclist: 'prop_cyclist' };
+      bus: 'prop_bus', worksign: 'prop_worksign', cyclist: 'prop_cyclist' };
     for (const [t, cap] of Object.entries(CAP)) {
       const im = new THREE.InstancedMesh(bakedGeometry(props, GEO[t]), mat, cap);
       im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
@@ -201,17 +202,11 @@ export class World {
       }
       s += rnd(58, 85) * (1 - Math.min(0.25, k * 0.015)); k++;
     }
-    // sidewalk life along the whole route: people, a couple of cyclists
-    for (let q = 0; q < 70; q++) this.spawnWalker(rnd(0, sStop + 30));
+    // a couple of cyclists in the bike lane (people on foot are the crowd: crowd.js)
     for (let q = 0; q < 5; q++) { const s0 = rnd(40, sStop - 60); this.add('cyclist', { s: s0, d: -(r.hw(s0) + 0.55), v: rnd(4.5, 6.5), color: pick(SHIRTS), dir: 1, scenery: true }); }
     this.planAmbient();
   }
 
-  spawnWalker(s) {
-    const hw = this.route.hw(s), side = Math.random() < 0.5 ? 1 : -1;
-    const standing = Math.random() < 0.25;
-    this.add(standing ? 'stander' : 'walker', { s, d: side * (hw + rnd(1.6, 4)), v: standing ? 0 : rnd(0.9, 1.6) * (Math.random() < 0.5 ? 1 : -1), color: pick(SHIRTS), dir: 1, scenery: true, bob: rnd(0, 6) });
-  }
 
   /** cross-street traffic (cars + city buses) that waits at the lights instead of entering the route */
   planAmbient() {
@@ -224,28 +219,74 @@ export class World {
       const along = rd.pts.filter((p) => r.distTo(p[0], p[1]) < 9).length / rd.pts.length;
       return dm > 14 && along < 0.3 && rd.pts.some((p) => r.distTo(p[0], p[1]) < 10);
     });
+    this.driveRoads = roads;
     for (let q = 0; q < 14; q++) this.spawnAmbient(true);
   }
-  spawnAmbient(anywhere) {
+  updateFrustum() {
+    if (this.camera) { this._pm.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse); this.frustum.setFromProjectionMatrix(this._pm); }
+  }
+  /** on screen? (route-plane x, y; z = height; r = bounding radius in metres). Nothing may appear or vanish where it's seen. */
+  visible(x, y, z, r = 4) {
+    if (!this.camera) return false;
+    this._sph.center.set(x, z ?? this.route.ground(x, y), -y); this._sph.radius = r;
+    return this.frustum.intersectsSphere(this._sph);
+  }
+  /** Cross traffic enters the world only off-screen and well clear of the route (OSM splits streets at every
+   *  junction, so a way's first point is often IN our road). `initial` = level load, before anything is seen. */
+  spawnAmbient(initial) {
     if (!this.crossRoads.length) return;
-    const rd = pick(this.crossRoads), bus = !rd.h && Math.random() < 0.3;   // buses stay on city streets
-    const pts = Math.random() < 0.5 ? rd.pts : [...rd.pts].reverse();
-    const hs = rd.h ? (pts === rd.pts ? rd.h : [...rd.h].reverse()) : null;
+    const r = this.route;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const rd = pick(this.crossRoads), bus = !rd.h && Math.random() < 0.3;   // buses stay on city streets
+      const pts = Math.random() < 0.5 ? rd.pts : [...rd.pts].reverse();
+      const hs = rd.h ? (pts === rd.pts ? rd.h : [...rd.h].reverse()) : null;
+      const i = (Math.random() * (pts.length - 1)) | 0, t = Math.random();
+      const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t;
+      if (!rd.h && r.distTo(x, y) < 18) continue;
+      if (!initial && this.visible(x, y, hs ? r.ground(x, y) + hs[i] : undefined, bus ? 7 : 3.5)) continue;
+      this.ambient.push(this.ambientOn(rd, pts, hs, bus ? 'bus' : pick(['sedan', 'suv']), i, t, bus ? pick(BUS_STRIPE) : pick(PAINT)));
+      return;
+    }
+  }
+  ambientOn(rd, pts, hs, type, i, t, color) {
     const RANK = { motorway: 6, trunk: 6, primary: 5, secondary: 4, tertiary: 3, residential: 2 };
-    this.ambient.push({ type: bus ? 'bus' : pick(['sedan', 'suv']), pts, hs, deck: !!rd.h, link: /_link/.test(rd.cls), bias: (RANK[rd.cls.replace('_link', '')] ?? 1) * 0.004, i: 0, t: anywhere ? Math.random() : 0, v: rd.h ? rnd(20, 27) : bus ? 8 : rnd(9, 13),
-      color: bus ? pick(BUS_STRIPE) : pick(PAINT), lane: laneFor(rd, bus ? 'bus' : 'suv') });
+    return { type, pts, hs, road: rd, deck: !!rd.h, link: /_link/.test(rd.cls), bias: (RANK[rd.cls.replace('_link', '')] ?? 1) * 0.004, i, t,
+      v: rd.h ? rnd(20, 27) : type === 'bus' ? 8 : rnd(9, 13), color, lane: laneFor(rd, type === 'bus' ? 'bus' : 'suv') };
+  }
+  /** at the end of its way a vehicle carries on along the connecting way (same street first), like real traffic */
+  continueAmbient(a) {
+    const end = a.pts[a.pts.length - 1], hEnd = a.hs ? a.hs[a.hs.length - 1] : 0, r = this.route;
+    const near = (p) => Math.hypot(p[0] - end[0], p[1] - end[1]) < 1.5;
+    const opts = [];
+    for (const rd of this.driveRoads) {
+      if (rd === a.road || (a.type === 'bus' && rd.h)) continue;
+      const fwd = near(rd.pts[0]), back = near(rd.pts[rd.pts.length - 1]);
+      if (!fwd && !back) continue;
+      const pts = fwd ? rd.pts : [...rd.pts].reverse(), hs = rd.h ? (fwd ? rd.h : [...rd.h].reverse()) : null;
+      if (Math.abs((hs ? hs[0] : 0) - hEnd) > 1) continue;              // no stepping off a deck onto the street below
+      const along = pts.filter((p) => r.distTo(p[0], p[1]) < 9).length / pts.length;
+      if (along >= 0.3) continue;                                        // never onto the route's own street
+      opts.push({ rd, pts, hs, w: rd.name && rd.name === a.road.name ? 4 : 1 });
+    }
+    if (!opts.length) return false;
+    const o = pickWeighted(opts.map((o) => [o, o.w]));
+    Object.assign(a, this.ambientOn(o.rd, o.pts, o.hs, a.type, 0, 0, a.color), { x: a.x, y: a.y, zAbs: a.zAbs, pitch: a.pitch });
+    return true;
   }
 
   /** advance everything; returns events for the HUD/audio */
   update(dt, car, t, hornT) {
     const out = { hits: [], nearMiss: 0, tokens: 0 };
     const r = this.route;
+    this.updateFrustum();
+    const seen = (e, rad = 4) => { const p = r.at(e.s, e.d); return this.visible(p.x, p.y, p.z, rad); };
     // oncoming traffic on two-way stretches, spawned ahead but never onto a blocked meeting point
     this.nextOncoming -= dt;
     if (this.nextOncoming <= 0 && car.s < this.sEnd - 120) {
       this.nextOncoming = rnd(5, 9) * (1 - Math.min(0.25, t / 120));
-      const s0 = car.s + 170, v0 = -rnd(9, 13);
-      if (!r.oneway(s0)) {
+      let s0 = car.s + 170; const v0 = -rnd(9, 13);
+      while (s0 < car.s + 330 && seen({ s: s0, d: r.lane(s0, 1) }, 4)) s0 += 15;   // appear beyond the edge of the screen
+      if (s0 < Math.min(car.s + 330, this.sEnd - 20) && !r.oneway(s0)) {
         const meet = car.s + 170 * car.v / (car.v + -v0 + 0.01);
         const blocked = this.ents.some((e) => e.alive && e.solid >= 0.7 && !e.scenery && e.d < 0 && Math.abs(e.s + (e.v || 0) * ((meet - car.s) / Math.max(car.v, 5)) - meet) < 38);
         if (!blocked) this.add(pick(['sedan', 'suv', 'sedan']), { s: s0, d: r.lane(s0, 1), v: v0, color: pick(PAINT), dir: -1 });
@@ -273,14 +314,11 @@ export class World {
         const ahead = this.ents.find((o) => o !== e && o.alive && !o.scenery && o.solid && o.s > e.s && o.s - e.s < 12 && Math.abs(o.d - e.d) < 1.6);
         if (ahead) e.v = Math.max(0, Math.min(e.v, (ahead.v || 0)));
       }
-      // walkers turn around at the ends of the mapped street instead of piling up there
+      // cyclists turn around at the ends of the mapped street instead of piling up there
       if (e.scenery && e.v && (e.s < 3 || e.s > r.length - 3)) { e.v = Math.abs(e.v) * (e.s < 3 ? 1 : -1); e.s = Math.max(3, Math.min(r.length - 3, e.s)); }
-      // walkers wrap around the player's window so the sidewalks never empty
-      if (e.scenery && (e.type === 'walker' || e.type === 'stander') && (e.s < car.s - 40 || e.s > car.s + 260)) {
-        e.s = car.s + (e.s < car.s ? rnd(160, 250) : rnd(-30, 0)); e.d = Math.sign(e.d) * (r.hw(e.s) + rnd(1.6, 4));
-      }
-      if (e.dir === -1 && e.s < car.s - 40) e.alive = false; // oncoming car passed and gone
-      if (e.dir === 1 && !e.parked && !e.scenery && e.s > r.length - 30) e.alive = false; // drove on out of view
+      if (e.dir === -1 && e.s < car.s - 40 && !seen(e)) e.alive = false;  // oncoming car passed and out of view
+      if (e.dir === 1 && !e.parked && !e.scenery && e.s > r.length - 30 && !seen(e)) e.alive = false; // drove on out of view
+      if (e.s < -20 || e.s > r.length + 20) e.alive = false;           // off the mapped street either way
 
       // collision / near miss (route space box test)
       if (e.solid && !e.scenery && !e.hitDone) {
@@ -306,8 +344,11 @@ export class World {
     }
     // cross traffic
     for (const a of this.ambient) {
+      if (!a.pts[a.i + 1] && !this.continueAmbient(a)) {                 // dead end: leave once nobody's looking
+        if (a.x === undefined || !this.visible(a.x, a.y, a.zAbs, a.type === 'bus' ? 7 : 3.5)) a.dead = true;
+        a.moved = 0; continue;
+      }
       const [p, q] = [a.pts[a.i], a.pts[a.i + 1]];
-      if (!q) { Object.assign(a, { dead: true }); continue; }
       const L = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
       const nt = a.t + a.v * dt / L, nx = p[0] + (q[0] - p[0]) * Math.min(nt, 1), ny = p[1] + (q[1] - p[1]) * Math.min(nt, 1);
       a.moved = a.x === undefined ? 0 : Math.hypot(nx - a.x, ny - a.y);
@@ -334,7 +375,7 @@ export class World {
       if (a.hitT) a.hitT = Math.max(0, a.hitT - dt);
     }
     this.ambient = this.ambient.filter((a) => !a.dead);
-    while (this.ambient.length < 14) this.spawnAmbient(false);
+    for (let k = 0; k < 2 && this.ambient.length < 14; k++) this.spawnAmbient(false);
     return out;
   }
 
@@ -364,7 +405,6 @@ export class World {
         const st = standOn(on, p.x, p.y, yaw, VEHICLE[e.type][0], VEHICLE[e.type][1]);
         z = st.z; pitch = st.pitch; roll = st.roll;
       }
-      if (e.type === 'walker' && e.v) z += Math.abs(Math.sin(t * 7 + e.bob)) * 0.06;
       if (e.type === 'panhandler') yaw = p.a + Math.PI;
       if (e.flying) { z += e.fz; roll = e.spin; pitch = e.spin * 0.7; }
       if (e.type === 'panhandler') { pitch = 0; roll = 0; }

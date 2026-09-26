@@ -211,13 +211,14 @@ export function buildCity(W, tex, ground, route, props) {
   const streets = buildStreets(W, ground, route, tex);
   const outside = footprintIndex(W);
   const isFree = (x, y) => outside(x, y) && !inHero(x, y);
+  const streetscape = buildStreetscape(W, ground, route, streets, props, isFree);
   const group = new THREE.Group();
   group.add(
     buildTerrain(W, tex, ground),
     buildCover(W, ground, tex, streets),
     buildContactShadows(W, ground, (bd) => { let cx = 0, cy = 0; for (const [x, y] of bd.pts) { cx += x; cy += y; } return inHero(cx / bd.pts.length, cy / bd.pts.length); }),
     streets.group, streets.freeway.group, b.group,
-    buildStreetscape(W, ground, route, streets, props, isFree),
+    streetscape,
   );
-  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces };
+  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces, isFree, furniture: streetscape.userData.placed };
 }

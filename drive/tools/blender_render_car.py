@@ -21,7 +21,9 @@ def shot(name, loc, rot, lens):
     cam.location, cam.rotation_euler, cam.data.lens = loc, [math.radians(a) for a in rot], lens
     sc.camera = cam; sc.render.filepath = os.path.join(OUT, name + ".png")
     bpy.ops.render.render(write_still=True, scene=sc.name)
-shot("car_3q", (5.2, 6.6, 2.2), (78, 0, 142), 50)
+shot("car_3q", (6.4, 8.6, 2.4), (80, 0, 143), 50)
+shot("car_front", (1.6, 10.5, 1.5), (84, 0, 171), 50)
+shot("car_rear", (-5.6, -5.6, 2.3), (79, 0, -40), 50)
 shot("car_top", (0, 1.5, 16), (0, 0, 0), 40)
 bpy.data.scenes.remove(sc)
 print("ok")

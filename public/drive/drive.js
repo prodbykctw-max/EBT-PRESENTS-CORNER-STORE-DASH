@@ -12,6 +12,7 @@ import { CUT } from './roads.js';
 import { TopSurface } from './surface.js';
 import { RouteFrame, RunnerCar, World } from './runner.js';
 import { DriveAudio } from './audio.js';
+import { Crowd } from './crowd.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
 
@@ -94,11 +95,21 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const surfAt = (x, y, below) => { const h = roadSurface.top(x, -y, below); return h ? h.y : null; };
   // ---------- the run, the car ----------
   const spot = route.project(SPOT.x, SPOT.y);             // parking space in route coords
-  const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt });
+  const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera });
   const car = new RunnerCar(route, 4);
+  const crowd = world.crowd = new Crowd({
+    route, ground, surfAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree, furniture: city.furniture,
+    onRoute: (x, y) => roadSurface.top(x, -y, ground(x, y) + 1.2)?.name === 'route_road',
+    visible: (x, y, z, r) => world.visible(x, y, z, r),
+  });
   const carModel = carGltf.scene;
   carModel.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   const carRig = new THREE.Group(); carRig.add(carModel); carModel.position.z = REAR_AXLE;
+  // wheel pivots from the car model: *_SPIN roll about their axle (local X), the front *_STEER turn about up (local Y)
+  const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), dq = new THREE.Quaternion();
+  const pivot = (re) => { const out = []; carModel.traverse((o) => { if (!o.isMesh && re.test(o.name)) out.push({ o, q0: o.quaternion.clone() }); }); return out; };
+  const wheelSpin = pivot(/^[FR][LR]_SPIN$/), wheelSteer = pivot(/^F[LR]_STEER$/), TYRE_R = 0.407;
+  let wheelRoll = 0;
   scene.add(carRig);
   const fx = new ImpactFX(scene);
 
@@ -245,7 +256,13 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     carRig.rotation.set(st.pitch, p.a - Math.PI / 2, st.roll, 'YXZ');
     carModel.rotation.z = THREE.MathUtils.clamp(-car.dv * 0.012, -0.07, 0.07);   // body roll into the dodge
     carModel.visible = car.invuln <= 0 || Math.floor(car.invuln * 12) % 2 === 0; // blink while recovering
+    wheelRoll = (wheelRoll + car.v * dt / TYRE_R) % (Math.PI * 2);
+    for (const w of wheelSpin) w.o.quaternion.copy(w.q0).multiply(dq.setFromAxisAngle(X, wheelRoll));
+    const steer = THREE.MathUtils.clamp(Math.atan2(car.dv, Math.max(car.v, 4)) * 1.6, -0.5, 0.5);   // fronts lead the dodge
+    for (const w of wheelSteer) w.o.quaternion.copy(w.q0).multiply(dq.setFromAxisAngle(Y, steer));
     world.render(car, drove);
+    if (state !== 'driving') world.updateFrustum();   // (world.update keeps it current while driving)
+    crowd.update(dt, car, hornT);
     fx.update(dt, camera, renderer);
     beacon.material.opacity = 0.12 + 0.08 * Math.sin(now / 250);
     spotGroup.visible = state === 'driving' || state === 'countdown';

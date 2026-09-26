@@ -67,6 +67,14 @@ export function scanWorld(api) {
       if (!h || v.y - h.y > 0.06 || v.y - h.y < -0.06) report.wheels.fail.push({ who: `${type}#${i}`, gap: h ? +(v.y - h.y).toFixed(3) : 'no surface', on: h?.name, at: [+v.x.toFixed(0), +(-v.z).toFixed(0)] });
     }
   }
+  // 2c) the crowd: every drawn person's feet on the sidewalk / crosswalk under them
+  const crowd = api.world.crowd?.mesh;
+  if (crowd) for (let i = 0; i < crowd.count; i++) {
+    crowd.getMatrixAt(i, m4); v.setFromMatrixPosition(m4);
+    const h = ALL.top(v.x, v.z, v.y + 1.0); report.props.samples++;
+    // lawns sit a few cm above the sidewalk plane; nobody may float or sink further than that
+    if (!h || v.y - h.y > 0.05 || v.y - h.y < -0.12) report.props.fail.push({ who: `person#${i}`, gap: h ? +(v.y - h.y).toFixed(3) : 'no surface', on: h?.name, at: [+v.x.toFixed(0), +(-v.z).toFixed(0)] });
+  }
   // 3) props: bases on the ground
   scene.traverse((o) => {
     if (!o.isInstancedMesh || !/^street_/.test(o.name)) return;

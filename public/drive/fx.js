@@ -18,7 +18,8 @@ export class ImpactFX {
       uniforms: { uScale: { value: 1 } },
       vertexShader: `attribute float aLife; varying float vLife; uniform float uScale;
         void main(){ vLife = aLife; vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = aLife <= 0.0 ? 0.0 : (0.3 + 0.5 * aLife) * uScale / -mv.z; // metres → pixels gl_Position = projectionMatrix * mv; }`,
+          gl_PointSize = aLife <= 0.0 ? 0.0 : (0.3 + 0.5 * aLife) * uScale / -mv.z;   // metres → pixels
+          gl_Position = projectionMatrix * mv; }`,
       fragmentShader: `varying float vLife;
         void main(){ vec2 c = gl_PointCoord - 0.5; float r = length(c); if (r > 0.5) discard;
           float core = smoothstep(0.5, 0.0, r);

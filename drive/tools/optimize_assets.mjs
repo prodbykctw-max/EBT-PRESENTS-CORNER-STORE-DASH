@@ -16,7 +16,7 @@ const tmp = (n) => path(new URL(n, cache));
 // the painted facades keep 2048 wide for the street-level arrival shot.
 const JOBS = [
   { src: 'hero_raw.glb', dst: 'hero.glb', max: 2048, quality: 80 },
-  { src: 'car_raw.glb', dst: 'car.glb', max: 512, quality: 80 },
+  { src: 'car_raw.glb', dst: 'car.glb', max: 512, quality: 80, keepMeshes: true }, // keeps the *_STEER/*_SPIN wheel pivots
   { src: 'props_raw.glb', dst: 'props.glb', max: 256, quality: 80, keepMeshes: true }, // one mesh per prop (runtime instances them by name)
 ];
 for (const j of JOBS) {

@@ -59,8 +59,24 @@ obstacles and collisions line up exactly with what's painted on the road.
     barricade. The right lane is closed.
   - **Panhandlers** working the lane line at the lights. **HORN** sends them back to the curb.
     Nobody gets hurt: if you clip one, he jumps clear and you just lose the moment.
-- **Scenery** (can't be hit): pedestrians on both sidewalks, cyclists along the curb, and city buses
-  and cars on the cross streets, which wait at the intersections while you pass.
+- **Scenery** (can't be hit): a procedural crowd on both sidewalks (see below), cyclists along the
+  curb, and city buses and cars on the cross streets, which wait at the intersections while you pass.
+- **Crowd** (`crowd.js`): one parametric low-poly person (~200 tris), drawn as a single InstancedMesh.
+  - **Variety:** each person has their own height, build, skin tone, top, bottoms, and hair, cap,
+    locs, backpack or hood.
+  - **Animation:** the walk cycle (legs and arms swinging, a bob on each step) runs in the vertex
+    shader, with no skeletons. Colours come from palette indices, keeping the draw within WebGL's
+    16-attribute limit.
+  - **Density:** the whole route is populated from the start, one person per ~5 m of sidewalk
+    (6.5 m on phones).
+  - **Groups:** they walk in groups of 1–3, talk in circles, wait at bus shelters, and hang out at
+    the corner store. Some check their phones.
+  - **Sidewalk band:** they keep between the curb or roadway and the building line, step round
+    trees, lamps, benches and shelters (single file if they must), and keep right for oncoming groups.
+  - **Reactions:** they flinch back and put their hands up when you run close to their curb or honk.
+  - **Cost:** only people near the car or on camera are simulated. Only those the camera can see
+    are drawn, with a margin that grows with distance, so nobody ever pops in. Phones skip crowd
+    shadows.
 - **Pickups:** EBT tokens in lines and weaves (+25). A NEAR MISS against oncoming traffic is +50.
 - **Density:** an event every 58–85 m, tightening slightly as the run goes on. At least one lane
   is always open.
@@ -160,12 +176,13 @@ Run it after any change to world building.
 | `landscape.js` | terrain mesh, parks/lawns/lots, contact shadows, streetscape (trees, lamps, signal masts, benches, bins, hydrants, shelters) |
 | `levels.js`, `surface.js` | the height stack, `standOn`, `deckTop`, and triangle height queries |
 | `sky.js` | sky dome and generated environment lighting |
-| `integrity.js` | QA-only world scanner |
+| `crowd.js` | procedural sidewalk crowd: parametric person, GPU walk cycle, group behaviour |
+| `integrity.js`, `autopilot.js` | QA only: world scanner; player-like autopilot with hit and pop-in audits |
 | `runner.js` | route space (RouteFrame), the auto-driving car, obstacle/scenery/traffic population, collisions, instanced rendering |
 | `audio.js`, `sfx/` | recorded engine and effects mix |
-| `props.glb` | traffic, bus, people, cyclist, cones, barricade, sign (vertex colour; white = per-instance tint) |
+| `props.glb` | traffic, bus, panhandler, cyclist, cones, barricade, sign (vertex colour; white = per-instance tint) |
 | `weather.js` | live Atlanta weather → sky, sun, shadows, haze, wet roads |
-| `hero.glb`, `car.glb` | Blender exports (meshopt + WebP) |
+| `hero.glb`, `car.glb` | Blender exports (meshopt + WebP). The player car is the user-supplied "Crimson Demon X" model (`drive/ref/car/`, dimensioned to the production Challenger SRT Demon, no badges); `drive/tools/blender_car.py` turns it nose-forward, puts the origin on the rear axle, decimates 78k to 36.5k tris and keeps the `*_STEER` / `*_SPIN` wheel pivots the runtime rolls and steers |
 | `vendor/` | three.js r186 (MIT), imports rewritten to relative paths so no import map is needed |
 
 **Game hook:** in `standalone/csd.js`, START RUN calls `startWithDrive()`. That
@@ -177,8 +194,25 @@ screen is up.
 **QA:** `/drive/index.html` is a standalone harness. Add `?qa` to either page to drive the loop from a
 timer, since hidden tabs pause `requestAnimationFrame`.
 
-Current download: about 2.4 MB of assets plus about 0.9 MB of three.js (≈0.25 MB gzipped), within the
-3 MB first-chunk budget.
+**Autopilot:** `/drive/index.html?qa&bot` plays the run like a player (`autopilot.js`, never loaded by the
+game). It drags into the clearest gap within 3 s of road, brakes when every gap is closing, honks at
+panhandlers and pulls to the curb for the park. It runs muted; add `&sound` to hear it. The report is in
+`__botReport` and on the finish screen. It lists every hit, plus pop-in, pop-out and teleport audits
+(anything appearing, vanishing or jumping while on camera), stalls, off-road moments and script errors.
+A healthy run parks clean with 0 hits and 0 pops.
+
+**Spawning rule:** nothing appears or disappears on screen (`World.visible` tests the camera frustum).
+- **Cross traffic** starts at an off-screen point of its street, at least 18 m from the route. OSM splits
+  ways at junctions, so a way's first point is often inside our road.
+- **At the end of its way** it continues onto the connecting way, preferring the same street name, and
+  never onto the route's own street or off a deck.
+- **Oncoming cars** spawn beyond the edge of the screen.
+- **Pedestrians** re-enter off-screen.
+- **Despawns** happen only out of view.
+
+Current download: about 3.7 MB of drive files (assets and code; the player car is 0.78 MB) plus about
+0.9 MB of three.js (≈0.25 MB gzipped). That is over the 3 MB first-chunk target but well within the 8 MB
+budget.
 
 ## Asset pipeline
 

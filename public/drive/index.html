@@ -26,8 +26,14 @@
       if (demo === 'arrive') Object.assign(d.car, { s: d.spot.s - 1.5, d: d.spot.d, targetD: d.spot.d, v: 0 });
     }, 50);
   }
+  // ?qa&bot: the autopilot drives it like a player and logs every hit/error (muted unless &sound)
+  const q = new URLSearchParams(location.search), bot = q.has('bot');
+  if (bot) import('./autopilot.js').then(({ autopilot }) => {
+    const wait = setInterval(() => { const d = window.__drive; if (d && d.car) { clearInterval(wait); autopilot(d); } }, 50);
+  });
   await startDrive({
-    onDone: (r) => { done.style.display = 'grid'; dt.textContent = r.parked ? 'Parked at the EBT Corner Store' : 'Too late'; dr.textContent = JSON.stringify(r, null, 1); },
+    muted: bot && !q.has('sound'),
+    onDone: (r) => { done.style.display = 'grid'; dt.textContent = r.parked ? 'Parked at the EBT Corner Store' : 'Too late'; dr.textContent = JSON.stringify(window.__botReport ? { ...r, bot: window.__botReport } : r, null, 1); },
   });
 </script>
 </body>
