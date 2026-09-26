@@ -742,16 +742,34 @@ function endScreen(won){
    (opened from disk, offline, or an old copy with no /drive/ next to it) the run just starts. */
 var DRIVE_URL="./drive/drive.js";
 function driveAvailable(){ return /^https?:$/.test(location.protocol) && !/[?&]nodrive/.test(location.search); }
+// Cover the store the instant START is tapped: the drive's code (three.js + modules) takes a moment to
+// arrive, and its own loading screen only exists once it has. Same look as the drive's loader, so the
+// hand-off is seamless; it lifts once the drive's screen is up and styled (or if the drive fails).
+function driveCover(){
+  var c=document.createElement("div");
+  c.setAttribute("style","position:fixed;inset:0;z-index:60;background:#101318;display:grid;place-content:center;gap:8px;text-align:center;color:#fff;font-family:system-ui,-apple-system,'Segoe UI',sans-serif");
+  c.innerHTML='<b style="font:900 34px/1 system-ui,sans-serif;letter-spacing:.12em;color:#ffd400">AUBURN AVE</b><span style="opacity:.75">Get to the corner store</span>';
+  document.body.appendChild(c);
+  var t=setInterval(function(){ var d=document.querySelector(".drive-root"); if(d&&getComputedStyle(d).position==="fixed") lift(); },50);
+  function lift(){ clearInterval(t); if(c.parentNode) c.parentNode.removeChild(c); }
+  return lift;
+}
 function startWithDrive(){
   if(!driveAvailable()){ startRun(); return; }
+  if(S.mode==="drive") return;                         // a second tap while it loads
   hide("ovTitle"); hide("ovHow"); S.mode="drive";
+  var lift=driveCover();
   import(DRIVE_URL).then(function(m){
     return m.startDrive({ mount: document.body, muted: !!S.muted, onDone: function(r){
       startRun();
       if(r && r.bonus){ addScore(r.bonus); S.driveBonus=r.bonus;
         bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus+(r.tokens? "  ·  "+r.tokens+" EBT":""), 2.2); }
     }});
-  }).catch(function(e){ console.warn("drive unavailable, starting the run:", e); startRun(); });
+  }).catch(function(e){
+    console.warn("drive unavailable, starting the run:", e);
+    var d=document.querySelector(".drive-root"); if(d&&d.parentNode) d.parentNode.removeChild(d);   // never leave a half-built drive over the store
+    lift(); startRun();
+  });
 }
 // warm the drive's code while the title screen is up, so START feels instant
 function prefetchDrive(){ if(driveAvailable()) setTimeout(function(){ import(DRIVE_URL).catch(function(){}); }, 1200); }

@@ -287,8 +287,14 @@ export class World {
       let s0 = car.s + 170; const v0 = -rnd(9, 13);
       while (s0 < car.s + 330 && seen({ s: s0, d: r.lane(s0, 1) }, 4)) s0 += 15;   // appear beyond the edge of the screen
       if (s0 < Math.min(car.s + 330, this.sEnd - 20) && !r.oneway(s0)) {
-        const meet = car.s + 170 * car.v / (car.v + -v0 + 0.01);
-        const blocked = this.ents.some((e) => e.alive && e.solid >= 0.7 && !e.scenery && e.d < 0 && Math.abs(e.s + (e.v || 0) * ((meet - car.s) / Math.max(car.v, 5)) - meet) < 38);
+        // where we'd meet at the current speed; if the player slows or stops (behind a queue) the meeting comes
+        // anywhere from here to there, so the whole stretch must leave the right lane open or the left lane free
+        const meet = car.s + (s0 - car.s) * car.v / (car.v + -v0 + 0.01), tMeet = (meet - car.s) / Math.max(car.v, 5);
+        const blocked = this.ents.some((e) => {
+          if (!e.alive || e.solid < 0.7 || e.scenery || e.d >= 0) return false;
+          const at = e.s + (e.parked ? 0 : e.v || 0) * tMeet;
+          return at > car.s - 10 && at < meet + 38;
+        });
         if (!blocked) this.add(pick(['sedan', 'suv', 'sedan']), { s: s0, d: r.lane(s0, 1), v: v0, color: pick(PAINT), dir: -1 });
       }
     }
@@ -332,7 +338,8 @@ export class World {
             Object.assign(e, { flying: true, fs: e.s, fd: e.d, fz: 0.2, fvs: car.v * rnd(0.6, 0.9), fvd: (e.d - car.d) * 6 + rnd(-2, 2), fvz: rnd(3, 6), spin: 0, hitDone: true, scenery: true });
             if (car.invuln <= 0) out.hits.push({ e, power: e.solid, label: e.type === 'cone' ? '' : 'CRASH' });
           } else if (car.invuln <= 0) {
-            out.hits.push({ e, power: 1, label: 'CRASH' }); e.v = Math.max(e.v, 0) + car.v * 0.3; e.hitDone = true;
+            out.hits.push({ e, power: 1, label: 'CRASH' }); e.hitDone = true;
+            if (e.dir !== -1) e.v = Math.max(e.v, 0) + car.v * 0.3;   // rear-ended: shoved on; oncoming: carries on past
             setTimeout(() => { e.hitDone = false; }, 900);
           }
         } else if (!e.parked && e.dir === -1 && !e.missed && ds < 2 && dd < hitD + 1.3) { e.missed = true; out.nearMiss++; }

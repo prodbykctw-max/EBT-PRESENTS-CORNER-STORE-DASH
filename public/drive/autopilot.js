@@ -85,8 +85,8 @@ export function autopilot(d, { log = console.log } = {}) {
       if (!best || cost < best.cost) best = { c, cost, soonest };
     }
     car.targetD = best.c;
-    // no clear gap inside ~1.3 s at this speed: brake like a player would
-    const mustBrake = best.soonest < 1.3 && car.v > 2;
+    // no clear gap inside ~1.3 s at this speed: brake like a player would, and hold it (wait) until one opens
+    const mustBrake = best.soonest < 1.3;
     if (mustBrake !== braking) { braking = mustBrake; key('ArrowDown', braking); if (braking) report.brakes++; }
     const beg = H.find((h) => h.type === 'panhandler' && h.s - car.s < 55 && h.s > car.s && Math.abs(h.d - best.c) < 2.5);
     if (beg && d.time - lastHonk > 1.5) { key('KeyH', true); key('KeyH', false); lastHonk = d.time; report.honks++; }
