@@ -246,6 +246,36 @@ while (Q.length) {
 const route = [];
 for (let u = t; u !== undefined; u = prev.get(u)) { const [x, y] = toXY(nodes.get(u)); route.unshift([r2(x), r2(y), r2(ground(x, y))]); }
 
+// ---------- route curb-to-curb width, measured from the mapped sidewalks ----------
+// OSM rarely tags street width or parking, but downtown's sidewalks are drawn as their own lines. At each route
+// point, cast a ray across the street to the nearest sidewalk on each side; a sidewalk centreline sits ~1.25 m
+// behind its curb, so curb-to-curb ≈ gap − 2.5 m. null where a side has no sidewalk (junctions, underpasses).
+const walkNodes = new Map([...nodes, ...xn]);
+const walks = [...ways, ...EXTRA.elements.filter((e) => e.type === 'way' && e.tags)]
+  .filter((w) => w.tags.highway === 'footway' && w.tags.footway === 'sidewalk')
+  .map((w) => w.nodes.map((id) => walkNodes.get(id)).filter(Boolean).map(toXY));
+const CURB_STEP = 10;                                       // one reading every 10 m along the route
+const along = [0]; for (let i = 1; i < route.length; i++) along.push(along[i - 1] + Math.hypot(route[i][0] - route[i - 1][0], route[i][1] - route[i - 1][1]));
+const stations = [];
+for (let sd = 0, i = 1; sd <= along.at(-1); sd += CURB_STEP) {
+  while (i < route.length - 1 && along[i] < sd) i++;
+  const a = route[i - 1], b = route[i], f = (sd - along[i - 1]) / ((along[i] - along[i - 1]) || 1);
+  stations.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a, b]);
+}
+const curb = stations.map(([x, y, a, b]) => {
+  const tl = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, nx = -(b[1] - a[1]) / tl, ny = (b[0] - a[0]) / tl;
+  const side = { 1: Infinity, [-1]: Infinity };
+  for (const w of walks) for (let k = 0; k + 1 < w.length; k++) {
+    const p = w[k], q = w[k + 1], ex = q[0] - p[0], ey = q[1] - p[1], den = nx * ey - ny * ex;
+    if (Math.abs(den) < 1e-6) continue;
+    const t = ((p[0] - x) * ey - (p[1] - y) * ex) / den, u = ((p[0] - x) * ny - (p[1] - y) * nx) / den;
+    if (u < 0 || u > 1 || Math.abs(t) < 2 || Math.abs(t) > 14) continue;
+    side[Math.sign(t)] = Math.min(side[Math.sign(t)], Math.abs(t));
+  }
+  const w = side[1] + side[-1] - 2.5;
+  return isFinite(w) && w >= 6 && w <= 18 ? r2(w) : null;
+});
+
 // ---------- landmarks ----------
 const landmarks = OSM.elements
   .filter((e) => e.tags?.name && (e.tags.tourism || e.tags.historic || e.tags.amenity === 'place_of_worship'))
@@ -260,7 +290,7 @@ const world = {
   // Hero row replaces whatever OSM buildings sit on these lots. x = frontage centre in the ROW frame (m).
   shops: ["Susie's Hair Care", 'Laundromat', 'EBT Corner Store', "JJ's Fish & Chicken"].map((name, i) => ({ name, x: r2((i - 2) * SHOP_W), width: SHOP_W })),
   cornerSign: { text: ['FORT ST', 'AUBURN AVE'], pos: toXY(CORNER).map(r2).concat(0) }, // world frame; kept from the intro
-  route: { length: Math.round(D.get(t)), pts: route },
+  route: { length: Math.round(D.get(t)), pts: route, curbStep: CURB_STEP, curb },   // curb[k]: measured curb-to-curb width (m) at k·curbStep along the route, or null
   elevation: { ...elev, z: elev.z.map((v) => r2(v - Z0)) },
   buildings, roads, landmarks, areas, points,
 };

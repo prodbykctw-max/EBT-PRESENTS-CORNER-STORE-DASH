@@ -41,7 +41,7 @@ export function autopilot(d, { log = console.log } = {}) {
     }
     lastAll = all; lastVis = vis;
     for (const h of out.hits) {
-      const rec = { t: +d.time.toFixed(1), hit: h.e.type, s: Math.round(car.s), carD: +car.d.toFixed(2), objD: +h.e.d.toFixed(2), v: +car.v.toFixed(1) };
+      const rec = { t: +d.time.toFixed(1), hit: h.e.type, s: Math.round(car.s), carD: +car.d.toFixed(2), objD: +h.e.d.toFixed(2), v: +car.v.toFixed(1), before: recorder.slice(-10) };
       report.hits.push(rec); log('BOT HIT', JSON.stringify(rec));
     }
     return out;
@@ -67,6 +67,7 @@ export function autopilot(d, { log = console.log } = {}) {
   };
 
   let braking = false, wantBrake = false, lastHonk = 0, slowFor = 0;
+  const recorder = [];   // flight recorder: the last ~2 s of decisions, attached to every hit
   const pending = [], act = (fn) => pending.push([performance.now() + REACTION * 1000, fn]);   // decided now, done a beat later
   const tick = () => {
     while (pending.length && pending[0][0] <= performance.now()) pending.shift()[1]();
@@ -98,10 +99,14 @@ export function autopilot(d, { log = console.log } = {}) {
         // the car also has to get there: sweep from where it is now for anything we'd reach at our ACTUAL speed
         // before the move is done (stopped, sliding over clips nothing that isn't already beside us)
         const hitReach = reach - 0.25, tNow = gap <= hitReach ? 0 : (gap - hitReach) / Math.max(car.v - h.vs, 0.01);
-        const sweep = tNow < 0.8;
+        // moving away from it (staying on the same side) can't hit it; crossing past it can
+        const away = Math.sign(c - h.d) === Math.sign(car.d - h.d) && Math.abs(c - h.d) >= Math.abs(car.d - h.d);
+        const sweep = tNow < 0.8 && !away;
         const lo = sweep ? Math.min(c, car.d) : c, hi = sweep ? Math.max(c, car.d) : c;
         if (h.d + need > lo && h.d - need < hi) { cost += 1000 * (LOOK_T + 0.2 - t); soonest = Math.min(soonest, t); }
       }
+      // the parking lane is for parking: only as a last resort (and at the store), never to undertake traffic
+      if (!approach && Math.abs(c) > route.travel(car.s) - 0.6) cost += 600;
       for (const tk of seenTokens) if (Math.abs(tk.d - c) < 1) cost -= 4;
       if (!best || cost < best.cost) best = { c, cost, soonest };
     }
@@ -110,11 +115,12 @@ export function autopilot(d, { log = console.log } = {}) {
     const nose = H.some((h) => { const gap = h.s - car.s, reach = PLAYER.halfL + h.L / 2;
       return gap > 0 && gap < reach + 2.5 && h.vs < car.v + 1 && Math.abs(h.d - car.d) < PLAYER.halfW + h.W / 2 + 0.15; });
     const mustBrake = best.soonest < 1.3 || nose;
-    // waiting: drop back into our own lane if it's free right here, otherwise hold where we are
-    const homeFree = !H.some((h) => Math.abs(h.s - car.s) <= PLAYER.halfL + h.L / 2 && Math.abs(h.d - want) < PLAYER.halfW + h.W / 2 + 0.2);
-    // (boxed in behind something with an open lane beside: brake AND steer out, like pulling out of a queue)
-    const line = best.soonest < 1.3 ? (homeFree ? want : car.targetD) : best.c;
+    // one plan at a time: head for the best line whenever it's actually open (braking or not, e.g. pulling out of
+    // a queue); when nothing is open, hold the line we're on and brake. Never flip back into a lane that's closed ahead.
+    const line = best.soonest < 1.3 ? car.targetD : best.c;
     act(() => { car.targetD = line; });
+    recorder.push({ s: Math.round(car.s), d: +car.d.toFixed(2), v: +car.v.toFixed(1), line: +line.toFixed(2), best: +best.c.toFixed(2), soon: isFinite(best.soonest) ? +best.soonest.toFixed(2) : 'inf', brake: mustBrake, nose, seen: H.filter((h) => h.s > car.s && h.s - car.s < 40).map((h) => h.type[0] + Math.round(h.s - car.s) + '@' + h.d.toFixed(1)).join(' ') });
+    if (recorder.length > 40) recorder.shift();
     // no clear gap inside ~1.3 s at this speed: brake like a player would, and hold it (wait) until one opens
     if (mustBrake !== wantBrake) { wantBrake = mustBrake; act(() => { braking = mustBrake; key('ArrowDown', braking); if (braking) report.brakes++; }); }
     const beg = H.find((h) => h.type === 'panhandler' && h.s - car.s < 55 && h.s > car.s && Math.abs(h.d - best.c) < 2.5);

@@ -109,10 +109,10 @@ function roadMaterial(tex, offset, fade) {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uWet = m.userData.wet;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec4 aRoad; attribute float aMark; varying vec4 vRoad; varying vec2 vRUv; varying float vMark;')
-      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvRoad = aRoad; vRUv = uv; vMark = aMark;');
+      .replace('#include <common>', '#include <common>\nattribute vec4 aRoad; attribute float aMark; attribute float aPark; varying vec4 vRoad; varying vec2 vRUv; varying float vMark; varying float vPark;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvRoad = aRoad; vRUv = uv; vMark = aMark; vPark = aPark;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uWet; varying vec4 vRoad; varying vec2 vRUv; varying float vMark;')
+      .replace('#include <common>', '#include <common>\nuniform float uWet; varying vec4 vRoad; varying vec2 vRUv; varying float vMark; varying float vPark;')
       .replace('#include <map_fragment>', `
         vec2 tuv = vec2(vRUv.x * vRoad.w, vRUv.y) / 5.0;
         diffuseColor *= texture2D(map, tuv);
@@ -120,7 +120,9 @@ function roadMaterial(tex, offset, fade) {
         float endFade = smoothstep(3.0, 7.0, along) * smoothstep(3.0, 7.0, vRoad.z - along) * smoothstep(0.5, 1.0, vMark);
         float px = fwidth(across * w) * 1.5;
         float line = 0.0; vec3 lineCol = vec3(0.93);
-        float edge = max(1.0 - smoothstep(0.1, 0.1 + px, abs(across * w - 0.4)), 1.0 - smoothstep(0.1, 0.1 + px, abs((1.0 - across) * w - 0.4)));
+        // edge line: 0.4 m in from the curb, or out at the parking lane where the street has one
+        float eo = vPark > 0.5 ? vPark : 0.4;
+        float edge = max(1.0 - smoothstep(0.1, 0.1 + px, abs(across * w - eo)), 1.0 - smoothstep(0.1, 0.1 + px, abs((1.0 - across) * w - eo)));
         if (vRoad.y > 1.5) {                              // two-way: double yellow centre, white edges on wide streets
           float c = abs(across - 0.5) * w;
           float centre = 1.0 - smoothstep(0.075, 0.075 + px, abs(c - 0.17));
@@ -145,7 +147,7 @@ function roadMaterial(tex, offset, fade) {
  *  which also stand on ground(x, y) + level — always sit exactly on it. Elevated freeway pieces are flat
  *  decks at centre height; wherever a deck would dip into rising terrain the terrain wins (max()). */
 function ribbonMesh(list, tex, { offset = -2, fade = false, name, ground }) {
-  const pos = [], uv = [], info = [], mark = [], idx = [];
+  const pos = [], uv = [], info = [], mark = [], park = [], idx = [];
   for (const r of list) {
     const p = r.p, n = normals(p);
     const lanes = Math.max(1, Math.round(r.width / 3.4)), kind = r.cls === 'service' ? 0 : r.oneway ? 1 : 2;
@@ -155,14 +157,14 @@ function ribbonMesh(list, tex, { offset = -2, fade = false, name, ground }) {
     for (let i = 0; i < p.length; i++) {
       if (i) along += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
       const w = r.widths ? r.widths[i] : r.width, hw = w / 2;
-      const mk = r.marks ? r.marks[i] : 1;
+      const mk = r.marks ? r.marks[i] : 1, pk = r.parks ? r.parks[i] : 0;
       for (let j = 0; j < K; j++) {
         const f = j / (K - 1), o = hw * (1 - 2 * f), x = p[i][0] + n[i][0] * o, y = p[i][1] + n[i][1] * o;
         // highest terrain within 0.4 m: ~2 cm on normal streets, keeps the road on top along near-cliff DEM slopes
         let gz = Math.max(ground(x, y), ground(x + 0.4, y), ground(x - 0.4, y), ground(x, y + 0.4), ground(x, y - 0.4));
         if (gz - ground(x, y) > 0.16) gz = Math.max(gz, ground(x + 0.9, y), ground(x - 0.9, y), ground(x, y + 0.9), ground(x, y - 0.9)); // >40 % slope
         const z = p[i][3] > 0.05 ? Math.max(deckTop(ground, x, y, p[i][3]), gz) + r.lift : gz + r.lift;
-        pos.push(x, z, -y); uv.push(f, along); info.push(lanes, kind, total, w); mark.push(mk);
+        pos.push(x, z, -y); uv.push(f, along); info.push(lanes, kind, total, w); mark.push(mk); park.push(pk);
       }
     }
     for (let i = 0; i + 1 < p.length; i++) for (let j = 0; j + 1 < K; j++) {
@@ -189,6 +191,7 @@ function ribbonMesh(list, tex, { offset = -2, fade = false, name, ground }) {
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.setAttribute('aRoad', new THREE.Float32BufferAttribute(info, 4));
   g.setAttribute('aMark', new THREE.Float32BufferAttribute(mark, 1));
+  g.setAttribute('aPark', new THREE.Float32BufferAttribute(park, 1));
   g.setIndex(idx); g.computeVertexNormals();
   const mesh = new THREE.Mesh(g, roadMaterial(tex, offset, fade));
   mesh.receiveShadow = true; mesh.name = name;
@@ -230,13 +233,13 @@ export function buildStreets(W, ground, route, tex) {
   for (const r of runs) for (let i = 0; i + 1 < r.p.length; i++) index.add(r.p[i][0], r.p[i][1], r.p[i + 1][0], r.p[i + 1][1], r.width / 2, r.id);
 
   // 2) the route's own road, with the centre line broken across intersections and crosswalks
-  const R = { id: 'route', cls: 'primary', oneway: false, lift: LEVEL.ROUTE, p: [], widths: [], marks: [] };
+  const R = { id: 'route', cls: 'primary', oneway: false, lift: LEVEL.ROUTE, p: [], widths: [], marks: [], parks: [] };
   const crossings = (W.points || []).filter((q) => q[0] === 'crossing');
   for (let s = 0; s <= route.length; s += 1) {
     const q = route.at(s), hw = route.hw(s);
     const cross = index.covering(q.x, q.y, null, 1.0);                      // another street meets us here
     const zebra = crossings.some((c) => Math.abs(c[1] - q.x) < 5 && Math.abs(c[2] - q.y) < 5 && Math.hypot(c[1] - q.x, c[2] - q.y) < 3);
-    R.p.push([q.x, q.y, ground(q.x, q.y), 0]); R.widths.push(hw * 2); R.marks.push(cross || zebra ? 0 : 1);
+    R.p.push([q.x, q.y, ground(q.x, q.y), 0]); R.widths.push(hw * 2); R.marks.push(cross || zebra ? 0 : 1); R.parks.push(route.parkD(s, 1) ? route.park(s) : 0);
   }
   R.width = R.widths[0];
   // widen the "no paint" zones a little and index the route road for curbs/crosswalks
@@ -314,7 +317,7 @@ export function buildStreets(W, ground, route, tex) {
   const fw = buildFreeway(elevated, ground, tex);
 
   const group = new THREE.Group(); group.add(junctions, roadsMesh, routeMesh, curbs, crosswalks);
-  return { group, roadsMesh, routeMesh, junctions, freeway: fw, index, runs, surfaces: [roadsMesh, routeMesh, fw.deck],
+  return { group, roadsMesh, routeMesh, junctions, freeway: fw, index, runs, routeMarks: R.marks, surfaces: [roadsMesh, routeMesh, fw.deck],
     drivable: [roadsMesh, routeMesh, junctions, fw.deck] }; // every surface a wheel can touch
 }
 
