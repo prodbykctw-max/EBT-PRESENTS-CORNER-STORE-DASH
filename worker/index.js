@@ -80,6 +80,11 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // the front page is the full game (drive + store), the same page GitHub Pages serves at /
+    // (public/index.html stays the modular build the tests exercise; wrangler.toml runs us first for / only)
+    if (url.pathname === '/') {
+      return env.ASSETS.fetch(new Request(new URL('/standalone', url), request));
+    }
     if (!url.pathname.startsWith('/api/')) {
       return env.ASSETS.fetch(request);
     }
