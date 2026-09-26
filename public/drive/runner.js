@@ -81,9 +81,10 @@ export class RouteFrame {
   }
   hw(s) { return this.HW[Math.round(this.i(s))]; }
   hwAt(x, y) { return this.hw(this.project(x, y).s); }
-  /** the road is two travel lanes (≤ 3.45 m each) in the middle; whatever is left out to each curb is a
-   *  curbside parking lane (where it's ≥ 2 m) or a shoulder */
-  travel(s) { return Math.min(this.hw(s), 3.45); }
+  /** the road is two travel lanes in the middle and, where the street is wide enough, a standard 2.4 m curbside
+   *  parking lane on each side; the travel lanes take the rest (Auburn's are wide: shared with bikes, streetcar
+   *  in the westbound one) */
+  travel(s) { const hw = this.hw(s); return Math.min(hw, Math.max(3.45, hw - 2.4)); }
   park(s) { return this.hw(s) - this.travel(s); }
   /** centre of travel lane k (0 = right/your lane, 1 = left) */
   lane(s, k) { const t = this.travel(s); return k === 0 ? -t / 2 : t / 2; }
@@ -166,9 +167,10 @@ const TYPES = {
   // scenery (never collides)
   bus: { L: 12, W: 2.55, solid: 0 }, worksign: { L: 1, W: 1, solid: 0 }, walker: { L: 0.5, W: 0.5, solid: 0 },
   stander: { L: 0.5, W: 0.5, solid: 0 }, cyclist: { L: 1.8, W: 0.6, solid: 0 },
+  tram: { L: 24.8, W: 2.65, solid: 1 },   // the Atlanta Streetcar (tram.js moves and draws it)
 };
 // half wheelbase / half track used to seat each vehicle on the road
-const VEHICLE = { sedan: [1.35, 0.8], suv: [1.42, 0.86], bus: [3.6, 1.15] };
+const VEHICLE = { sedan: [1.35, 0.8], suv: [1.42, 0.86], bus: [3.6, 1.15], tram: [11, 1.3] };
 const PAINT = [0xb8bcc2, 0x1d1f24, 0xe9e9e6, 0x7a1a1a, 0x1f3c78, 0x5a5f66, 0x24542f, 0xc4a44a, 0x8a8f96, 0x2b2b30];
 const SHIRTS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2e2e2e, 0xe8e8e8, 0x3d9a5b, 0x8e44ad, 0xff8c1a, 0x1abc9c, 0x7f8c8d];
 const BUS_STRIPE = [0x1d5fbf, 0xc62828];
@@ -248,7 +250,7 @@ export class World {
     for (const side of [-1, 1]) for (let s1 = rnd(6, 12); s1 < r.length - 4; s1 += rnd(6.2, 7.2)) {
       const pd = r.parkD(s1, side); if (pd === null || !clearAt(s1) || Math.random() > 0.6) continue;
       if (side < 0 && (this.workZones || []).some(([a, b]) => s1 > a && s1 < b)) continue;   // coned off
-      if (side < 0 && Math.abs(s1 - sStop) < 10) continue;                                    // the store's P space
+      if (side < 0 && s1 > sStop - 14 && s1 < sStop + 16) continue;                          // the store's P space (room to pull in)
       this.add(pick(['sedan', 'sedan', 'suv']), { s: s1, d: pd + side * rnd(-0.1, 0.15), color: pick(PAINT), dir: side > 0 ? -1 : 1, parked: true, curb: true });
     }
     // a couple of cyclists in the bike lane (people on foot are the crowd: crowd.js)
@@ -356,8 +358,11 @@ export class World {
     };
     // courtesy: once the player has stopped behind one, oncoming cars wait just past its far end and wave them through
     const waitEnd = car.v < 3 ? stretchFrom(car.s) : -1;
+    // work zones on a two-lane street run alternating traffic: as the player comes up to one, a flagger holds the
+    // oncoming side just past its far end (cars already inside finish passing) so the open lane is theirs
+    const zone = (this.workZones || []).find(([a, b]) => car.s > a - 70 && car.s < b + 5);
     for (const e of this.ents) if (e.dir === -1 && e.v0) {
-      const yieldHere = waitEnd > 0 && e.s > waitEnd + 8 && e.s - waitEnd < 40;
+      const yieldHere = (waitEnd > 0 && e.s > waitEnd + 8 && e.s - waitEnd < 40) || (zone && e.s > zone[1] + 6 && e.s < zone[1] + 70);
       e.v = yieldHere ? Math.min(0, e.v + 20 * dt) : Math.max(e.v0, e.v - 6 * dt);   // ease to a stop / back up to speed
     }
     for (const e of this.ents) {
@@ -380,7 +385,7 @@ export class World {
       // oncoming cars stop for anything in their lane: the car in front (maybe yielding), a car overtaking
       // toward them, or the player
       if (e.dir === -1 && e.v0) {
-        const ahead = this.ents.find((o) => o !== e && o.alive && !o.scenery && !o.flying && VEHICLE[o.type] && o.s < e.s && e.s - o.s < 12 && Math.abs(o.d - e.d) < 1.8);
+        const ahead = this.ents.find((o) => o !== e && o.alive && !o.scenery && !o.flying && VEHICLE[o.type] && o.s < e.s && e.s - o.s < (o.L || 4.5) / 2 + (e.L || 4.5) / 2 + 3 && Math.abs(o.d - e.d) < 1.8);
         if (ahead) e.v = Math.max(e.v, Math.min(0, ahead.dir === -1 ? ahead.v : 0));
         // the player over the line in front of them: ease over toward their own curb and squeeze past slowly
         // (a real driver doesn't sit nose to nose); stop only if there's no room to get by
@@ -509,7 +514,7 @@ export class World {
     // distance, so a turning camera never sweeps an undrawn car into view)
     const win0 = car.s - 60, win1 = car.s + 280, cam = this.camera?.position;
     for (const e of this.ents) {
-      if (e.s < car.s - 400 || e.s > car.s + 800) continue;
+      if (e.type === 'tram' || e.s < car.s - 400 || e.s > car.s + 800) continue;   // (tram.js draws the streetcar)
       const p = this.route.at(e.s, e.d);
       if ((e.s < win0 || e.s > win1) && !(cam && this.visible(p.x, p.y, p.z + 0.8, 4 + Math.hypot(p.x - cam.x, p.z - cam.y, -p.y - cam.z) * 0.04))) continue;
       let yaw = p.a + (e.dir === -1 ? Math.PI : 0) + (e.yawOff || 0) + (e.v < 0 && e.scenery ? Math.PI : 0);
