@@ -1,18 +1,59 @@
-// Runtime city: builds terrain, roads and every OSM building from world.json (0.4 MB) instead of shipping
-// a heavy city model. Only the hand-made hero row comes from a glTF.
+// Runtime city: builds the whole of downtown from world.json (≈0.5 MB) instead of shipping a heavy city model.
+// This file owns the buildings and orchestrates the rest: streets + freeway (roads.js), terrain, land cover,
+// contact shadows and streetscape (landscape.js). Only the hand-made hero row and props come from glTF.
 // Frames: world.json is metres, +x east, +y north, z up. three.js is X = x, Y = z, Z = -y.
 import * as THREE from './vendor/three.module.min.js';
+import { LEVEL } from './levels.js';
+import { buildStreets } from './roads.js';
+import { buildTerrain, buildCover, buildContactShadows, buildStreetscape, pointInPoly } from './landscape.js';
+export { pointInPoly };
 
 export const toV3 = (x, y, z = 0) => new THREE.Vector3(x, z, -y);
 
-export function makeGround(W) {
+/** THE height function of the world. The DEM is resampled onto an 8 m grid (bilinear, once) and ground(x, y)
+ *  interpolates that grid with exactly the same two triangles per cell (diagonal i,j → i+1,j+1) that the
+ *  terrain mesh is built from. So anything placed at ground(x, y) is ON the rendered terrain — not a smooth
+ *  formula that disagrees with the flat triangles by up to half a metre on Atlanta's hills. */
+export function makeGround(W, STEP = 8, PAD = 400) {
   const E = W.elevation;
-  return (x, y) => {
+  const bil = (x, y) => {
     const fx = Math.min(Math.max((x - E.x0) / E.step, 0), E.gx - 1.001);
     const fy = Math.min(Math.max((y - E.y0) / E.step, 0), E.gy - 1.001);
     const i = fx | 0, j = fy | 0, u = fx - i, v = fy - j, Z = (a, b) => E.z[b * E.gx + a];
     return (Z(i, j) * (1 - u) + Z(i + 1, j) * u) * (1 - v) + (Z(i, j + 1) * (1 - u) + Z(i + 1, j + 1) * u) * v;
   };
+  const x0 = E.x0 - PAD, y0 = E.y0 - PAD;
+  const nx = Math.ceil(((E.gx - 1) * E.step + 2 * PAD) / STEP), ny = Math.ceil(((E.gy - 1) * E.step + 2 * PAD) / STEP);
+  const H = new Float32Array((nx + 1) * (ny + 1));
+  for (let j = 0; j <= ny; j++) for (let i = 0; i <= nx; i++) H[j * (nx + 1) + i] = bil(x0 + i * STEP, y0 + j * STEP);
+  const ground = (x, y) => {
+    const fx = Math.min(Math.max((x - x0) / STEP, 0), nx - 1e-6), fy = Math.min(Math.max((y - y0) / STEP, 0), ny - 1e-6);
+    const i = fx | 0, j = fy | 0, u = fx - i, v = fy - j, r = nx + 1;
+    const h00 = H[j * r + i], h10 = H[j * r + i + 1], h01 = H[(j + 1) * r + i], h11 = H[(j + 1) * r + i + 1];
+    return u >= v ? h00 + u * (h10 - h00) + v * (h11 - h10) : h00 + v * (h01 - h00) + u * (h11 - h01);
+  };
+  ground.grid = { x0, y0, step: STEP, nx, ny, H };
+  // freeway grade surface: the smooth 40 m DEM. Every deck is "grade + h", so overlapping decks (a ramp
+  // merging into the Connector) share one surface instead of each following the bumps under its own centre line
+  // blurred over ~120 m (3 passes of a 3×3 box on the 40 m DEM) so decks are near-level across their width
+  let Z = Float32Array.from(E.z);
+  for (let pass = 0; pass < 3; pass++) {
+    const nz = new Float32Array(Z.length);
+    for (let j = 0; j < E.gy; j++) for (let i = 0; i < E.gx; i++) {
+      let a = 0, c = 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= E.gx || jj >= E.gy) continue; a += Z[jj * E.gx + ii]; c++;
+      }
+      nz[j * E.gx + i] = a / c;
+    }
+    Z = nz;
+  }
+  ground.grade = (x, y) => {
+    const fx = Math.min(Math.max((x - E.x0) / E.step, 0), E.gx - 1.001), fy = Math.min(Math.max((y - E.y0) / E.step, 0), E.gy - 1.001);
+    const i = fx | 0, j = fy | 0, u = fx - i, v = fy - j, q = (a, b) => Z[b * E.gx + a];
+    return (q(i, j) * (1 - u) + q(i + 1, j) * u) * (1 - v) + (q(i, j + 1) * (1 - u) + q(i + 1, j + 1) * u) * v;
+  };
+  return ground;
 }
 
 // Deterministic per-building randomness, so the city looks the same every run.
@@ -21,112 +62,6 @@ const hash = (n) => { n = (n ^ 61) ^ (n >>> 16); n = Math.imul(n, 9); n ^= n >>>
 // Hero row footprint in world coords (row frame x∈[-35,21], y∈[-4,12], rotated 180° → world).
 export const HERO_BOX = { x0: -21, x1: 35, y0: -12, y1: 4 };
 const inHero = (x, y) => x > HERO_BOX.x0 - 4 && x < HERO_BOX.x1 + 4 && y > HERO_BOX.y0 - 6 && y < HERO_BOX.y1 + 2;
-
-function canvasTexture(size, draw, repeat = true) {
-  const c = document.createElement('canvas'); c.width = c.height = size;
-  draw(c.getContext('2d'), size);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 8;
-  return t;
-}
-
-function asphaltTexture() {
-  return canvasTexture(256, (g, s) => {
-    g.fillStyle = '#2b2c2e'; g.fillRect(0, 0, s, s);
-    const img = g.getImageData(0, 0, s, s), d = img.data;
-    for (let i = 0; i < d.length; i += 4) { const n = (Math.random() - 0.5) * 26; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
-    g.putImageData(img, 0, 0);
-    for (let k = 0; k < 40; k++) { // patched tar seams and stains
-      g.fillStyle = `rgba(${Math.random() < 0.5 ? '15,15,16' : '70,70,72'},${0.08 + Math.random() * 0.1})`;
-      g.beginPath(); g.ellipse(Math.random() * s, Math.random() * s, 4 + Math.random() * 30, 2 + Math.random() * 10, Math.random() * 3, 0, 7); g.fill();
-    }
-  });
-}
-
-// ---------------- roads: ribbons with markings drawn in the shader (no extra geometry) ----------------
-// OSM nodes can be 60 m apart; a straight ribbon between them would cut under a hill. Resample every
-// 4 m and drape each point on the same ground function the terrain uses (bridges keep their deck line).
-function drape(pts, ground, onGround) {
-  const out = [];
-  for (let i = 0; i + 1 < pts.length; i++) {
-    const [ax, ay, az] = pts[i], [bx, by, bz] = pts[i + 1], L = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.ceil(L / 4));
-    for (let k = 0; k < n; k++) {
-      const t = k / n, x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
-      out.push([x, y, onGround ? ground(x, y) : az + (bz - az) * t]);
-    }
-  }
-  out.push(pts[pts.length - 1]);
-  return out;
-}
-
-function buildRoads(roads, tex, ground, { bridges = false, dense = false, extraLift = 0, offset = -2 } = {}) {
-  const pos = [], uv = [], info = [], idx = [];
-  const RANK = { motorway: 6, trunk: 6, primary: 5, secondary: 4, tertiary: 3, residential: 2, unclassified: 2, living_street: 1, service: 0 };
-  for (const rd of roads) {
-    if (rd.pts.length < 2 || !!rd.bridge !== bridges) continue;
-    const p = dense ? rd.pts : drape(rd.pts, ground, !bridges);
-    const base = pos.length / 3;
-    const lift = 0.06 + extraLift + (rd.bridge ? 7 * (rd.layer || 1) : 0) + (RANK[rd.cls.replace('_link', '')] ?? 1) * 0.004;
-    const lanes = Math.max(1, Math.round(rd.width / 3.4));
-    const kind = rd.cls.startsWith('service') ? 0 : rd.oneway ? 1 : 2; // 0 plain, 1 one-way lanes, 2 two-way
-    let along = 0; const segLen = [];
-    for (let i = 0; i + 1 < p.length; i++) segLen.push(Math.hypot(p[i + 1][0] - p[i][0], p[i + 1][1] - p[i][1]));
-    const total = segLen.reduce((a, b) => a + b, 0);
-    for (let i = 0; i < p.length; i++) {
-      const a = p[Math.max(i - 1, 0)], b = p[Math.min(i + 1, p.length - 1)];
-      let dx = b[0] - a[0], dy = b[1] - a[1]; const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
-      const nx = -dy, ny = dx, z = p[i][2] + lift, w = rd.widths ? rd.widths[i] : rd.width, hw = w / 2;
-      pos.push(p[i][0] + nx * hw, z, -(p[i][1] + ny * hw), p[i][0] - nx * hw, z, -(p[i][1] - ny * hw));
-      uv.push(0, along, 1, along);
-      info.push(lanes, kind, total, w, lanes, kind, total, w);
-      if (i < segLen.length) along += segLen[i];
-    }
-    for (let i = 0; i + 1 < p.length; i++) { const k = base + i * 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  g.setAttribute('aRoad', new THREE.Float32BufferAttribute(info, 4));
-  g.setIndex(idx); g.computeVertexNormals();
-  const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: offset, polygonOffsetUnits: offset });
-  m.userData.wet = { value: 0 };
-  m.onBeforeCompile = (sh) => {
-    sh.uniforms.uWet = m.userData.wet;
-    sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec4 aRoad; varying vec4 vRoad; varying vec2 vRUv;')
-      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvRoad = aRoad; vRUv = uv;');
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform float uWet; varying vec4 vRoad; varying vec2 vRUv;')
-      .replace('#include <map_fragment>', `
-        vec4 texelColor = texture2D(map, vec2(vRUv.x * vRoad.w, vRUv.y) / 6.0);
-        diffuseColor *= texelColor;
-        float across = vRUv.x, along = vRUv.y, w = vRoad.w;
-        float endFade = smoothstep(4.0, 9.0, along) * smoothstep(4.0, 9.0, vRoad.z - along); // keep intersections clean
-        float px = fwidth(across * w);
-        float line = 0.0; vec3 lineCol = vec3(0.92);
-        float edge = (1.0 - smoothstep(0.12, 0.12 + px, abs(across * w - 0.45))) + (1.0 - smoothstep(0.12, 0.12 + px, abs((1.0 - across) * w - 0.45)));
-        if (vRoad.y > 1.5) { // two-way: double yellow centre line
-          float c = abs(across - 0.5) * w;
-          float centre = (1.0 - smoothstep(0.08, 0.08 + px, abs(c - 0.18)));
-          float edges = clamp(edge, 0.0, 1.0) * 0.8 * step(9.0, w);
-          lineCol = mix(vec3(0.92), vec3(0.95, 0.72, 0.12), step(edges, centre)); // yellow centre, white edges
-          line = max(centre, edges);
-        } else if (vRoad.y > 0.5) { // one-way: dashed white lane dividers
-          float lanes = vRoad.x; float f = fract(across * lanes);
-          float dash = step(0.5, fract(along / 9.0));
-          line = (1.0 - smoothstep(0.06, 0.06 + px / w * lanes * w, min(f, 1.0 - f) * w / lanes)) * dash * step(1.5, lanes);
-          line += edge * 0.8;
-        }
-        diffuseColor.rgb = mix(diffuseColor.rgb, lineCol, clamp(line, 0.0, 1.0) * 0.85 * endFade);
-        diffuseColor.rgb *= mix(1.0, 0.62, uWet);`)
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.18, uWet);');
-  };
-  if (bridges) m.transparent = true; // decks fade out while you drive underneath (see drive.js)
-  const mesh = new THREE.Mesh(g, m); mesh.receiveShadow = true; mesh.castShadow = bridges; mesh.name = bridges ? 'bridges' : 'roads';
-  return mesh;
-}
 
 // ---------------- buildings: merged walls with a procedural facade shader + textured roofs ----------------
 const PALETTE = { // [r,g,b] wall tints by style
@@ -156,7 +91,7 @@ function buildBuildings(W, tex, ground) {
     if (inHero(cx, cy)) continue;                           // the hand-built row replaces these lots
     const r = hash(b.id % 2147483647), style = styleOf(b, r);
     const tint = Object.values(PALETTE)[style][(r * 4) | 0];
-    const z0 = b.base - 0.5 + (b.canopy ? b.h - 0.6 : (b.minH || 0)), z1 = b.base + b.h;
+    const z0 = b.base + LEVEL.TERRAIN - 0.6 + (b.canopy ? b.h - 0.6 : (b.minH || 0)), z1 = b.base + b.h; // walls start below grade: never float
     // walls
     let run = 0;
     for (let i = 0; i < pts.length; i++) {
@@ -256,56 +191,33 @@ function buildBuildings(W, tex, ground) {
   return { group: new THREE.Group().add(walls, roofs, units, outline), colliders };
 }
 
-export function pointInPoly(x, y, pts) {
-  let inside = false;
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-    const [xi, yi] = pts[i], [xj, yj] = pts[j];
-    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+
+/** footprint grid: "is this spot inside a building?" (for placing trees, lamps, benches) */
+function footprintIndex(W) {
+  const cell = 40, g = new Map();
+  for (const b of W.buildings) {
+    if (b.canopy) continue;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const [x, y] of b.pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+    for (let gx = Math.floor(x0 / cell); gx <= Math.floor(x1 / cell); gx++) for (let gy = Math.floor(y0 / cell); gy <= Math.floor(y1 / cell); gy++) {
+      const k = gx + ',' + gy; if (!g.has(k)) g.set(k, []); g.get(k).push(b.pts);
+    }
   }
-  return inside;
+  return (x, y) => !(g.get(Math.floor(x / cell) + ',' + Math.floor(y / cell)) || []).some((p) => pointInPoly(x, y, p));
 }
 
-function buildTerrain(W, tex, ground) {
-  // Re-sample the 40 m elevation grid at 8 m through the SAME bilinear function the roads, buildings and car
-  // use, so the ground can never poke up through a road on a slope. Sits 0.25 m low; roads/curbs ride on top.
-  const E = W.elevation, STEP = 8;
-  const x0 = E.x0, y0 = E.y0, x1 = E.x0 + (E.gx - 1) * E.step, y1 = E.y0 + (E.gy - 1) * E.step;
-  const nx = Math.ceil((x1 - x0) / STEP), ny = Math.ceil((y1 - y0) / STEP);
-  const g = new THREE.PlaneGeometry(x1 - x0, y1 - y0, nx, ny);
-  const p = g.attributes.position, uv = g.attributes.uv;
-  for (let j = 0; j <= ny; j++) for (let i = 0; i <= nx; i++) {
-    const k = j * (nx + 1) + i, x = x0 + (i / nx) * (x1 - x0), y = y1 - (j / ny) * (y1 - y0); // rows run north → south
-    p.setXYZ(k, x, ground(x, y) - 0.25, -y);
-    uv.setXY(k, x / 3, y / 3);
-  }
-  g.computeVertexNormals();
-  const m = new THREE.MeshStandardMaterial({ map: tex.sidewalk, color: 0xc9c7c1, roughness: 0.95 });
-  const mesh = new THREE.Mesh(g, m); mesh.receiveShadow = true; mesh.name = 'ground';
-  return mesh;
-}
-
-export function buildCity(W, tex) {
-  const ground = makeGround(W);
+export function buildCity(W, tex, ground, route, props) {
   const b = buildBuildings(W, tex, ground);
+  const streets = buildStreets(W, ground, route, tex);
+  const outside = footprintIndex(W);
+  const isFree = (x, y) => outside(x, y) && !inHero(x, y);
   const group = new THREE.Group();
-  const asphalt = asphaltTexture();
-  const roads = buildRoads(W.roads, asphalt, ground), bridges = buildRoads(W.roads, asphalt, ground, { bridges: true });
-  group.add(buildTerrain(W, tex, ground), roads, bridges, b.group);
-  // 2D footprint of every deck, so the drive can tell when the car is underneath one
-  const decks = [];
-  for (const rd of W.roads) if (rd.bridge) for (let i = 0; i + 1 < rd.pts.length; i++) decks.push([rd.pts[i][0], rd.pts[i][1], rd.pts[i + 1][0], rd.pts[i + 1][1], rd.width / 2 + 3]);
-  // hero row blocks the lot it stands on
-  b.colliders.push([[HERO_BOX.x0, HERO_BOX.y0], [HERO_BOX.x1, HERO_BOX.y0], [HERO_BOX.x1, HERO_BOX.y1], [HERO_BOX.x0, HERO_BOX.y1]]);
-  return { group, colliders: b.colliders, ground, roads: [roads, bridges], bridges, decks, asphalt };
-}
-
-/** The drive route as ONE continuous two-lane road on top of the OSM ribbons: unbroken centre line and edge
- *  lines for the whole run, and exactly the width the gameplay lanes use (route.hw), so what you see is
- *  what you can drive. */
-export function buildRouteRoad(route, tex) {
-  const pts = [], widths = [];
-  for (let s = 0; s <= route.length; s += 2) { const p = route.at(s); pts.push([p.x, p.y, p.z]); widths.push(route.hw(s) * 2); }
-  const mesh = buildRoads([{ pts, widths, width: widths[0], cls: 'primary', oneway: false }], tex, null, { dense: true, extraLift: 0.03, offset: -4 });
-  mesh.name = 'route_road';
-  return mesh;
+  group.add(
+    buildTerrain(W, tex, ground),
+    buildCover(W, ground, tex, streets),
+    buildContactShadows(W, ground, (bd) => { let cx = 0, cy = 0; for (const [x, y] of bd.pts) { cx += x; cy += y; } return inHero(cx / bd.pts.length, cy / bd.pts.length); }),
+    streets.group, streets.freeway.group, b.group,
+    buildStreetscape(W, ground, route, streets, props, isFree),
+  );
+  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces };
 }

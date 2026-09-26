@@ -207,7 +207,74 @@ def cyclist():
     b.box((0, 0.2, 1.6), (0.26, 0.32, 0.1), (0.9, 0.85, 0.1))             # helmet
     return b.finish("prop_cyclist")
 
-objs = [sedan(), suv(), bus(), cone(), barricade(), work_sign(), person("walk"), person("stand"), person("stand", sign=True), cyclist()]
+# ---------------- streetscape ----------------
+BARK = (0.24, 0.17, 0.11); STEEL = (0.3, 0.32, 0.34); GALV = (0.62, 0.64, 0.66); SIGNAL_Y = (0.9, 0.72, 0.1)
+def tree(kind):
+    """Street tree. Canopy is WHITE (tinted per instance: season/variety greens); trunk fixed bark."""
+    b = Builder()
+    b.cyl((0, 0, 1.4), 0.16, 2.8, BARK, seg=8, r2=0.11)
+    if kind == "round":      # oak / elm: a clustered, lumpy crown
+        for (x, y, z, r) in ((0, 0, 4.2, 2.3), (1.2, 0.5, 3.7, 1.6), (-1.1, -0.6, 3.8, 1.7), (0.3, -1.2, 4.6, 1.5), (-0.4, 1.1, 4.9, 1.4)):
+            res = bmesh.ops.create_icosphere(b.bm, subdivisions=1, radius=r, matrix=M.Translation((x, y, z)))
+            b._paint({f for v in res["verts"] for f in v.link_faces}, WHITE)
+    else:                    # upright (e.g. Bradford pear): tall teardrop
+        res = bmesh.ops.create_icosphere(b.bm, subdivisions=1, radius=1.5, matrix=M.Translation((0, 0, 4.3)) @ M.Scale(1.9, 4, (0, 0, 1)))
+        b._paint({f for v in res["verts"] for f in v.link_faces}, WHITE)
+    return b.finish(f"prop_tree_{kind}")
+
+def street_lamp():
+    """Cobra-head street light: tapered pole, arm reaching over the road (+Y), luminaire."""
+    b = Builder()
+    b.cyl((0, 0, 4.5), 0.13, 9.0, GALV, seg=10, r2=0.08)
+    b.box((0, 1.1, 8.85), (0.08, 2.3, 0.08), GALV, rot=M.Rotation(-0.12, 4, "X"))
+    b.box((0, 2.3, 8.7), (0.36, 0.75, 0.16), GALV)
+    b.box((0, 2.3, 8.6), (0.28, 0.55, 0.03), (1.0, 0.96, 0.85))
+    b.cyl((0, 0, 0.3), 0.2, 0.6, STEEL, seg=10)
+    return b.finish("prop_lamp")
+
+def signal_mast():
+    """Traffic signal: pole at the corner, mast arm over the road (+Y); heads face -X (oncoming traffic when
+    the runtime maps local +X to the direction of travel)."""
+    b = Builder()
+    b.cyl((0, 0, 3.6), 0.17, 7.2, STEEL, seg=10, r2=0.13)
+    b.box((0, 3.3, 6.6), (0.12, 6.6, 0.12), STEEL)
+    for y in (2.4, 4.6, 6.3):
+        b.box((0, y, 6.05), (0.4, 0.3, 1.05), SIGNAL_Y)
+        for k, c in enumerate(((0.9, 0.1, 0.05), (1.0, 0.75, 0.05), (0.1, 0.85, 0.3))):
+            b.cyl((-0.21, y, 6.4 - k * 0.33), 0.1, 0.03, c, axis="X", seg=10)
+    b.box((-0.16, 0, 3.0), (0.35, 0.35, 0.5), SIGNAL_Y)  # pedestrian head
+    return b.finish("prop_signal")
+
+def bench():
+    b = Builder()
+    b.box((0, 0, 0.45), (1.8, 0.45, 0.06), (0.35, 0.22, 0.12))
+    b.box((0, -0.22, 0.75), (1.8, 0.05, 0.4), (0.35, 0.22, 0.12))
+    for x in (-0.75, 0.75): b.box((x, 0, 0.22), (0.06, 0.45, 0.45), BLACK)
+    return b.finish("prop_bench")
+
+def trash_can():
+    b = Builder()
+    b.cyl((0, 0, 0.48), 0.3, 0.96, (0.1, 0.22, 0.14), seg=12)
+    b.cyl((0, 0, 1.0), 0.33, 0.08, BLACK, seg=12)
+    return b.finish("prop_bin")
+
+def hydrant():
+    b = Builder()
+    b.cyl((0, 0, 0.35), 0.13, 0.7, (0.82, 0.12, 0.08), seg=10)
+    b.sphere((0, 0, 0.72), 0.14, (0.82, 0.12, 0.08))
+    b.cyl((0, 0, 0.45), 0.06, 0.4, (0.82, 0.12, 0.08), axis="X", seg=8)
+    return b.finish("prop_hydrant")
+
+def shelter():
+    b = Builder()
+    for x in (-1.8, 1.8): b.box((x, 0, 1.2), (0.08, 1.4, 2.4), GALV)
+    b.box((0, -0.65, 1.3), (3.6, 0.04, 2.0), (0.55, 0.65, 0.72))       # back glass
+    b.box((0, 0, 2.5), (4.0, 1.7, 0.12), (0.25, 0.27, 0.3))           # roof
+    b.box((0, -0.35, 0.5), (2.6, 0.4, 0.06), (0.35, 0.22, 0.12))
+    return b.finish("prop_shelter")
+
+objs = [sedan(), suv(), bus(), cone(), barricade(), work_sign(), person("walk"), person("stand"), person("stand", sign=True), cyclist(),
+        tree("round"), tree("upright"), street_lamp(), signal_mast(), bench(), trash_can(), hydrant(), shelter()]
 for i, o in enumerate(objs):
     o.location = (i * 16, 60, 0)   # spread out in the blend for inspection; export resets below
 

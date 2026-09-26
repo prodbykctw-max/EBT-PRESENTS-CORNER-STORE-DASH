@@ -2,6 +2,7 @@
 // across the road to be. Everything gameplay-relevant lives in ROUTE SPACE: s = metres along the route,
 // d = metres left(+)/right(-) of the centre line. That makes lanes, dodging and collision trivial and exact.
 import * as THREE from './vendor/three.module.min.js';
+import { LEVEL, standOn, deckTop } from './levels.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
@@ -21,6 +22,15 @@ export class RouteFrame {
       for (let t = 0; t < L; t += 1) { X.push(ax + (bx - ax) * t / L); Y.push(ay + (by - ay) * t / L); }
     }
     X.push(src.at(-1)[0]); Y.push(src.at(-1)[1]);
+    // OSM junctions leave little jogs in the polyline; smooth it into a road you'd actually drive
+    // (two moving-average passes over ±9 m, ends pinned), so the road ribbon and the car follow real curves
+    for (let pass = 0; pass < 2; pass++) {
+      const sx = X.slice(), sy = Y.slice(), R = 9;
+      for (let i = R; i < X.length - R; i++) {
+        let ax = 0, ay = 0; for (let k = -R; k <= R; k++) { ax += sx[i + k]; ay += sy[i + k]; }
+        X[i] = ax / (2 * R + 1); Y[i] = ay / (2 * R + 1);
+      }
+    }
     this.n = X.length; this.length = this.n - 1; this.X = X; this.Y = Y;
     // smoothed tangent (±8 m) so the camera and the car never snap at OSM vertices
     this.A = X.map((_, i) => {
@@ -41,8 +51,8 @@ export class RouteFrame {
       }
       return best ? [Math.max(7, best.width) / 2, !!best.oneway] : [4.5, false];
     });
-    // hold the narrowest width over ±12 m so the road never "breathes" under the car
-    this.HW = raw.map((_, i) => { let m = 99; for (let k = Math.max(0, i - 12); k <= Math.min(this.n - 1, i + 12); k++) m = Math.min(m, raw[k][0]); return m; });
+    // average the real width over ±15 m: follows the street without "breathing" under the car
+    this.HW = raw.map((_, i) => { let a = 0, c = 0; for (let k = Math.max(0, i - 15); k <= Math.min(this.n - 1, i + 15); k++) { a += raw[k][0]; c++; } return a / c; });
     this.ONEWAY = raw.map((r) => r[1]);
     // spatial grid of samples for distance-to-route queries (ambient traffic stops at the route)
     this.grid = new Map();
@@ -58,6 +68,7 @@ export class RouteFrame {
     return { x: wx, y: wy, z: this.ground(wx, wy), a };
   }
   hw(s) { return this.HW[Math.round(this.i(s))]; }
+  hwAt(x, y) { return this.hw(this.project(x, y).s); }
   /** centre of lane k (0 = right/your lane, 1 = left) — the road is always laid out as two lanes */
   lane(s, k) { const hw = this.hw(s); return k === 0 ? -hw / 2 : hw / 2; }
   oneway(s) { return this.ONEWAY[Math.round(this.i(s))]; }
@@ -129,13 +140,15 @@ const TYPES = {
   bus: { L: 12, W: 2.55, solid: 0 }, worksign: { L: 1, W: 1, solid: 0 }, walker: { L: 0.5, W: 0.5, solid: 0 },
   stander: { L: 0.5, W: 0.5, solid: 0 }, cyclist: { L: 1.8, W: 0.6, solid: 0 },
 };
+// half wheelbase / half track used to seat each vehicle on the road
+const VEHICLE = { sedan: [1.35, 0.8], suv: [1.42, 0.86], bus: [3.6, 1.15] };
 const PAINT = [0xb8bcc2, 0x1d1f24, 0xe9e9e6, 0x7a1a1a, 0x1f3c78, 0x5a5f66, 0x24542f, 0xc4a44a, 0x8a8f96, 0x2b2b30];
 const SHIRTS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2e2e2e, 0xe8e8e8, 0x3d9a5b, 0x8e44ad, 0xff8c1a, 0x1abc9c, 0x7f8c8d];
 const BUS_STRIPE = [0x1d5fbf, 0xc62828];
 
 export class World {
-  constructor({ route, props, scene, W, sEnd, audio }) {
-    Object.assign(this, { route, scene, W, sEnd, audio });
+  constructor({ route, props, scene, W, sEnd, audio, surfAt }) {
+    Object.assign(this, { route, scene, W, sEnd, audio, surfAt });
     this.ents = []; this.tokens = [];
     this.meshes = {};
     const mat = propMaterial();
@@ -202,20 +215,25 @@ export class World {
 
   /** cross-street traffic (cars + city buses) that waits at the lights instead of entering the route */
   planAmbient() {
-    const r = this.route, roads = this.W.roads.filter((rd) => !rd.bridge && /primary|secondary|tertiary|residential/.test(rd.cls) && rd.pts.length > 1);
-    // keep roads that actually meet the route (true cross streets) and aren't the route itself
+    const r = this.route, roads = this.W.roads.filter((rd) => /primary|secondary|tertiary|residential|motorway|trunk/.test(rd.cls) && rd.pts.length > 1);
+    // cross streets that actually meet the route, plus the freeway decks that pass over it
     this.crossRoads = roads.filter((rd) => {
       const mid = rd.pts[(rd.pts.length / 2) | 0], dm = r.distTo(mid[0], mid[1]);
-      return dm > 14 && rd.pts.some((p) => r.distTo(p[0], p[1]) < 10);
+      if (rd.h) return Math.max(...rd.h) > 3 && rd.pts.some((p) => r.distTo(p[0], p[1]) < 60);
+      // never the route's own street (OSM's copy of Luckie/Auburn): only streets that genuinely cross it
+      const along = rd.pts.filter((p) => r.distTo(p[0], p[1]) < 9).length / rd.pts.length;
+      return dm > 14 && along < 0.3 && rd.pts.some((p) => r.distTo(p[0], p[1]) < 10);
     });
     for (let q = 0; q < 14; q++) this.spawnAmbient(true);
   }
   spawnAmbient(anywhere) {
     if (!this.crossRoads.length) return;
-    const rd = pick(this.crossRoads), bus = Math.random() < 0.3;
+    const rd = pick(this.crossRoads), bus = !rd.h && Math.random() < 0.3;   // buses stay on city streets
     const pts = Math.random() < 0.5 ? rd.pts : [...rd.pts].reverse();
-    this.ambient.push({ type: bus ? 'bus' : pick(['sedan', 'suv']), pts, i: 0, t: anywhere ? Math.random() : 0, v: bus ? 8 : rnd(9, 13),
-      color: bus ? pick(BUS_STRIPE) : pick(PAINT), lane: (rd.oneway ? 0 : -1.9) - (bus ? 0.4 : 0) });
+    const hs = rd.h ? (pts === rd.pts ? rd.h : [...rd.h].reverse()) : null;
+    const RANK = { motorway: 6, trunk: 6, primary: 5, secondary: 4, tertiary: 3, residential: 2 };
+    this.ambient.push({ type: bus ? 'bus' : pick(['sedan', 'suv']), pts, hs, deck: !!rd.h, link: /_link/.test(rd.cls), bias: (RANK[rd.cls.replace('_link', '')] ?? 1) * 0.004, i: 0, t: anywhere ? Math.random() : 0, v: rd.h ? rnd(20, 27) : bus ? 8 : rnd(9, 13),
+      color: bus ? pick(BUS_STRIPE) : pick(PAINT), lane: laneFor(rd, bus ? 'bus' : 'suv') });
   }
 
   /** advance everything; returns events for the HUD/audio */
@@ -255,11 +273,14 @@ export class World {
         const ahead = this.ents.find((o) => o !== e && o.alive && !o.scenery && o.solid && o.s > e.s && o.s - e.s < 12 && Math.abs(o.d - e.d) < 1.6);
         if (ahead) e.v = Math.max(0, Math.min(e.v, (ahead.v || 0)));
       }
+      // walkers turn around at the ends of the mapped street instead of piling up there
+      if (e.scenery && e.v && (e.s < 3 || e.s > r.length - 3)) { e.v = Math.abs(e.v) * (e.s < 3 ? 1 : -1); e.s = Math.max(3, Math.min(r.length - 3, e.s)); }
       // walkers wrap around the player's window so the sidewalks never empty
       if (e.scenery && (e.type === 'walker' || e.type === 'stander') && (e.s < car.s - 40 || e.s > car.s + 260)) {
         e.s = car.s + (e.s < car.s ? rnd(160, 250) : rnd(-30, 0)); e.d = Math.sign(e.d) * (r.hw(e.s) + rnd(1.6, 4));
       }
       if (e.dir === -1 && e.s < car.s - 40) e.alive = false; // oncoming car passed and gone
+      if (e.dir === 1 && !e.parked && !e.scenery && e.s > r.length - 30) e.alive = false; // drove on out of view
 
       // collision / near miss (route space box test)
       if (e.solid && !e.scenery && !e.hitDone) {
@@ -289,12 +310,28 @@ export class World {
       if (!q) { Object.assign(a, { dead: true }); continue; }
       const L = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
       const nt = a.t + a.v * dt / L, nx = p[0] + (q[0] - p[0]) * Math.min(nt, 1), ny = p[1] + (q[1] - p[1]) * Math.min(nt, 1);
+      a.moved = a.x === undefined ? 0 : Math.hypot(nx - a.x, ny - a.y);
       // red light for them: stop short of the route while the player is anywhere near
-      const near = Math.hypot(nx - car.pose.x, ny - car.pose.y) < 180;
-      if (!(near && r.distTo(nx, ny) < r.hw(r.project(nx, ny).s) + 7 && r.distTo(nx, ny) < r.distTo(a.x ?? nx, a.y ?? ny))) {
+      const near = !a.deck && Math.hypot(nx - car.pose.x, ny - car.pose.y) < 260;   // decks pass over: no light
+      // stop line: the vehicle's whole front half stays clear of the route's road (a 12 m bus stops further back)
+      const clear = VEHICLE[a.type][0] + (a.type === 'bus' ? 2.6 : 1.2) + 3;
+      if (!(near && r.distTo(nx, ny) < 20 && r.distTo(nx, ny) < r.hw(r.project(nx, ny).s) + clear && r.distTo(nx, ny) < r.distTo(a.x ?? nx, a.y ?? ny))) {
         a.t = nt; if (a.t >= 1) { a.i++; a.t = 0; }
       }
       a.x = nx; a.y = ny; a.h = Math.atan2(q[1] - p[1], q[0] - p[0]);
+      const zOld = a.zAbs;
+      a.z = a.hs ? a.hs[a.i] + ((a.hs[a.i + 1] ?? a.hs[a.i]) - a.hs[a.i]) * Math.min(a.t, 1) : 0;
+      a.grade = a.hs ? ((a.hs[a.i + 1] ?? a.hs[a.i]) - a.hs[a.i]) / L : 0; // deck climb per metre (on top of the terrain's)
+      a.zAbs = r.ground(nx, ny) + a.z;
+      if (zOld !== undefined && a.moved > 0.01) a.pitch = (a.pitch || 0) * 0.8 + Math.atan2(a.zAbs - zOld, a.moved) * 0.2;
+      // in our road while we're close? it's solid — test it like any obstacle
+      if (!a.deck && r.distTo(nx, ny) < 8 && Math.hypot(nx - car.pose.x, ny - car.pose.y) < 20) {
+        const pr = r.project(nx, ny);
+        if (Math.abs(pr.s - car.s) < PLAYER.halfL + VEHICLE[a.type][0] + 0.4 && Math.abs(pr.d - car.d) < PLAYER.halfW + VEHICLE[a.type][1] + 0.1 && !a.hitT) {
+          out.hits.push({ e: { type: a.type, s: pr.s, d: pr.d, solid: 1, color: a.color }, power: 1, label: 'CRASH' }); a.hitT = 1.5;
+        }
+      }
+      if (a.hitT) a.hitT = Math.max(0, a.hitT - dt);
     }
     this.ambient = this.ambient.filter((a) => !a.dead);
     while (this.ambient.length < 14) this.spawnAmbient(false);
@@ -315,15 +352,33 @@ export class World {
       if (e.s < win0 || e.s > win1) continue;
       const p = this.route.at(e.s, e.d);
       let yaw = p.a + (e.dir === -1 ? Math.PI : 0) + (e.yawOff || 0) + (e.v < 0 && e.scenery ? Math.PI : 0);
-      let z = p.z, roll = 0, pitch = 0;
+      const inStreet = Math.abs(e.d) < this.route.hw(e.s) + 0.2, lvl = inStreet ? LEVEL.ROUTE : LEVEL.TERRAIN;
+      // anything standing IN the street (cones, barricades, a panhandler) stands on the rendered road surface
+      let z = inStreet ? (this.surfAt(p.x, p.y, p.z + 1.2) ?? p.z + lvl) : p.z + lvl, roll = 0, pitch = 0;
+      if (inStreet && (e.type === 'cone' || e.type === 'barricade') && !e.flying) { // sit flat on the slope
+        const g = this.route.ground, on = (x, y) => this.surfAt(x, y, g(x, y) + 1.2) ?? g(x, y) + lvl;
+        const st = standOn(on, p.x, p.y, yaw, 0.2, 0.2); z = st.z; pitch = st.pitch; roll = st.roll;
+      }
+      if (VEHICLE[e.type] && !e.flying) { // all four wheels on the rendered road surface, whatever the slope
+        const g = this.route.ground, on = (x, y) => this.surfAt(x, y, g(x, y) + 1.2) ?? g(x, y) + lvl;
+        const st = standOn(on, p.x, p.y, yaw, VEHICLE[e.type][0], VEHICLE[e.type][1]);
+        z = st.z; pitch = st.pitch; roll = st.roll;
+      }
       if (e.type === 'walker' && e.v) z += Math.abs(Math.sin(t * 7 + e.bob)) * 0.06;
       if (e.type === 'panhandler') yaw = p.a + Math.PI;
       if (e.flying) { z += e.fz; roll = e.spin; pitch = e.spin * 0.7; }
+      if (e.type === 'panhandler') { pitch = 0; roll = 0; }
       put(e.type, p.x, p.y, z, yaw, e.color, roll, pitch);
     }
     for (const a of this.ambient) if (a.x !== undefined) {
-      const ox = -Math.sin(a.h) * a.lane, oy = Math.cos(a.h) * a.lane;
-      put(a.type, a.x + ox, a.y + oy, this.route.ground(a.x, a.y), a.h, a.color);
+      const ox = -Math.sin(a.h) * a.lane, oy = Math.cos(a.h) * a.lane, x = a.x + ox, y = a.y + oy, g = this.route.ground;
+      const [hl, hw] = VEHICLE[a.type];
+      // every wheel reads the rendered surface under it: its own deck (below the expected height + 1.2 m, so a
+      // deck overhead is never picked), or the street
+      const expect = (px, py) => (a.deck ? deckTop(g, px, py, a.z) : g(px, py)) + LEVEL.ROAD;
+      const on = (px, py) => this.surfAt(px, py, expect(px, py) + (a.deck ? 2.1 : 1.2)) ?? expect(px, py); // decks: merged surface up to 2 m
+      const st = standOn(on, x, y, a.h, hl, hw);
+      put(a.type, x, y, st.z, a.h, a.color, st.roll, st.pitch);
     }
     for (const k in this.meshes) { const im = this.meshes[k]; im.count = counts[k]; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
     // tokens
@@ -331,7 +386,7 @@ export class World {
     for (const tk of this.tokens) {
       if (!tk.alive || tk.s < win0 || tk.s > win1 || n >= 260) continue;
       const p = this.route.at(tk.s, tk.d);
-      m4.compose(pos.set(p.x, p.z + 1.0 + Math.sin(t * 3 + tk.s) * 0.12, -p.y), q.setFromEuler(e3.set(0, spin + tk.s, 0)), one);
+      m4.compose(pos.set(p.x, p.z + LEVEL.ROUTE + 1.0 + Math.sin(t * 3 + tk.s) * 0.12, -p.y), q.setFromEuler(e3.set(0, spin + tk.s, 0)), one);
       this.tokenMesh.setMatrixAt(n++, m4);
     }
     this.tokenMesh.count = n; this.tokenMesh.instanceMatrix.needsUpdate = true;
@@ -341,7 +396,7 @@ export class World {
 /** Mesh geometry in true metres. meshopt quantisation stores positions as normalised int16 and puts the
  *  dequantising scale/offset on the NODE, so the raw geometry is ~2 units long. Bake the node transform
  *  into float attributes (instancing ignores the node). */
-function bakedGeometry(root, name) {
+export function bakedGeometry(root, name) {
   root.updateMatrixWorld(true);
   const node = root.getObjectByName(name);
   if (!node) throw new Error('props.glb is missing ' + name);
@@ -357,6 +412,13 @@ function bakedGeometry(root, name) {
   return g;
 }
 
+/** a lane offset that keeps the WHOLE vehicle on its road: anywhere across a one-way road (ramps are only
+ *  ~6 m wide), the right-hand lane of a two-way street */
+function laneFor(rd, type) {
+  const room = Math.max(0, rd.width / 2 - VEHICLE[type][1] - (rd.h ? 0.9 : 0.35)); // ramps curve: keep clear of the edge
+  return rd.oneway ? rnd(-room, room) : -Math.min(rd.width / 4, room);
+}
+
 function pickWeighted(list) {
   const tot = list.reduce((a, [, w]) => a + w, 0); let r = Math.random() * tot;
   for (const [v, w] of list) { if ((r -= w) <= 0) return v; }
@@ -364,7 +426,7 @@ function pickWeighted(list) {
 }
 
 /** One material for every prop: vertex colours, and pure-white vertices take the per-instance tint. */
-function propMaterial() {
+export function propMaterial() {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.15 });
   m.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader.replace('#include <color_vertex>', `

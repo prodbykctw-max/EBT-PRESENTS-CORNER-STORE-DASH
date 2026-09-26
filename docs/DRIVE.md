@@ -111,12 +111,56 @@ parapet cap and rooftop units (the overhead camera mostly sees roofs), and a mod
 board UV-projected from the same facade image, so paint and depth line up.
 **To fix before shipping:** the EBT facade shows real chip brands in the window. Paint them out.
 
+## World integrity (nothing sinks, floats or pokes through)
+
+Everything that can stand on something follows one set of rules:
+
+- **One height function.** `makeGround()` (city.js) resamples the DEM onto an 8 m grid, and
+  `ground(x, y)` interpolates it with exactly the triangles the terrain mesh is built from. A thing placed at
+  `ground()` is on the rendered terrain.
+- **One height stack** (`levels.js`): terrain −0.05, lawns/lots +0.02, streets +0.14 (+ class bias), the
+  route road +0.17, curb tops +0.29.
+- **Roads are draped per vertex** (columns ≤1.5 m, rows 1–4 m, denser where the terrain bends). A final
+  pass raises any road triangle whose centre or edge midpoint would dip under the terrain.
+- **Sharp corners are split into separate pieces** with a pavement pad at the elbow, so ribbons never
+  fold over themselves. Every junction is filled with a draped pad.
+- **Freeway:** deck heights are propagated from OSM bridge spans at a 5 % grade and capped at 6 % from any
+  point where a ramp meets a street, so ramps land at street level. `deckTop()` puts high decks on a
+  shared, blurred grade surface (overlapping decks line up) and blends low ramp ends down onto the ground.
+  Where a ramp merges under another deck by less than 2 m, it is lifted onto it to form one surface.
+- **Vehicles read the real triangles.** `surface.js` bins every drivable triangle into a grid, and the
+  player car, obstacles and all traffic sample the actual rendered road/deck under their four wheels
+  (`standOn`: height, pitch and roll, settled so no wheel is below the surface). Cones and barricades
+  stand on the rendered road too.
+- **Traffic stays on its road:** each vehicle gets a lane offset that keeps its whole body on the road
+  (ramps get extra edge clearance, and buses stay on city streets). Cross traffic waits behind a stop
+  line that scales with vehicle length, is solid if it's in your road, and never uses the route's own
+  street.
+
+**Scanner:** open `/drive/index.html?qa`, then run
+`(await import('./integrity.js')).scanWorld(__drive)`. It checks:
+
+| Check | Last result |
+|---|---|
+| Route and street surfaces are the top surface, never terrain or lawns | 66,775/66,775 |
+| Every vehicle's wheels are within 10 cm of the surface (buses may hang up to 20 cm on a crest) | 2,325/2,325 over 32 checkpoints |
+| Cones, barricades and panhandlers stand on the road | included in the wheel count |
+| Every lane a vehicle can be given keeps all wheels on its road or deck | 2,620/2,620 |
+| Street props stand on the ground | 2,103/2,103 |
+
+Run it after any change to world building.
+
 ## Runtime (public/drive/)
 
 | File | Role |
 | --- | --- |
 | `drive.js` | `startDrive({ mount, onDone })`: loader, scene, loop, HUD, parking, arrival, QA hooks (`window.__drive`) |
-| `city.js` | builds terrain, roads (markings in the shader), and all OSM buildings (procedural window facades, roofs, rooftop units) from `world.json` |
+| `city.js` | the height function, the OSM buildings (procedural facades, roofs, rooftop units), and orchestration |
+| `roads.js` | street and route surfaces (markings in the shader), junction and corner pads, curbs, crosswalks, and the freeway (deck, barriers, soffit, pier bents, overpass cutaway) |
+| `landscape.js` | terrain mesh, parks/lawns/lots, contact shadows, streetscape (trees, lamps, signal masts, benches, bins, hydrants, shelters) |
+| `levels.js`, `surface.js` | the height stack, `standOn`, `deckTop`, and triangle height queries |
+| `sky.js` | sky dome and generated environment lighting |
+| `integrity.js` | QA-only world scanner |
 | `runner.js` | route space (RouteFrame), the auto-driving car, obstacle/scenery/traffic population, collisions, instanced rendering |
 | `audio.js`, `sfx/` | recorded engine and effects mix |
 | `props.glb` | traffic, bus, people, cyclist, cones, barricade, sign (vertex colour; white = per-instance tint) |

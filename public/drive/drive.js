@@ -6,7 +6,10 @@
 import * as THREE from './vendor/three.module.min.js';
 import { GLTFLoader } from './vendor/GLTFLoader.js';
 import { MeshoptDecoder } from './vendor/meshopt_decoder.module.js';
-import { buildCity, buildRouteRoad, toV3 } from './city.js';
+import { buildCity, makeGround, toV3 } from './city.js';
+import { LEVEL, standOn } from './levels.js';
+import { CUT } from './roads.js';
+import { TopSurface } from './surface.js';
 import { RouteFrame, RunnerCar, World } from './runner.js';
 import { DriveAudio } from './audio.js';
 import { ImpactFX } from './fx.js';
@@ -67,10 +70,16 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (/roof/.test(m.name)) tex.roof = tex.concrete = m.map;
     if (/sidewalk/.test(m.name)) tex.sidewalk = m.map;
   });
+  // real asphalt (CC0 Poly Haven "asphalt_02"), shared by every road surface and parking lot
+  const tl = new THREE.TextureLoader();
+  const [asphalt, asphaltNor] = await Promise.all(['tex/asphalt_diff.webp', 'tex/asphalt_nor.webp'].map((f) => tl.loadAsync(new URL(f, BASE).href)));
+  asphalt.colorSpace = THREE.SRGBColorSpace;
+  Object.assign(tex, { map: asphalt, normal: asphaltNor, asphalt });
   for (const t of Object.values(tex)) if (t) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; }
-  const city = buildCity(W, tex);
+  const ground = makeGround(W);
+  const route = new RouteFrame(W, ground, 200); // road continues 200 m past the store: traffic drives on out of view
+  const city = buildCity(W, tex, ground, route, props.scene);
   scene.add(city.group, hero.scene);
-  const ground = city.ground;
 
   // lights: the sun follows the car so its shadow map stays sharp where you are
   const hemi = new THREE.HemisphereLight(0xbcd3ec, 0x5d574f, 1.2);
@@ -79,12 +88,13 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   Object.assign(sun.shadow.camera, { left: -110, right: 110, top: 110, bottom: -110, near: 1, far: 600 });
   sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.6;
   scene.add(hemi, sun, sun.target);
-  // ---------- route space, the run, the car ----------
-  const route = new RouteFrame(W, ground, 70);
-  const routeRoad = buildRouteRoad(route, city.asphalt); scene.add(routeRoad);
-  applyWeather(weather, { scene, renderer, sun, hemi, roads: [...city.roads, routeRoad] });
+  const sky = applyWeather(weather, { scene, renderer, sun, hemi, roads: city.surfaces });
+  // wheels read the height of the actual road triangles under them (never a formula that could disagree)
+  const roadSurface = new TopSurface(city.streets.drivable);
+  const surfAt = (x, y, below) => { const h = roadSurface.top(x, -y, below); return h ? h.y : null; };
+  // ---------- the run, the car ----------
   const spot = route.project(SPOT.x, SPOT.y);             // parking space in route coords
-  const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio });
+  const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt });
   const car = new RunnerCar(route, 4);
   const carModel = carGltf.scene;
   carModel.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
@@ -159,6 +169,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   };
   addEventListener('resize', resize); resize();
 
+  const api = { camOverride: null }; // test hooks (filled in below)
   // ---------- state ----------
   let t = TIME_LIMIT, drove = 0, hits = 0, tokens = 0, nearMisses = 0, state = 'countdown', countdown = 3, shake = 0, endT = 0;
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3();
@@ -227,20 +238,19 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
     // car transform
     const p = car.pose;
-    carRig.position.copy(toV3(p.x, p.y, p.z));
-    carRig.rotation.set(0, p.a - Math.PI / 2, 0);
+    // all four wheels on the road: height, pitch and roll from the ground under the axles and both sides
+    const onRoad = (x, y) => surfAt(x, y, ground(x, y) + 1.2) ?? ground(x, y) + LEVEL.ROUTE;
+    const st = standOn(onRoad, p.x, p.y, p.a, 1.47, 0.82);
+    carRig.position.copy(toV3(p.x, p.y, st.z));
+    carRig.rotation.set(st.pitch, p.a - Math.PI / 2, st.roll, 'YXZ');
     carModel.rotation.z = THREE.MathUtils.clamp(-car.dv * 0.012, -0.07, 0.07);   // body roll into the dodge
     carModel.visible = car.invuln <= 0 || Math.floor(car.invuln * 12) % 2 === 0; // blink while recovering
     world.render(car, drove);
     fx.update(dt, camera, renderer);
     beacon.material.opacity = 0.12 + 0.08 * Math.sin(now / 250);
     spotGroup.visible = state === 'driving' || state === 'countdown';
-    // under an overpass? fade the deck so you never lose the car
-    const under = city.decks.some(([ax, ay, bx, by, r]) => {
-      const dx = bx - ax, dy = by - ay, tt = Math.max(0, Math.min(1, ((p.x - ax) * dx + (p.y - ay) * dy) / (dx * dx + dy * dy || 1)));
-      return Math.hypot(p.x - ax - tt * dx, p.y - ay - tt * dy) < r;
-    });
-    const bm = city.bridges.material; bm.opacity += ((under ? 0.25 : 1) - bm.opacity) * Math.min(1, dt * 6); bm.depthWrite = bm.opacity > 0.95;
+    // overpass cutaway follows the car (a soft hole in anything above it)
+    CUT.uCutPos.value.copy(carRig.position);
 
     // camera: high and behind along the road (runner framing), rising and reaching further with speed
     const v = car.v, h = 17 + v * 0.4, back = 14 + v * 0.45, ahead = 10 + v * 0.35; // car sits in the lower third
@@ -260,9 +270,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (!camPos.lengthSq()) { camPos.copy(targetPos); camLook.copy(targetLook); }
     if (state === 'parked' || state === 'late') { camPos.copy(targetPos); camLook.copy(targetLook); }
     else { camPos.lerp(targetPos, Math.min(1, dt * 6)); camLook.lerp(targetLook, Math.min(1, dt * 8)); }
+    if (api.camOverride) { camPos.copy(api.camOverride.pos); camLook.copy(api.camOverride.look); } // QA: free camera
     camera.position.copy(camPos);
     if (shake > 0) { camera.position.x += (Math.random() - 0.5) * shake * 1.2; camera.position.z += (Math.random() - 0.5) * shake * 1.2; shake = Math.max(0, shake - dt * 3); }
     camera.lookAt(camLook);
+    sky.follow(camera);
 
     sun.position.copy(carRig.position).add(tmp.copy(sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35)).multiplyScalar(220));
     sun.target.position.copy(carRig.position);
@@ -288,9 +300,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   root.querySelector('[data-skip]').addEventListener('click', () => { Object.assign(result, { hits, tokens, nearMisses }); finish(); });
   frame();
   // test hooks (drive QA + screenshots)
-  const api = { car, world, route, spot, keys, result, audio, fx, get state() { return state; }, get time() { return t; },
-    three: { scene, camera, carRig, THREE },
-    snapshot: (q = 0.85) => { renderer.render(scene, camera); return renderer.domElement.toDataURL('image/jpeg', q); } };
+  Object.assign(api, { car, world, route, spot, keys, result, audio, fx, city, 
+    three: { scene, camera, carRig, THREE, renderer },
+    snapshot: (q = 0.85) => { renderer.render(scene, camera); return renderer.domElement.toDataURL('image/jpeg', q); } });
+  // live getters (Object.assign would have frozen their values at assignment time)
+  Object.defineProperties(api, { state: { get: () => state }, time: { get: () => t } });
   window.__drive = api;
   return api;
 }

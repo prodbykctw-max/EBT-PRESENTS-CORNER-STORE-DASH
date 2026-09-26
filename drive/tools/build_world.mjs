@@ -139,7 +139,86 @@ for (const w of ways) {
     oneway: ['yes', 'true', '1', '-1'].includes(w.tags.oneway) || undefined,
     bridge: bridge || undefined, tunnel: tunnel || undefined, layer: layer || undefined,
     pts: ns.map((n) => { const [x, y] = toXY(n); return [r2(x), r2(y), r2(ground(x, y))]; }),
+    _ids: w.nodes.filter((id) => nodes.get(id)),
   });
+}
+
+// ---------- elevated freeway: decks + ramps at a real 5 % grade ----------
+// OSM only tags the bridge SPAN. Real viaducts climb on embankments/ramps before it, so propagate each deck
+// height outward through the connected freeway network (motorway/trunk + links) and let it fall at 5 %.
+// City-street "bridges" downtown (viaducts over the rail gulch) ARE street level; the DEM already has them.
+const FREEWAY = /^(motorway|trunk)/, DECK = 7.0, GRADE = 0.05;
+const fwAdj = new Map(), fwH = new Map();
+const link = (a, b, d) => { if (!fwAdj.has(a)) fwAdj.set(a, []); fwAdj.get(a).push([b, d]); };
+for (const r of roads) {
+  if (!FREEWAY.test(r.cls)) continue;
+  for (let i = 0; i + 1 < r._ids.length; i++) {
+    const d = Math.hypot(r.pts[i + 1][0] - r.pts[i][0], r.pts[i + 1][1] - r.pts[i][1]);
+    link(r._ids[i], r._ids[i + 1], d); link(r._ids[i + 1], r._ids[i], d);
+  }
+  if (r.bridge) for (const id of r._ids) fwH.set(id, Math.max(fwH.get(id) || 0, DECK * Math.max(1, r.layer || 1)));
+}
+const heap = [...fwH.entries()];
+while (heap.length) {
+  heap.sort((a, b) => b[1] - a[1]);
+  const [u, h] = heap.shift();
+  if (h < (fwH.get(u) || 0)) continue;
+  for (const [v, d] of fwAdj.get(u) || []) {
+    const nh = h - d * GRADE;
+    if (nh > 0.05 && nh > (fwH.get(v) || 0)) { fwH.set(v, nh); heap.push([v, nh]); }
+  }
+}
+// A ramp must land at street level where it meets a city street. Find every freeway node shared with a
+// non-freeway road (an at-grade junction), measure network distance from those anchors, and cap the height
+// at a 6 % grade from them — so no deck ever ends in the air.
+const streetNodes = new Set();
+for (const r of roads) if (!FREEWAY.test(r.cls)) for (const id of r._ids) streetNodes.add(id);
+const anchorD = new Map([...fwAdj.keys()].filter((id) => streetNodes.has(id)).map((id) => [id, 0]));
+const q2 = [...anchorD.entries()];
+while (q2.length) {
+  q2.sort((a, b) => a[1] - b[1]);
+  const [u, d0] = q2.shift();
+  if (d0 > (anchorD.get(u) ?? Infinity)) continue;
+  for (const [v, d] of fwAdj.get(u) || []) if (d0 + d < (anchorD.get(v) ?? Infinity)) { anchorD.set(v, d0 + d); q2.push([v, d0 + d]); }
+}
+let capped = 0;
+for (const [id, h] of fwH) {
+  const cap = (anchorD.get(id) ?? Infinity) * 0.06;
+  if (h > cap) { fwH.set(id, cap); capped++; }
+}
+console.log('ramps capped to land at street level:', capped, 'nodes');
+for (const r of roads) {
+  const hs = r._ids.map((id) => (FREEWAY.test(r.cls) ? r2(fwH.get(id) || 0) : 0));
+  if (hs.some((h) => h > 0.05)) r.h = hs;           // height of the deck above the terrain at each point
+  if (!FREEWAY.test(r.cls)) delete r.bridge;         // street "bridges" are at street level (see above)
+  delete r._ids;
+}
+
+// ---------- land cover, trees and street furniture (drive/osm/auburn_extra.json) ----------
+const EXTRA = JSON.parse(fs.readFileSync(here('../osm/auburn_extra.json'), 'utf8'));
+const xn = new Map(EXTRA.elements.filter((e) => e.type === 'node').map((n) => [n.id, n]));
+const areas = [], points = [];
+const AREA = (t) => t.leisure === 'park' || t.leisure === 'garden' || t.leisure === 'dog_park' || t.landuse === 'recreation_ground' ? 'park'
+  : t.landuse === 'grass' || t.landuse === 'greenfield' || t.natural === 'scrub' ? 'grass'
+  : t.natural === 'wood' ? 'wood'
+  : t.leisure === 'pitch' ? 'pitch' : t.leisure === 'playground' ? 'playground'
+  : t.amenity === 'parking' || t.landuse === 'parking' ? 'parking'
+  : t.landuse === 'construction' ? 'construction' : null;
+for (const e of EXTRA.elements) {
+  if (!e.tags) continue;
+  if (e.type === 'way') {
+    const kind = AREA(e.tags); if (!kind) continue;
+    if (e.tags.parking && /multi-storey|underground|rooftop/.test(e.tags.parking)) continue; // decks are buildings
+    const ns = e.nodes.map((id) => xn.get(id)).filter(Boolean);
+    if (ns.length < 4 || e.nodes[0] !== e.nodes.at(-1) || !ns.some(inPlay)) continue;
+    areas.push({ kind, pts: ns.slice(0, -1).map((n) => toXY(n).map(r2)) });
+  } else if (inPlay(e)) {
+    const t = e.tags;
+    const kind = t.natural === 'tree' ? 'tree' : t.highway === 'street_lamp' ? 'lamp' : /traffic_signals/.test(t.highway || '') ? 'signal'
+      : t.highway === 'crossing' ? 'crossing' : t.highway === 'bus_stop' ? 'bus_stop' : t.amenity === 'bench' ? 'bench'
+      : t.amenity === 'waste_basket' ? 'bin' : t.emergency === 'fire_hydrant' ? 'hydrant' : null;
+    if (kind) points.push([kind, ...toXY(e).map(r2)]);
+  }
 }
 
 // ---------- route (Dijkstra on drivable, one-way aware) ----------
@@ -183,10 +262,13 @@ const world = {
   cornerSign: { text: ['FORT ST', 'AUBURN AVE'], pos: toXY(CORNER).map(r2).concat(0) }, // world frame; kept from the intro
   route: { length: Math.round(D.get(t)), pts: route },
   elevation: { ...elev, z: elev.z.map((v) => r2(v - Z0)) },
-  buildings, roads, landmarks,
+  buildings, roads, landmarks, areas, points,
 };
 fs.writeFileSync(new URL('world.json', CACHE), JSON.stringify(world));
 const tall = buildings.filter((b) => b.kind === 'play').sort((a, b) => b.h - a.h).slice(0, 5);
 console.log(`world.json: ${buildings.filter((b) => b.kind === 'play').length} play + ${buildings.filter((b) => b.kind === 'skyline').length} skyline buildings, ${roads.length} roads, route ${world.route.length} m, relief ${r2(Math.min(...world.elevation.z))}..${r2(Math.max(...world.elevation.z))} m`);
 console.log('tallest in play area:', tall.map((b) => `${b.name || b.id} ${b.h}m`).join(', '));
+console.log('areas', Object.entries(areas.reduce((a, r) => (a[r.kind] = (a[r.kind] || 0) + 1, a), {})).map((e) => e.join(':')).join(' '),
+  '| points', Object.entries(points.reduce((a, r) => (a[r[0]] = (a[r[0]] || 0) + 1, a), {})).map((e) => e.join(':')).join(' '),
+  '| elevated roads', roads.filter((r) => r.h).length, 'max deck', Math.max(0, ...roads.flatMap((r) => r.h || [0])));
 console.log('size', (fs.statSync(new URL('world.json', CACHE)).size / 1e6).toFixed(2), 'MB');
