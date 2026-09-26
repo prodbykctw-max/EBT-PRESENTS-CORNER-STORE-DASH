@@ -182,16 +182,18 @@ export function buildStreetscape(W, ground, route, streets, props, isFree) {
   // traffic signals: cluster OSM signal nodes into intersections; on the drive, a mast arm on the far-right
   // corner for each direction of travel, reaching over its lanes
   const sig = (W.points || []).filter((p) => p[0] === 'signal' && route.distTo(p[1], p[2]) < 14);
-  const done = [];
+  const done = [], signals = [];              // signals: every signalised intersection on the route and its masts
   for (const [, x, y] of sig) {
     if (done.some(([dx, dy]) => Math.hypot(dx - x, dy - y) < 30)) continue;
     done.push([x, y]);
-    const { s } = route.project(x, y), hw = route.hw(s);
+    const { s } = route.project(x, y), hw = route.hw(s), node = { s, masts: [] };
     for (const dir of [1, -1]) {           // dir 1: our direction of travel; -1: oncoming
       const p = route.at(s + dir * 11, -dir * (hw + 1.1));
       // model: arm +Y, heads face -X. Map +X → travel direction, +Y → across the road (to the travel's left)
-      if (!onRoad(p.x, p.y)) add('signal', p.x, p.y, p.a + (dir > 0 ? Math.PI / 2 : -Math.PI / 2));
+      const yaw = p.a + (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+      if (!onRoad(p.x, p.y) && add('signal', p.x, p.y, yaw)) node.masts.push({ dir, x: p.x, y: p.y, z: ground(p.x, p.y) + LEVEL.TERRAIN, yaw });
     }
+    signals.push(node);
   }
 
   // instanced meshes (one draw per prop type)
@@ -210,5 +212,6 @@ export function buildStreetscape(W, ground, route, streets, props, isFree) {
   }
   group.userData.counts = Object.fromEntries(Object.entries(put).map(([k, v]) => [k, v.length]));
   group.userData.placed = put;   // positions of every street prop (the crowd walks round them)
+  group.userData.signals = signals;   // (signals.js runs them)
   return group;
 }

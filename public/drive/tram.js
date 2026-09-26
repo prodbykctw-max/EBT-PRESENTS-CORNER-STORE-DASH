@@ -130,6 +130,9 @@ export class Streetcars {
       }
       const pgap = front - (car.s + 2.5);
       if (pgap > -1 && pgap < 35 && Math.abs(car.d - e.d) < 2.1) { want = Math.min(want, Math.max(0, (pgap - 5) * 0.8)); if (pgap < 25) this.ring(e, car); }
+      // red light: stop at the line
+      const sl = W.signals?.stopFor(front, T.speed, -1);
+      if (sl != null) want = Math.min(want, Math.sqrt(Math.max(0, 2 * DEC * 0.9 * (front - sl - 0.3))));
       // a flagger at a work zone the player is coming through holds it short of the zone
       const zone = (W.workZones || []).find(([a, b]) => car.s > a - 70 && car.s < b + 5);
       if (zone && front > zone[1] + 4 && front < zone[1] + 70) want = Math.min(want, Math.max(0, (front - zone[1] - 6) * 0.8));

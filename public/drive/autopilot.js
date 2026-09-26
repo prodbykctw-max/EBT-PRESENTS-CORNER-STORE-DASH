@@ -125,7 +125,10 @@ export function autopilot(d, { log = console.log } = {}) {
     // and never roll into something right in front before we've actually moved clear of it
     const nose = H.some((h) => { const gap = h.s - car.s, reach = PLAYER.halfL + h.L / 2;
       return gap > 0 && gap < reach + 2.5 && h.vs < car.v + 1 && Math.abs(h.d - car.d) < PLAYER.halfW + h.W / 2 + 0.15; });
-    const mustBrake = best.soonest < 1.3 || nose;
+    // red lights: stop at the line like a driver (brake when the stopping distance, plus reaction, runs out)
+    const redLine = world.signals?.stopFor(car.s + PLAYER.halfL, car.v, 1);
+    const red = redLine != null && redLine - (car.s + PLAYER.halfL) < car.v * car.v / (2 * 9) + car.v * REACTION + 2.5;
+    const mustBrake = best.soonest < 1.3 || nose || red;
     // one plan at a time: head for the best line whenever it's actually open (braking or not, e.g. pulling out of
     // a queue); when nothing is open, hold the line we're on and brake. Never flip back into a lane that's closed ahead.
     // (and when it's down to a crawl, wait tucked into our own lane if that's clear right beside us, not on the

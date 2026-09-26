@@ -220,5 +220,5 @@ export function buildCity(W, tex, ground, route, props) {
     streets.group, streets.freeway.group, b.group,
     streetscape,
   );
-  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces, isFree, furniture: streetscape.userData.placed };
+  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces, isFree, furniture: streetscape.userData.placed, signals: streetscape.userData.signals };
 }
