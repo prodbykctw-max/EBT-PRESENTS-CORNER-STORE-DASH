@@ -20,6 +20,8 @@ drive/blender/
 drive/route_v1.svg
 drive/cache/
 drive/ref/
+# CC0 foliage scans (drive/tools/fetch_foliage.mjs) and the atlases composed from them
+drive/art/foliage/
 
 # local HTTPS dev certificate (scripts/serve.mjs)
 .certs/

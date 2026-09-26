@@ -5,7 +5,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { LEVEL } from './levels.js';
 import { buildStreets } from './roads.js';
-import { buildTerrain, buildCover, buildContactShadows, buildStreetscape, pointInPoly } from './landscape.js';
+import { buildTerrain, buildCover, buildContactShadows, buildStreetscape, buildGrass, pointInPoly } from './landscape.js';
 export { pointInPoly };
 
 export const toV3 = (x, y, z = 0) => new THREE.Vector3(x, z, -y);
@@ -206,19 +206,19 @@ function footprintIndex(W) {
   return (x, y) => !(g.get(Math.floor(x / cell) + ',' + Math.floor(y / cell)) || []).some((p) => pointInPoly(x, y, p));
 }
 
-export function buildCity(W, tex, ground, route, props) {
+export function buildCity(W, tex, ground, route, props, trees) {
   const b = buildBuildings(W, tex, ground);
   const streets = buildStreets(W, ground, route, tex);
   const outside = footprintIndex(W);
   const isFree = (x, y) => outside(x, y) && !inHero(x, y);
-  const streetscape = buildStreetscape(W, ground, route, streets, props, isFree);
+  const streetscape = buildStreetscape(W, ground, route, streets, props, isFree, trees, tex);
   const group = new THREE.Group();
   group.add(
     buildTerrain(W, tex, ground),
     buildCover(W, ground, tex, streets),
     buildContactShadows(W, ground, (bd) => { let cx = 0, cy = 0; for (const [x, y] of bd.pts) { cx += x; cy += y; } return inHero(cx / bd.pts.length, cy / bd.pts.length); }),
     streets.group, streets.freeway.group, b.group,
-    streetscape,
+    streetscape, buildGrass(W, ground, route, streets, isFree, tex),
   );
   return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces, isFree, furniture: streetscape.userData.placed, signals: streetscape.userData.signals };
 }
