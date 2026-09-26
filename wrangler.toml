@@ -9,6 +9,7 @@ workers_dev = true
 directory = "./public"
 binding = "ASSETS"
 not_found_handling = "404-page"
+run_worker_first = ["/"]   # the front page goes through the Worker, which serves the full game (standalone)
 
 [[d1_databases]]
 binding = "DB"
