@@ -189,13 +189,32 @@ Everything that can stand on something follows one set of rules:
 
 | Check | Last result |
 |---|---|
-| Route and street surfaces are the top surface, never terrain or lawns | 66,775/66,775 |
+| Route and street surfaces are the top surface, never terrain or lawns | 66,771/66,771 |
 | Every vehicle's wheels are within 10 cm of the surface (buses may hang up to 20 cm on a crest) | 2,325/2,325 over 32 checkpoints |
 | Cones, barricades and panhandlers stand on the road | included in the wheel count |
 | Every lane a vehicle can be given keeps all wheels on its road or deck | 2,620/2,620 |
-| Street props stand on the ground | 2,103/2,103 |
+| Street props stand on the ground | 2,246/2,246 |
 
 Run it after any change to world building.
+
+## Trees and lawns (beauty pass)
+
+Built the way game foliage is built, from CC0 Poly Haven scans (`drive/tools/fetch_foliage.mjs` downloads them
+into `drive/art/foliage/`; photo-scanned tree models run 0.3–17 M triangles, far too heavy for phones):
+
+- **Leaf clusters** (`make_leaf_atlas.py` → `tex/leaves.webp`): 4 twig tiles composed from the `island_tree_02`
+  leaf scans. Every leaf's stem base sits on a node of its twig and the blade points away from it (alternate
+  leaves, leaning toward the tip, with a terminal leaf); leaves are never scattered loose.
+- **Trees** (`blender_trees.py` → `trees.glb`): a bark trunk with branches plus a canopy of leaf-cluster cards on
+  the crown's shell. `tree_round` (110 cards) and `tree_upright` (72 cards), about 0.6–1k triangles each. Vertex
+  colour R is height in the canopy and drives the wind sway (`WIND`, advanced in drive.js). Instanced in 150 m tiles
+  so the camera and shadow pass skip the tiles they can't see.
+- **Lawns:** the `leafy_grass` photo plus its normal map, graded to a late-summer green in the shader, with
+  world-space noise for lusher and drier patches, so it never looks tiled. Cover is draped adaptively: triangles
+  split where the terrain bends under them, so the cover never dips below the ground.
+- **Grass tufts** (`make_grass_atlas.py` → `tex/grass_tuft.webp`): strips of `grass_bermuda_01` plants on crossed
+  cards, only on lawns within 55 m of the drive (about 3.7k on desktop, capped at 16k on phones). They sway
+  and sink into the lawn from 40–55 m out, so nothing pops.
 
 ## Runtime (public/drive/)
 
@@ -204,7 +223,7 @@ Run it after any change to world building.
 | `drive.js` | `startDrive({ mount, onDone })`: loader, scene, loop, HUD, parking, arrival, QA hooks (`window.__drive`) |
 | `city.js` | the height function, the OSM buildings (procedural facades, roofs, rooftop units), and orchestration |
 | `roads.js` | street and route surfaces (markings in the shader), junction and corner pads, curbs, crosswalks, and the freeway (deck, barriers, soffit, pier bents, overpass cutaway) |
-| `landscape.js` | terrain mesh, parks/lawns/lots, contact shadows, streetscape (trees, lamps, signal masts, benches, bins, hydrants, shelters) |
+| `landscape.js` | terrain mesh, parks/lawns/lots, grass tufts, contact shadows, streetscape (trees, lamps, signal masts, benches, bins, hydrants, shelters) |
 | `levels.js`, `surface.js` | the height stack, `standOn`, `deckTop`, and triangle height queries |
 | `sky.js` | sky dome and generated environment lighting |
 | `crowd.js` | procedural sidewalk crowd: parametric person, GPU walk cycle, group behaviour |

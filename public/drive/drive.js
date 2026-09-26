@@ -15,6 +15,7 @@ import { DriveAudio } from './audio.js';
 import { Crowd } from './crowd.js';
 import { Streetcars } from './tram.js';
 import { Signals } from './signals.js';
+import { WIND } from './landscape.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
 
@@ -46,11 +47,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const audio = new DriveAudio({ muted });
   audio.unlock(); // still inside the START tap's user activation on most browsers
   const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
-  const [W, hero, carGltf, props, weather] = await Promise.all([
+  const [W, hero, carGltf, props, trees, weather] = await Promise.all([
     fetch(new URL('world.json', BASE)).then((r) => r.json()),
     loader.loadAsync(new URL('hero.glb', BASE).href),
     loader.loadAsync(new URL('car.glb', BASE).href),
     loader.loadAsync(new URL('props.glb', BASE).href),
+    loader.loadAsync(new URL('trees.glb', BASE).href),
     fetchWeather(),
   ]);
   progress(0.7, 'Building the city');
@@ -77,13 +79,16 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   });
   // real asphalt (CC0 Poly Haven "asphalt_02"), shared by every road surface and parking lot
   const tl = new THREE.TextureLoader();
-  const [asphalt, asphaltNor] = await Promise.all(['tex/asphalt_diff.webp', 'tex/asphalt_nor.webp'].map((f) => tl.loadAsync(new URL(f, BASE).href)));
+  const [asphalt, asphaltNor, grass, grassNor, bark, barkNor, leaves, tuft] = await Promise.all(['tex/asphalt_diff.webp', 'tex/asphalt_nor.webp',
+    'tex/grass_diff.webp', 'tex/grass_nor.webp', 'tex/bark.webp', 'tex/bark_nor.webp', 'tex/leaves.webp', 'tex/grass_tuft.webp'].map((f) => tl.loadAsync(new URL(f, BASE).href)));
+  for (const t of [grass, bark, leaves, tuft]) t.colorSpace = THREE.SRGBColorSpace;   // CC0 Poly Haven: leafy_grass, island_tree_02, grass_bermuda_01
+  Object.assign(tex, { grass, grassNor, bark, barkNor, leaves, tuft });
   asphalt.colorSpace = THREE.SRGBColorSpace;
   Object.assign(tex, { map: asphalt, normal: asphaltNor, asphalt });
   for (const t of Object.values(tex)) if (t) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; }
   const ground = makeGround(W);
   const route = new RouteFrame(W, ground, 200); // road continues 200 m past the store: traffic drives on out of view
-  const city = buildCity(W, tex, ground, route, props.scene);
+  const city = buildCity(W, tex, ground, route, props.scene, trees.scene);
   scene.add(city.group, hero.scene);
 
   // lights: the sun follows the car so its shadow map stays sharp where you are
@@ -255,7 +260,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       }
     }
     if (state === 'driving') {
-      t -= dt; drove += dt;
+      if (!api.freezeClock) t -= dt; drove += dt;   // QA: freezeClock holds the timer for look-dev
       trams.update(dt, car);
       const ev = world.update(dt, car, drove, hornT > 0 ? 1 : 0);
       for (const h of ev.hits) {
@@ -297,7 +302,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const steer = THREE.MathUtils.clamp(Math.atan2(car.dv, Math.max(car.v, 4)) * 1.6, -0.5, 0.5);   // fronts lead the dodge
     for (const w of wheelSteer) w.o.quaternion.copy(w.q0).multiply(dq.setFromAxisAngle(Y, steer));
     world.render(car, drove);
-    signals.update(dt);
+    signals.update(dt); WIND.value += dt;   // traffic lights; the tree canopies sway
     if (state !== 'driving') { world.updateFrustum(); trams.render(); }   // (world.update keeps the frustum current while driving)
     crowd.update(dt, car, hornT);
     fx.update(dt, camera, renderer);

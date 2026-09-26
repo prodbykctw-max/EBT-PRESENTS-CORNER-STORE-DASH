@@ -18,6 +18,7 @@ const JOBS = [
   { src: 'hero_raw.glb', dst: 'hero.glb', max: 2048, quality: 80 },
   { src: 'car_raw.glb', dst: 'car.glb', max: 512, quality: 80, keepMeshes: true }, // keeps the *_STEER/*_SPIN wheel pivots
   { src: 'props_raw.glb', dst: 'props.glb', max: 256, quality: 80, keepMeshes: true }, // one mesh per prop (runtime instances them by name)
+  { src: 'trees_raw.glb', dst: 'trees.glb', max: 256, quality: 80, keepMeshes: true }, // trunk + leaf-card canopy per tree (textures: tex/)
 ];
 for (const j of JOBS) {
   gt('optimize', tmp(j.src), tmp('_a.glb'), '--compress', 'meshopt', '--texture-compress', 'false', '--simplify', 'false',
