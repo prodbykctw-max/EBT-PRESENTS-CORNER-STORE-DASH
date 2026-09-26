@@ -39,8 +39,8 @@
     muted: bot && !q.has('sound'),
     onDone: (r) => {
       done.style.display = 'grid';
-      dt.textContent = r.parked ? (r.cleanPark ? 'Clean park!' : 'Parked') : 'Too late';
-      ds.textContent = r.parked ? `+${r.bonus} bonus · ${r.tokens} EBT · ${r.hits ? r.hits + (r.hits > 1 ? ' hits' : ' hit') : 'no hits'}` : 'The store closed before you got there.';
+      dt.textContent = r.busted ? 'Busted' : r.parked ? (r.cleanPark ? 'Clean park!' : 'Parked') : 'Too late';
+      ds.textContent = r.busted ? 'You hit a police car and went to jail.' : r.parked ? `+${r.bonus} bonus · ${r.tokens} EBT · ${r.hits ? r.hits + (r.hits > 1 ? ' hits' : ' hit') : 'no hits'}` : 'The store closed before you got there.';
       if (q.has('qa')) { done.classList.add('qa'); dr.textContent = JSON.stringify(window.__botReport ? { ...r, bot: window.__botReport } : r, null, 1); }   // test report only in QA
     },
   });

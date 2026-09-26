@@ -2,7 +2,7 @@
 // loaded on demand by the main game.
 //   const { startDrive } = await import('./drive/drive.js');
 //   startDrive({ mount: document.body, muted, onDone: (result) => { /* start the store level */ } });
-// result = { arrived, parked, timeLeft, cleanPark, hits, tokens, nearMisses, bonus }
+// result = { arrived, parked, timeLeft, cleanPark, hits, tokens, nearMisses, bonus, busted }
 import * as THREE from './vendor/three.module.min.js';
 import { GLTFLoader } from './vendor/GLTFLoader.js';
 import { MeshoptDecoder } from './vendor/meshopt_decoder.module.js';
@@ -15,6 +15,7 @@ import { DriveAudio } from './audio.js';
 import { Crowd } from './crowd.js';
 import { Streetcars } from './tram.js';
 import { Signals } from './signals.js';
+import { Birds } from './birds.js';
 import { WIND } from './landscape.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
@@ -116,6 +117,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     onRoute: (x, y) => roadSurface.top(x, -y, ground(x, y) + 1.2)?.name === 'route_road',
     visible: (x, y, z, r) => world.visible(x, y, z, r),
   });
+  world.planCorners(signals);   // water sellers and panhandlers working the red lights
+  // flocks fly over the roofs: height of whatever is under a point (roofs, freeway decks, landmarks), by a ray from above
+  const roofRay = new THREE.Raycaster(), roofHits = [city.group.getObjectByName('roofs'), city.freeway.group, hero.scene].filter(Boolean), down = new THREE.Vector3(0, -1, 0);
+  const roofAt = (x, y) => { roofRay.set(toV3(x, y, 400), down); const h = roofRay.intersectObjects(roofHits, true)[0]; return h ? h.point.y : ground(x, y); };
+  const groundAt = (x, y) => Math.max(surfAt(x, y, ground(x, y) + 1.2) ?? -Infinity, ground(x, y) + LEVEL.TERRAIN);
+  const birds = world.birds = new Birds({ scene, props: props.scene, route, roofAt, groundAt, isFree: city.isFree, sEnd: spot.s,
+    trees: [...(city.furniture.tree_round || []), ...(city.furniture.tree_upright || [])],
+    occupied: (s, d) => world.ents.some((e) => e.alive && Math.abs(e.s - s) < 7 && Math.abs(e.d - d) < 2.5), visible: (x, y, z, r) => world.visible(x, y, z, r), mobile: MOBILE });
   const carModel = carGltf.scene;
   carModel.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   // brake lights: the tail-lamp material flares when you're on the brakes
@@ -235,12 +244,62 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     audio.chime(); endT = 0;
   }
 
+  // ---------- BUSTED: hit a police car and the run is over ----------
+  // the cruiser you hit lights up and stops; backup rolls in behind you, lights and siren; then it's jail
+  const glowTex = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.25, 'rgba(255,255,255,.8)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c);
+  })();
+  const beacons = [], busted = {};
+  const poseOf = (e) => () => {
+    if (e.cross) return { x: e.cross.x, y: e.cross.y, z: e.cross.zAbs + LEVEL.ROAD, a: e.cross.h };
+    const p = route.at(e.s, e.d), z = surfAt(p.x, p.y, p.z + 1.2) ?? p.z + LEVEL.ROUTE;
+    return { x: p.x, y: p.y, z, a: p.a + (e.dir === -1 ? Math.PI : 0) };
+  };
+  function lightsOn(pose) {
+    const mk = (col) => new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+    const red = mk(0xff1a1a), blue = mk(0x2a5cff), g = new THREE.Group(); g.add(red, blue); scene.add(g);
+    beacons.push({ g, red, blue, pose });
+  }
+  function updateBeacons(now) {
+    const ph = Math.floor(now / 110) % 6;   // red-red, blue-blue, both
+    for (const b of beacons) {
+      const p = b.pose(), lx = -Math.sin(p.a) * 0.42, ly = Math.cos(p.a) * 0.42;   // across the light bar
+      b.g.position.copy(toV3(p.x, p.y, p.z + 1.72));
+      b.red.position.set(lx, 0, -ly); b.blue.position.set(-lx, 0, ly);
+      const r = ph < 2 || ph === 4, bl = (ph >= 2 && ph < 4) || ph === 4;
+      b.red.scale.setScalar(r ? 2.2 : 0.5); b.blue.scale.setScalar(bl ? 2.2 : 0.5);
+      b.red.material.opacity = r ? 1 : 0.25; b.blue.material.opacity = bl ? 1 : 0.25;
+    }
+  }
+  function bust(e) {
+    state = 'busted'; endT = 0;
+    Object.assign(result, { hits, tokens, nearMisses, busted: true, bonus: 0 });
+    hud.msg.classList.add('busted'); flash('BUSTED', 600000); hud.hint.textContent = '';
+    if (e.cross) e.cross.v = 0; else Object.assign(e, { v: 0, v0: 0, cruise: 0 });   // the cruiser you hit stops
+    lightsOn(poseOf(e));
+    const backup = world.add('police', { s: Math.max(-15, car.s - 60), d: car.d, v: 18, cruise: 18, dir: 1, color: 0xffffff, backup: true });
+    lightsOn(poseOf(backup)); busted.backup = backup;
+    audio.siren(); try { navigator.vibrate?.([60, 80, 60, 80, 200]); } catch {}
+  }
+  function showBusted() {
+    if (root.querySelector('.drive-busted')) return;
+    hud.msg.classList.remove('on');
+    const card = document.createElement('div'); card.className = 'drive-busted';
+    card.innerHTML = '<h2>BUSTED</h2><p>You hit a police car. You’re going to jail.</p><button type="button">Drive again</button>';
+    card.querySelector('button').addEventListener('click', () => finish(), { once: true });
+    root.appendChild(card);
+    if (QA && window.__botReport) setTimeout(() => { if (root.isConnected) finish(); }, 2500);   // the autopilot doesn't wait for a tap
+  }
+
   // ---------- loop ----------
   let last = performance.now(), raf = 0, acc = 0;
   const FIXED = 1 / 120;
   function frame() {
     raf = nextFrame(frame);
     const now = performance.now(), dt = Math.min((now - last) / 1000, 0.05); last = now;
+    if (api.pause) { renderer.render(scene, camera); return; }   // QA: freeze-frame for look-dev
     hornT -= dt;
     if (state === 'countdown') {
       countdown -= dt;
@@ -249,7 +308,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     }
     const braking = keys.has('down');
     const approaching = car.s > spot.s - 95;
-    if (state === 'driving' || state === 'parked' || state === 'late') {
+    if (state === 'driving' || state === 'parked' || state === 'late' || state === 'busted') {
       acc += dt;
       while (acc >= FIXED) {
         acc -= FIXED;
@@ -272,12 +331,25 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
           const at = toV3((cp.x + ep.x) / 2, (cp.y + ep.y) / 2, (cp.z + ep.z) / 2 + 0.6);
           fx.burst(at, new THREE.Vector3(Math.cos(cp.a), 0, -Math.sin(cp.a)), { power: h.power, kind: h.e.solid < 0.8 ? 'plastic' : 'metal', color: h.e.color });
         }
+        if (h.busted) { bust(h.e); break; }
       }
       if (ev.nearMiss) { nearMisses += ev.nearMiss; pop('NEAR MISS +50'); audio.whoosh(); }
       if (ev.tokens) { tokens += ev.tokens; pop('+' + ev.tokens * 25); audio.token(); }
       if (approaching) hud.hint.textContent = Math.abs(car.d - spot.d) < 0.8 ? 'Nice — hold the curb' : 'Pull right to the curb ▸';
-      if (approaching && car.v < 0.3 && Math.abs(car.s - spot.s) < 2) park();
-      if (t <= 0) { t = 0; state = 'late'; Object.assign(result, { hits, tokens, nearMisses }); flash('TOO LATE — walk it in', 2600); endT = 0; }
+      if (state === 'driving' && approaching && car.v < 0.3 && Math.abs(car.s - spot.s) < 2) park();
+      if (state === 'driving' && t <= 0) { t = 0; state = 'late'; Object.assign(result, { hits, tokens, nearMisses }); flash('TOO LATE — walk it in', 2600); endT = 0; }
+    } else if (state === 'busted') {   // the street carries on around you while the police pull up
+      trams.update(dt, car); world.update(dt, car, drove, 0);
+      endT += dt;
+      // once backup has pulled up, an officer gets out and walks up to your door
+      const b = busted, bk = b.backup;
+      if (!b.officer && bk && bk.v < 0.3 && car.s - bk.s < 16) b.officer = world.add('officer', { s: bk.s + 1.2, d: bk.d + 1.2, scenery: true, color: 0x1c2740, hd: 0 });
+      if (b.officer) {
+        const o = b.officer, ts = car.s - 0.4, td = car.d + 1.35, ds = ts - o.s, dd = td - o.d, L = Math.hypot(ds, dd);
+        if (L > 0.1) { const k = Math.min(1, 1.5 * dt / L); o.s += ds * k; o.d += dd * k; o.hd = Math.atan2(dd, ds); }
+        else { o.hd = -Math.PI / 2; b.at = (b.at || 0) + dt; }   // at the driver's window
+      }
+      if (endT > 9 || b.at > 0.9) showBusted();
     } else {
       world.update(0, car, drove, 0);
     }
@@ -305,6 +377,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     signals.update(dt); WIND.value += dt;   // traffic lights; the tree canopies sway
     if (state !== 'driving') { world.updateFrustum(); trams.render(); }   // (world.update keeps the frustum current while driving)
     crowd.update(dt, car, hornT);
+    birds.update(dt, car, drove, hornT > 0 ? 1 : 0); updateBeacons(now);
     fx.update(dt, camera, renderer);
     beacon.material.opacity = 0.12 + 0.08 * Math.sin(now / 250);
     spotGroup.visible = state === 'driving' || state === 'countdown';

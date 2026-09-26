@@ -168,9 +168,21 @@ const TYPES = {
   bus: { L: 12, W: 2.55, solid: 0 }, worksign: { L: 1, W: 1, solid: 0 }, walker: { L: 0.5, W: 0.5, solid: 0 },
   stander: { L: 0.5, W: 0.5, solid: 0 }, cyclist: { L: 1.8, W: 0.6, solid: 0 },
   tram: { L: 24.8, W: 2.65, solid: 1 },   // the Atlanta Streetcar (tram.js moves and draws it)
+  // city life: police cruisers and driverless robotaxis in the traffic mix, stray dogs on the sidewalks, and
+  // the kids selling water / panhandlers who work the red lights (people and dogs jump clear: never hurt)
+  police: { L: 4.95, W: 1.9, solid: 1 }, robotaxi: { L: 4.7, W: 1.95, solid: 1 },
+  dog: { L: 0.8, W: 0.35, solid: 0.5 }, officer: { L: 0.5, W: 0.5, solid: 0 }, seller: { L: 0.6, W: 0.6, solid: 0.6 }, cooler: { L: 0.7, W: 0.45, solid: 0 },
 };
 // half wheelbase / half track used to seat each vehicle on the road
-const VEHICLE = { sedan: [1.35, 0.8], suv: [1.42, 0.86], bus: [3.6, 1.15], tram: [11, 1.3] };
+const VEHICLE = { sedan: [1.35, 0.8], suv: [1.42, 0.86], bus: [3.6, 1.15], tram: [11, 1.3], police: [1.47, 0.82], robotaxi: [1.5, 0.83] };
+const CARS = new Set(['sedan', 'suv', 'police', 'robotaxi']);
+const ON_FOOT = new Set(['panhandler', 'seller', 'dog']);   // hit one and they leap clear: a scare, never an injury
+/** the traffic mix: mostly private cars, about one in ten a driverless robotaxi, one in twenty a police cruiser */
+const carType = () => pickWeighted([['sedan', 5], ['suv', 3], ['robotaxi', 0.9], ['police', 0.5]]);
+const parkedType = () => pickWeighted([['sedan', 5], ['suv', 3], ['police', 0.25]]);
+/** does o block e's lane? vehicles by lane; people and dogs only if they're actually in e's path */
+const blocks = (o, e) => Math.abs(o.d - e.d) < (VEHICLE[o.type] ? 1.8 : (e.W || 1.8) / 2 + (o.W || 0.5) / 2 + 0.25);
+const COATS = [0x8a5a32, 0x2a2420, 0xc9a877, 0x6b4a33, 0xe6dccb, 0x4a3b30, 0xa0703f];
 const PAINT = [0xb8bcc2, 0x1d1f24, 0xe9e9e6, 0x7a1a1a, 0x1f3c78, 0x5a5f66, 0x24542f, 0xc4a44a, 0x8a8f96, 0x2b2b30];
 const SHIRTS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2e2e2e, 0xe8e8e8, 0x3d9a5b, 0x8e44ad, 0xff8c1a, 0x1abc9c, 0x7f8c8d];
 const BUS_STRIPE = [0x1d5fbf, 0xc62828];
@@ -182,8 +194,10 @@ export class World {
     this.ents = []; this.tokens = [];
     this.meshes = {};
     const mat = propMaterial();
-    const CAP = { sedan: 150, suv: 110, cone: 120, barricade: 16, panhandler: 6, bus: 8, worksign: 10, cyclist: 8 };   // people on foot: crowd.js
-    const GEO = { sedan: 'prop_sedan', suv: 'prop_suv', cone: 'prop_cone', barricade: 'prop_barricade', panhandler: 'prop_panhandler',
+    const CAP = { sedan: 150, suv: 110, police: 24, robotaxi: 30, cone: 120, barricade: 16, panhandler: 12, seller: 16, cooler: 10,
+      dog_a: 12, dog_b: 12, officer: 2, bus: 8, worksign: 10, cyclist: 8 };   // people on foot: crowd.js
+    const GEO = { sedan: 'prop_sedan', suv: 'prop_suv', police: 'prop_police', robotaxi: 'prop_robotaxi', cone: 'prop_cone', barricade: 'prop_barricade',
+      panhandler: 'prop_panhandler', seller: 'prop_seller', cooler: 'prop_cooler', dog_a: 'prop_dog_a', dog_b: 'prop_dog_b', officer: 'prop_person_walk',
       bus: 'prop_bus', worksign: 'prop_worksign', cyclist: 'prop_cyclist' };
     for (const [t, cap] of Object.entries(CAP)) {
       const im = new THREE.InstancedMesh(bakedGeometry(props, GEO[t]), mat, cap);
@@ -206,7 +220,7 @@ export class World {
     const r = this.route, v0 = -rnd(9, 13), n = Math.random() < 0.6 ? 1 : Math.random() < 0.75 ? 2 : 3;
     for (let k = 0; k < n; k++, s += rnd(18, 28)) {
       if (r.oneway(s)) continue;
-      this.add(pick(['sedan', 'suv', 'sedan']), { s, d: r.lane(s, 1), v: v0, v0, color: pick(PAINT), dir: -1 });
+      this.add(carType(), { s, d: r.lane(s, 1), v: v0, v0, color: pick(PAINT), dir: -1 });
       this.stats.oncoming++;
     }
     return s;
@@ -218,11 +232,11 @@ export class World {
     let s = 70, k = 0;
     while (s < sStop - 95) {
       const hw = r.hw(s), right = r.lane(s, 0), left = r.lane(s, 1), two = !r.oneway(s);
-      const ev = pickWeighted([['slow', 2], ['parked', 2], ['construction', 1], ['panhandler', 0.8], ['tokens', 3]]);
-      if (ev === 'slow') this.add(pick(['sedan', 'suv', 'sedan']), { s, d: right, v: rnd(9, 13), color: pick(PAINT), dir: 1 });
+      const ev = pickWeighted([['slow', 2], ['parked', 2], ['construction', 1], ['tokens', 3]]);   // (panhandlers work the lights: planCorners)
+      if (ev === 'slow') this.add(carType(), { s, d: right, v: rnd(9, 13), color: pick(PAINT), dir: 1 });
       if (ev === 'parked') {
         const n = Math.random() < 0.25 ? 2 : 1;
-        for (let q = 0; q < n; q++) this.add(pick(['sedan', 'suv']), { s: s + q * 6.5, d: right - 0.35, color: pick(PAINT), dir: 1, parked: true });
+        for (let q = 0; q < n; q++) this.add(parkedType(), { s: s + q * 6.5, d: right - 0.35, color: pick(PAINT), dir: 1, parked: true });
         if (!two && Math.random() < 0.5) this.add('sedan', { s: s + 30, d: left + 0.35, color: pick(PAINT), dir: 1, parked: true });
       }
       if (ev === 'construction') {
@@ -251,12 +265,40 @@ export class World {
       const pd = r.parkD(s1, side); if (pd === null || !clearAt(s1) || Math.random() > 0.6) continue;
       if (side < 0 && (this.workZones || []).some(([a, b]) => s1 > a && s1 < b)) continue;   // coned off
       if (side < 0 && s1 > sStop - 14 && s1 < sStop + 16) continue;                          // the store's P space (room to pull in)
-      this.add(pick(['sedan', 'sedan', 'suv']), { s: s1, d: pd + side * rnd(-0.1, 0.15), color: pick(PAINT), dir: side > 0 ? -1 : 1, parked: true, curb: true });
+      this.add(parkedType(), { s: s1, d: pd + side * rnd(-0.1, 0.15), color: pick(PAINT), dir: side > 0 ? -1 : 1, parked: true, curb: true });
     }
     // a couple of cyclists in the bike lane (people on foot are the crowd: crowd.js)
     for (let q = 0; q < 5; q++) { const s0 = rnd(40, sStop - 60); this.add('cyclist', { s: s0, d: -(r.hw(s0) + 0.55), v: rnd(4.5, 6.5), color: pick(SHIRTS), dir: 1, scenery: true }); }
+    // stray dogs nosing along the sidewalks; now and then one trots across the street in front of you
+    for (let q = 0; q < 8; q++) {
+      const s0 = rnd(50, sStop - 30), side = Math.random() < 0.5 ? 1 : -1, off = rnd(1.2, 2.0);
+      this.add('dog', { s: s0, d: side * (r.hw(s0) + off), side, off, walk: rnd(1.0, 1.6) * (Math.random() < 0.5 ? 1 : -1), color: pick(COATS), gait: rnd(0, 6), pause: rnd(-4, 2), hd: 0 });
+    }
     this.planAmbient();
   }
+
+  /** the people who work the red lights: at signalised junctions a kid (or two) selling cold water from a cooler
+   *  on the corner, or a panhandler with a sign. They wait at the stop line on the lane line; on red they walk
+   *  down between the stopped cars to the driver's window; on green they linger a few seconds before drifting
+   *  back up the line, which is exactly when they're in the way of anyone pulling off. */
+  planCorners(signals) {
+    const r = this.route;
+    for (const n of signals?.nodes || []) {
+      const line = n.lineIn;
+      if (line < 90 || line > this.sEnd - 25 || (this.workZones || []).some(([a, b]) => line > a - 20 && line < b + 20)) continue;
+      const roll = Math.random();
+      if (roll > 0.85) continue;
+      const kids = roll < 0.5, crew = kids ? (Math.random() < 0.45 ? 2 : 1) : 1;
+      if (kids) this.add('cooler', { s: line - 2.5, d: -(r.hw(line - 2.5) + 1.3), scenery: true, yawOff: Math.PI / 2 });
+      for (let k = 0; k < crew; k++) {
+        const s0 = line - 0.6 - k * 1.3;
+        this.add(kids ? 'seller' : 'panhandler', { s: s0, d: -(r.hw(s0) + 0.7), color: pick(SHIRTS), worker: true, node: n, line,
+          post: s0, beat: line - rnd(8, 26) - k * 9, delay: rnd(1, 3.5), linger: rnd(2.5, 5), hd: Math.PI });
+      }
+    }
+  }
+  /** the painted line between our lane and the next one (the centre line on a two-way street) */
+  laneLine(s) { return (this.route.lane(s, 0) + this.route.lane(s, 1)) / 2; }
 
 
   /** cross-street traffic (cars + city buses) that waits at the lights instead of entering the route */
@@ -295,7 +337,7 @@ export class World {
       const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t;
       if (!rd.h && r.distTo(x, y) < 18) continue;
       if (!initial && this.visible(x, y, hs ? r.ground(x, y) + hs[i] : undefined, bus ? 7 : 3.5)) continue;
-      this.ambient.push(this.ambientOn(rd, pts, hs, bus ? 'bus' : pick(['sedan', 'suv']), i, t, bus ? pick(BUS_STRIPE) : pick(PAINT)));
+      this.ambient.push(this.ambientOn(rd, pts, hs, bus ? 'bus' : carType(), i, t, bus ? pick(BUS_STRIPE) : pick(PAINT)));
       return;
     }
   }
@@ -342,7 +384,7 @@ export class World {
       if (!seen({ s: src, d: r.lane(src, 1) }, 4)) {   // one car at a time: platoon spacing, then a real gap
         if (!this.srcLeft) { this.srcLeft = Math.random() < 0.6 ? 1 : Math.random() < 0.75 ? 2 : 3; this.srcV = -rnd(9, 13); }
         const v0 = this.srcV;                                   // a platoon shares one speed
-        this.add(pick(['sedan', 'suv', 'sedan']), { s: src, d: r.lane(src, 1), v: v0, v0, color: pick(PAINT), dir: -1 });
+        this.add(carType(), { s: src, d: r.lane(src, 1), v: v0, v0, color: pick(PAINT), dir: -1 });
         this.stats.oncoming++;
         this.nextOncoming = (--this.srcLeft ? rnd(18, 28) : rnd(50, 130)) / -v0;
       } else this.nextOncoming = 0.5;
@@ -377,7 +419,9 @@ export class World {
         continue;
       }
       if (!e.parked) e.s += (e.v || 0) * dt;
-      if (e.type === 'panhandler') {
+      if (e.worker && !e.leaving) this.work(e, dt, car);
+      else if (e.type === 'dog') this.dog(e, dt, car, seen);
+      else if (e.type === 'panhandler' || e.type === 'seller') {
         if (e.leaving) { e.d += (e.home2 - e.d) * Math.min(1, dt * 3); }
         else {
           e.d = e.home + Math.sin(t * 0.8 + e.sway) * 0.6; // works the line between lanes
@@ -387,7 +431,7 @@ export class World {
       // oncoming cars stop for anything in their lane: the car in front (maybe yielding), a car overtaking
       // toward them, or the player
       if (e.dir === -1 && e.v0) {
-        const ahead = this.ents.find((o) => o !== e && o.alive && !o.scenery && !o.flying && VEHICLE[o.type] && o.s < e.s && e.s - o.s < (o.L || 4.5) / 2 + (e.L || 4.5) / 2 + 3 && Math.abs(o.d - e.d) < 1.8);
+        const ahead = this.ents.find((o) => o !== e && o.alive && !o.scenery && !o.flying && (VEHICLE[o.type] || ON_FOOT.has(o.type)) && o.s < e.s && e.s - o.s < (o.L || 4.5) / 2 + (e.L || 4.5) / 2 + 3 && blocks(o, e));
         if (ahead) e.v = Math.max(e.v, Math.min(0, ahead.dir === -1 ? ahead.v : 0));
         // the player over the line in front of them: ease over toward their own curb and squeeze past slowly
         // (a real driver doesn't sit nose to nose); stop only if there's no room to get by
@@ -395,18 +439,19 @@ export class World {
         let aim = lane;
         if (car.s < e.s + 3 && e.s - car.s < 22 && car.d > lane - 3.2) {
           aim = Math.min(room, Math.max(lane, car.d + 2.15));
-          const clear = Math.abs(e.d - car.d) >= 1.9;                               // already far enough over?
-          if (aim - car.d < 1.9) { if (e.s - car.s < 13) e.v = Math.max(e.v, 0); }   // can't get by: wait
+          const need = PLAYER.halfW + (e.W || 1.9) / 2 + 0.05;                      // side-by-side clearance, this car's width
+          const clear = Math.abs(e.d - car.d) >= need;                              // already far enough over?
+          if (aim - car.d < need) { if (e.s - car.s < 13) e.v = Math.max(e.v, 0); }  // can't get by: wait
           else e.v = Math.max(e.v, clear || e.s - car.s > 9 ? -4 : 0);               // move over first, then squeeze by
         }
         e.d += Math.max(-2 * dt, Math.min(2 * dt, aim - e.d));
       }
       // slow traffic in our direction drives like traffic: follows slower cars, and around a stationary blockage
       // it overtakes through the other lane when that's clear (and pulls back in), otherwise waits behind it
-      if ((e.type === 'sedan' || e.type === 'suv') && !e.parked && e.dir === 1 && !e.scenery) {
+      if (CARS.has(e.type) && !e.parked && e.dir === 1 && !e.scenery) {
         e.cruise ??= e.v;
         const home = r.lane(e.s, 0), other = r.lane(e.s, 1);
-        const ahead = this.ents.find((o) => o !== e && o.alive && !o.scenery && !o.flying && o.solid && o.s > e.s && o.s - e.s < 14 && Math.abs(o.d - e.d) < 1.8);
+        const ahead = this.ents.find((o) => o !== e && o.alive && !o.scenery && !o.flying && o.solid && o.s > e.s && o.s - e.s < 14 && blocks(o, e));
         if (!e.passing && ahead && isStill(ahead) && !r.oneway(e.s)) {
           const end = stretchFrom(e.s) + 8;
           // mirror check: no oncoming car in the way, and the player isn't beside them or coming up fast behind
@@ -422,6 +467,7 @@ export class World {
         if (car.s > e.s && car.s - e.s < 16 && Math.abs(car.d - e.d) < 1.9) want = Math.min(want, car.s - e.s < 9 ? 0 : car.v);
         const sl = this.signals?.stopFor(e.s + (e.L || 4.5) / 2, e.v, 1);                        // red light
         if (sl != null) { const gap = sl - (e.s + (e.L || 4.5) / 2); want = Math.min(want, gap < 0.5 ? 0 : Math.sqrt(2 * 3 * gap)); }
+        if (e.backup) { const gap = car.s - 6.5 - e.s; target = car.d; want = gap < 0.3 ? 0 : Math.min(e.cruise, Math.sqrt(2 * 5 * gap)); }   // BUSTED: pulls up behind you
         e.v += Math.max(-9 * dt, Math.min(4 * dt, want - e.v));
         e.d += Math.max(-2.5 * dt, Math.min(2.5 * dt, target - e.d));
       }
@@ -436,14 +482,16 @@ export class World {
         const ds = Math.abs(e.s - car.s), dd = Math.abs(e.d - car.d);
         const hitS = PLAYER.halfL + e.L / 2 - 0.25, hitD = PLAYER.halfW + e.W / 2 - 0.12;
         if (ds < hitS && dd < hitD) {
-          if (e.type === 'panhandler') {        // nobody gets hurt: he jumps clear, you lose the moment
+          if (ON_FOOT.has(e.type)) {            // nobody gets hurt: they leap clear, you lose the moment
             e.leaving = true; e.home2 = Math.sign(e.d - car.d || 1) * (r.hw(e.s) + 1.8); e.hitDone = true;
+            if (e.type === 'dog') Object.assign(e, { crossing: 0, bolt: Math.sign(e.d - car.d || 1) });
             if (car.invuln <= 0) out.hits.push({ e, power: 0.6, label: 'WATCH IT!' });
           } else if (e.solid < 0.8) {           // cones / barricades go flying
             Object.assign(e, { flying: true, fs: e.s, fd: e.d, fz: 0.2, fvs: car.v * rnd(0.6, 0.9), fvd: (e.d - car.d) * 6 + rnd(-2, 2), fvz: rnd(3, 6), spin: 0, hitDone: true, scenery: true });
             if (car.invuln <= 0) out.hits.push({ e, power: e.solid, label: e.type === 'cone' ? '' : 'CRASH' });
           } else if (car.invuln <= 0) {
-            out.hits.push({ e, power: 1, label: 'CRASH' }); e.hitDone = true;
+            // BUSTED only if you drove into the cruiser; creeping or stopped, a scrape is just a scrape
+            out.hits.push(e.type === 'police' && car.v > 3 ? { e, power: 1, label: 'BUSTED', busted: true } : { e, power: 1, label: 'CRASH' }); e.hitDone = true;
             if (e.dir !== -1) e.v = Math.max(e.v, 0) + car.v * 0.3;   // rear-ended: shoved on; oncoming: carries on past
             setTimeout(() => { e.hitDone = false; }, 900);
           }
@@ -499,7 +547,8 @@ export class World {
       if (!a.deck && r.distTo(nx, ny) < 8 && Math.hypot(nx - car.pose.x, ny - car.pose.y) < 20) {
         const pr = r.project(nx, ny);
         if (Math.abs(pr.s - car.s) < PLAYER.halfL + VEHICLE[a.type][0] + 0.4 && Math.abs(pr.d - car.d) < PLAYER.halfW + VEHICLE[a.type][1] + 0.1 && !a.hitT) {
-          out.hits.push({ e: { type: a.type, s: pr.s, d: pr.d, solid: 1, color: a.color }, power: 1, label: 'CRASH' }); a.hitT = 1.5;
+          const e = { type: a.type, s: pr.s, d: pr.d, solid: 1, color: a.color, cross: a };
+          out.hits.push(a.type === 'police' && car.v > 3 ? { e, power: 1, label: 'BUSTED', busted: true } : { e, power: 1, label: 'CRASH' }); a.hitT = 1.5;
         }
       }
       if (a.hitT) a.hitT = Math.max(0, a.hitT - dt);
@@ -507,6 +556,70 @@ export class World {
     this.ambient = this.ambient.filter((a) => !a.dead);
     for (let k = 0; k < 2 && this.ambient.length < 14; k++) this.spawnAmbient(false);
     return out;
+  }
+
+  /** a water seller / panhandler working a red light (see planCorners). They wait on the corner; a beat after the
+   *  light goes red they cross at the crosswalk in front of the stopped cars and work down the lane line (to the
+   *  player's window if they're stopped nearby). After green they linger, head back up the line and cross to the
+   *  corner once there's a gap: right across the front of anyone pulling off. */
+  work(e, dt, car) {
+    const r = this.route, red = (this.signals?.routeAspect(e.node) ?? 'G') !== 'G';
+    if (red) { e.redT = (e.redT || 0) + dt; e.greenT = 0; } else { e.greenT = (e.greenT || 0) + dt; e.redT = 0; }
+    const xs = e.line + 1.6, curbD = -(r.hw(xs) + 0.7);                           // the crosswalk, and the corner
+    e.phase ??= 'corner';
+    const out = red ? e.redT > e.delay : e.greenT < e.linger;
+    let ts = e.post, td = -(r.hw(e.post) + 0.7), sp = 1.3;
+    e.atWindow = false;
+    if (e.phase === 'corner' && red && e.redT > e.delay) e.phase = 'out';
+    if (e.phase === 'out') { ts = xs; td = this.laneLine(xs); }
+    if (e.phase === 'line') {
+      if (out) {
+        ts = e.beat; td = this.laneLine(e.beat);
+        if (car.v < 1 && e.line - car.s > 2 && e.line - car.s < 40 && Math.abs(car.s - e.beat) < 14 && !this.ents.some((o) => o !== e && o.worker && o.atWindow)) {
+          ts = car.s + 0.7; td = car.d + 1.4; e.atWindow = true;                  // the driver's window (driver sits left)
+        }
+      } else { ts = xs; td = this.laneLine(xs); sp = 1.6; }                        // back up the line, briskly
+    }
+    if (e.phase === 'back') { ts = xs; td = curbD; sp = 1.7; }
+    const ds = ts - e.s, dd = td - e.d, L = Math.hypot(ds, dd);
+    if (L > 0.05) { const k = Math.min(1, sp * dt / L); e.s += ds * k; e.d += dd * k; e.hd = Math.atan2(dd, ds); }
+    else {
+      e.hd = Math.atan2(car.d - e.d, car.s - e.s);                                // standing: face the traffic
+      if (e.phase === 'out') e.phase = 'line';
+      else if (e.phase === 'back') e.phase = 'corner';
+      else if (e.phase === 'line' && !out) {
+        // a pedestrian's gap: nothing in our lanes about to reach the crosswalk (cars at the line pulling off count)
+        const coming = (o) => o.s < xs && xs - o.s < 4 + Math.max(o.v || 0, 2) * 2.5 && o.d < 0.5;
+        if (!coming(car) && !this.ents.some((o) => o.alive && CARS.has(o.type) && !o.parked && o.dir === 1 && coming(o))) e.phase = 'back';
+      }
+    }
+    e.v = 0;
+  }
+  /** a stray dog: ambles along its sidewalk with sniffing stops; sometimes trots across the street ahead of the
+   *  player (only when it's on screen and nothing is coming the other way, so it's always a fair dodge) */
+  dog(e, dt, car, seen) {
+    const r = this.route, hw = r.hw(e.s);
+    let vs = 0, vd = 0;
+    if (e.bolt) {                                                  // spooked: runs for the nearest sidewalk
+      vd = e.bolt * 6;
+      if (Math.abs(e.d) > hw + 1.2 && Math.sign(e.d) === e.bolt) { Object.assign(e, { side: e.bolt, bolt: 0, leaving: false }); setTimeout(() => { e.hitDone = false; }, 1500); }
+    } else if (e.crossing) {
+      vd = e.crossing * 3.3; vs = Math.sign(e.walk) * 0.4;
+      if (Math.abs(e.d) > hw + e.off && Math.sign(e.d) === e.crossing) { e.side = e.crossing; e.crossing = 0; }
+    } else {
+      e.pause -= dt;
+      if (e.pause < -rnd(5, 10)) e.pause = rnd(1, 3);            // stops to sniff now and then
+      vs = e.pause > 0 ? 0 : e.walk;
+      vd = (e.side * (hw + e.off) - e.d) * 2;                     // keeps to the sidewalk as the street widens
+      if (e.s < 8 || e.s > r.length - 8) e.walk = Math.abs(e.walk) * (e.s < 8 ? 1 : -1);
+      const ahead = e.s - car.s, eta = ahead / Math.max(car.v, 1);   // seconds until the player gets here
+      if (!e.crossed && ahead > 30 && eta > 2.3 && eta < 3.6 && car.v > 4 && Math.random() < dt * 1.2 && seen(e, 1)
+        && !this.ents.some((o) => o !== e && o.alive && VEHICLE[o.type] && (o.parked || !o.v ? Math.abs(o.s - e.s) < 4.5   // a parked car in the way
+          : (o.s - e.s) * Math.sign(o.v) < 0 && Math.abs(o.s - e.s) < Math.abs(o.v) * 4 + 6))                        // or traffic about to get there
+        && !(this.workZones || []).some(([a, b]) => e.s > a && e.s < b)) { e.crossing = -e.side; e.crossed = true; }
+    }
+    e.s += vs * dt; e.d += vd * dt; e.v = 0;
+    if (Math.abs(vs) + Math.abs(vd) > 0.2) { e.hd = Math.atan2(vd, vs); e.gait += dt * (e.bolt ? 16 : e.crossing ? 12 : 7); }
   }
 
   /** push every live entity into its InstancedMesh */
@@ -529,6 +642,8 @@ export class World {
       const inStreet = Math.abs(e.d) < this.route.hw(e.s) + 0.2, lvl = inStreet ? LEVEL.ROUTE : LEVEL.TERRAIN;
       // anything standing IN the street (cones, barricades, a panhandler) stands on the rendered road surface
       let z = inStreet ? (this.surfAt(p.x, p.y, p.z + 1.2) ?? p.z + lvl) : p.z + lvl, roll = 0, pitch = 0;
+      const afoot = ON_FOOT.has(e.type) || e.type === 'cooler';
+      if (afoot && !inStreet) z = Math.max(this.surfAt(p.x, p.y, p.z + 1.2) ?? -Infinity, p.z + LEVEL.TERRAIN);   // sidewalk / curb top
       if (inStreet && (e.type === 'cone' || e.type === 'barricade') && !e.flying) { // sit flat on the slope
         const g = this.route.ground, on = (x, y) => this.surfAt(x, y, g(x, y) + 1.2) ?? g(x, y) + lvl;
         const st = standOn(on, p.x, p.y, yaw, 0.2, 0.2); z = st.z; pitch = st.pitch; roll = st.roll;
@@ -538,10 +653,11 @@ export class World {
         const st = standOn(on, p.x, p.y, yaw, VEHICLE[e.type][0], VEHICLE[e.type][1]);
         z = st.z; pitch = st.pitch; roll = st.roll;
       }
-      if (e.type === 'panhandler') yaw = p.a + Math.PI;
+      if (e.hd !== undefined) yaw = p.a + e.hd;                 // people and dogs face where they're going
+      else if (e.type === 'panhandler') yaw = p.a + Math.PI;
       if (e.flying) { z += e.fz; roll = e.spin; pitch = e.spin * 0.7; }
-      if (e.type === 'panhandler') { pitch = 0; roll = 0; }
-      put(e.type, p.x, p.y, z, yaw, e.color, roll, pitch);
+      if (afoot) { pitch = 0; roll = 0; }
+      put(e.type === 'dog' ? (Math.sin(e.gait) > 0 ? 'dog_a' : 'dog_b') : e.type, p.x, p.y, z, yaw, e.color, roll, pitch);
     }
     for (const a of this.ambient) if (a.x !== undefined) {
       const ox = -Math.sin(a.h) * a.lane, oy = Math.cos(a.h) * a.lane, x = a.x + ox, y = a.y + oy, g = this.route.ground;

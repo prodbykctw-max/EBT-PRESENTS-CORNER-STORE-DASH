@@ -197,6 +197,33 @@ Everything that can stand on something follows one set of rules:
 
 Run it after any change to world building.
 
+## City life
+
+Everything is modelled in `blender_props.py` (no logos, lettering or insignia on any of it); look-dev render:
+`blender_render_citylife.py`.
+
+- **Traffic mix:** about 1 in 10 cars is a white driverless robotaxi (roof lidar dome, fender and corner sensor
+  pods) and 1 in 20 is a black-and-white police cruiser (light bar, push bar). Both drive, park and queue like any
+  other car, and you can hit them like any other car.
+- **BUSTED:** drive into a police car (above a crawl; a scrape while you're stopped is just a crash) and the run
+  ends. The cruiser lights up, backup pulls in behind you with its siren going, an officer walks to your window,
+  and the card reads "BUSTED: you're going to jail". *Drive again* restarts the drive (the full game never drops
+  you into the store after a bust). The result has `busted: true`.
+- **Stray dogs** amble along the sidewalks with sniffing stops. Now and then one trots across the street in front
+  of you, 2.3–3.6 s ahead and only when it's on screen and no traffic is about to reach that spot, so it's always
+  a fair dodge. Hit one and it bolts clear: a scare ("WATCH IT!"), never an injury.
+- **Water sellers and panhandlers work the red lights** (`planCorners`). At about 85 % of signalised junctions,
+  one or two kids selling cold water (cooler on the corner) or a panhandler with a sign waits on the corner. A
+  beat after red they cross at the crosswalk in front of the stopped cars and walk down the lane line, up to your
+  window if you're stopped nearby. After green they linger, head back up the line and cross to the corner once
+  there's a gap, right across anyone pulling off. Traffic stops for them; you have to as well.
+- **Birds** (`birds.js`), pure scenery that casts shadows:
+  - Rock pigeons, American crows and grackles peck about in the gutter along the curb, in gaps between parked cars
+    and clear of tree canopies. They burst up and away down the street as you drive up, or when you honk.
+  - Flocks also cross the street overhead, just over the roofs on their path (raycast against roofs, freeway decks
+    and landmarks).
+  - Birds are drawn a little over life size so they read from the chase camera.
+
 ## Trees and lawns (beauty pass)
 
 Built the way game foliage is built, from CC0 Poly Haven scans (`drive/tools/fetch_foliage.mjs` downloads them
@@ -228,6 +255,7 @@ into `drive/art/foliage/`; photo-scanned tree models run 0.3–17 M triangles, f
 | `sky.js` | sky dome and generated environment lighting |
 | `crowd.js` | procedural sidewalk crowd: parametric person, GPU walk cycle, group behaviour |
 | `signals.js` | the route's traffic signals: green-wave timing, stop lines, lamp overlays, cross-traffic gates, HUD light |
+| `birds.js` | pigeons, crows and grackles: pecking flocks that take off as you pass, flocks crossing over the roofs |
 | `tram.js` | Atlanta Streetcar: embedded rails from OSM, the westbound car on its real track, platform dwells, bell |
 | `integrity.js`, `autopilot.js` | QA only: world scanner; player-like autopilot with hit and pop-in audits |
 | `runner.js` | route space (RouteFrame), the auto-driving car, obstacle/scenery/traffic population, collisions, instanced rendering |
