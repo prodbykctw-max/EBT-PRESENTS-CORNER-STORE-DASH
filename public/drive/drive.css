@@ -1,0 +1,39 @@
+.drive-root { position: fixed; inset: 0; z-index: 50; background: #101318; overflow: hidden; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; color: #fff; transition: opacity .45s; touch-action: none; user-select: none; }
+/* holding BRAKE / HORN / steering is gameplay: no text selection, no iOS Copy / Look Up callout */
+.drive-root, .drive-root * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.drive-root.out { opacity: 0; }
+.drive-root canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.drive-hud { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; gap: 8px; pointer-events: none; }
+.drive-box { background: rgba(10, 12, 16, .72); border: 1px solid rgba(255, 255, 255, .12); border-radius: 10px; padding: 6px 12px; min-width: 76px; text-align: center; backdrop-filter: blur(6px); }
+.drive-box span { display: block; font-size: 10px; letter-spacing: .14em; opacity: .65; }
+.drive-box b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.drive-box .low { color: #ff4d4d; }
+.drive-box.wx b { font-size: 14px; }
+.drive-msg { position: absolute; top: 38%; left: 0; right: 0; text-align: center; font: 900 clamp(34px, 8vw, 72px)/1 system-ui, sans-serif; letter-spacing: .04em; color: #ffd400; text-shadow: 0 4px 0 #000, 0 0 24px rgba(0, 0, 0, .6); opacity: 0; transform: scale(.9); transition: opacity .15s, transform .15s; pointer-events: none; }
+.drive-msg.on { opacity: 1; transform: scale(1); }
+.drive-hint { position: absolute; bottom: 120px; left: 0; right: 0; text-align: center; font-weight: 700; font-size: 18px; text-shadow: 0 2px 6px #000; pointer-events: none; }
+/* touch controls: the whole screen is the steering zone; buttons sit on top of it, bottom right */
+.drive-steer { position: absolute; inset: 0; display: none; touch-action: none; }
+.drive-knob { position: absolute; width: 0; height: 0; pointer-events: none; opacity: 0; transition: opacity .12s; }
+.drive-knob.on { opacity: 1; }
+.drive-knob::before { content: ''; position: absolute; left: -70px; top: -4px; width: 140px; height: 8px; border-radius: 4px; background: rgba(255,255,255,.28); }
+.drive-knob i { position: absolute; left: -24px; top: -24px; width: 48px; height: 48px; border-radius: 50%; background: rgba(255,212,0,.85); box-shadow: 0 2px 10px rgba(0,0,0,.5); transform: translateX(var(--dx, 0px)); }
+.drive-touch { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); display: none; flex-direction: column; align-items: flex-end; gap: 12px; }
+.drive-touch button { border-radius: 50%; border: 2px solid rgba(255,255,255,.4); background: rgba(10,12,16,.6); color: #fff; font-weight: 900; letter-spacing: .04em; touch-action: none; }
+.drive-touch .brake { width: 92px; height: 92px; font-size: 15px; }
+.drive-touch .horn { width: 64px; height: 64px; font-size: 12px; margin-right: 14px; }
+.drive-touch button:active { background: rgba(255,212,0,.5); }
+.drive-tip { position: absolute; left: 0; right: 0; bottom: 36%; text-align: center; font-weight: 800; font-size: 17px; text-shadow: 0 2px 8px #000; pointer-events: none; display: none; animation: tipfade 5s forwards; }
+@keyframes tipfade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+@media (pointer: coarse) { .drive-touch, .drive-steer, .drive-tip { display: flex; } .drive-tip { display: block; } .drive-box { min-width: 64px; padding: 4px 8px; } .drive-box b { font-size: 16px; } }
+.drive-skip { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 12px; padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.2); background: rgba(10,12,16,.7); color: #fff; font-weight: 800; }
+.drive-loading { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; text-align: center; background: #101318; z-index: 2; }
+.drive-loading b { font: 900 34px/1 system-ui, sans-serif; letter-spacing: .12em; color: #ffd400; }
+.drive-loading span { opacity: .75; }
+.drive-loading i { display: block; height: 5px; width: 0; background: #ffd400; border-radius: 3px; transition: width .2s; margin: 8px auto 0; max-width: 260px; }
+@media (max-width: 560px) { .drive-hud { top: 52px; } }
+.drive-pop { position: absolute; top: 30%; left: 0; right: 0; text-align: center; pointer-events: none; }
+.drive-pop b { display: block; font: 900 22px/1.2 system-ui, sans-serif; color: #fff; text-shadow: 0 2px 0 #000, 0 0 12px rgba(0,0,0,.6); animation: popup .9s ease-out forwards; }
+@keyframes popup { from { opacity: 1; transform: translateY(0) scale(1.1); } to { opacity: 0; transform: translateY(-40px) scale(1); } }
+.drive-box.tok b { color: #ffd400; }
+.drive-osm { position: absolute; left: 8px; bottom: max(6px, env(safe-area-inset-bottom)); font-size: 9px; opacity: .6; pointer-events: none; text-shadow: 0 1px 2px #000; }

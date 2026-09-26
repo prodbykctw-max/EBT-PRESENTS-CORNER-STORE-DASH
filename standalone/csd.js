@@ -565,6 +565,43 @@ function endScreen(won){
   el("btnAgain").style.display = canCont? "none" : "";
   show("ovEnd");
 }
+/* ---------- the drive: 60 s top-down drive to the store, before the first run ----------
+   Lives in /drive/ and loads on demand, so this single-file game gets no bigger. If it can't load
+   (opened from disk, offline, or an old copy with no /drive/ next to it) the run just starts. */
+var DRIVE_URL="./drive/drive.js";
+function driveAvailable(){ return /^https?:$/.test(location.protocol) && !/[?&]nodrive/.test(location.search); }
+// Cover the store the instant START is tapped: the drive's code (three.js + modules) takes a moment to
+// arrive, and its own loading screen only exists once it has. Same look as the drive's loader, so the
+// hand-off is seamless; it lifts once the drive's screen is up and styled (or if the drive fails).
+function driveCover(){
+  var c=document.createElement("div");
+  c.setAttribute("style","position:fixed;inset:0;z-index:60;background:#101318;display:grid;place-content:center;gap:8px;text-align:center;color:#fff;font-family:system-ui,-apple-system,'Segoe UI',sans-serif");
+  c.innerHTML='<b style="font:900 34px/1 system-ui,sans-serif;letter-spacing:.12em;color:#ffd400">AUBURN AVE</b><span style="opacity:.75">Get to the corner store</span>';
+  document.body.appendChild(c);
+  var t=setInterval(function(){ var d=document.querySelector(".drive-root"); if(d&&getComputedStyle(d).position==="fixed") lift(); },50);
+  function lift(){ clearInterval(t); if(c.parentNode) c.parentNode.removeChild(c); }
+  return lift;
+}
+function startWithDrive(){
+  if(!driveAvailable()){ startRun(); return; }
+  if(S.mode==="drive") return;                         // a second tap while it loads
+  hide("ovTitle"); hide("ovHow"); S.mode="drive";
+  var lift=driveCover();
+  import(DRIVE_URL).then(function(m){
+    return m.startDrive({ mount: document.body, muted: !!S.muted, onDone: function(r){
+      startRun();
+      if(r && r.bonus){ addScore(r.bonus); S.driveBonus=r.bonus;
+        bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus+(r.tokens? "  ·  "+r.tokens+" EBT":""), 2.2); }
+    }});
+  }).catch(function(e){
+    console.warn("drive unavailable, starting the run:", e);
+    var d=document.querySelector(".drive-root"); if(d&&d.parentNode) d.parentNode.removeChild(d);   // never leave a half-built drive over the store
+    lift(); startRun();
+  });
+}
+// warm the drive's code while the title screen is up, so START feels instant
+function prefetchDrive(){ if(driveAvailable()) setTimeout(function(){ import(DRIVE_URL).catch(function(){}); }, 1200); }
+
 function startRun(){
   hide("ovEnd"); hide("ovTitle"); hide("ovHow");
   S.mode="play"; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
@@ -1052,6 +1089,8 @@ function loop(ts){
   if(S.mode!=="boot") draw();
 }
 function init(){
+  // a held finger is gameplay: no long-press menu or text selection anywhere in the game (except text fields)
+  ["contextmenu","selectstart"].forEach(function(ev){ document.addEventListener(ev,function(e){ if(!/^(INPUT|TEXTAREA)$/.test(e.target&&e.target.tagName)) e.preventDefault(); }); });
   view=el("view"); vctx=view.getContext("2d");
   view.width=IW; view.height=IH;
   var img=new Image();
@@ -1083,7 +1122,8 @@ function init(){
   window.addEventListener("resize",fit);
   setTimeout(fit,300); setTimeout(fit,1000);
   el("btnTitle").addEventListener("click",function(){ hide("ovTitle"); show("ovHow"); });
-  el("btnStart").addEventListener("click",function(){ sfx.start(); startRun(); });
+  el("btnStart").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
+  prefetchDrive();
   el("btnAgain").addEventListener("click",startRun);
   el("btnContinue").addEventListener("click",useContinue);
   el("btnMenu").addEventListener("click",goMenu);

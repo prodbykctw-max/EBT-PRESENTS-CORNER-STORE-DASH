@@ -7,7 +7,10 @@
 <title>Corner Store Dash — the EBT browser game</title>
 <style>
   :root{ --pink:#E85D9E; --magenta:#C2255C; --gold:#F5C518; --cream:#FFF3E0; --coral:#F08C4B; --navy:#1E2340; --ink:#0A0A0C; }
-  *{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  *{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;
+    /* a held finger is gameplay, never a text selection or iOS's Copy / Look Up menu */
+    -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  input,textarea{ -webkit-user-select:text; user-select:text; }
   html,body{ height:100%; }
   body{ background:var(--ink); color:var(--cream); overflow:hidden;
     font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
@@ -67,6 +70,8 @@
   .rules{ font-size:12px; line-height:1.9; font-weight:700; letter-spacing:.04em; }
   .rules b{ color:var(--gold); }
   .hint{ font-size:9px; letter-spacing:.14em; opacity:.75; line-height:1.8; }
+  .credits{ position:absolute; bottom:max(10px, env(safe-area-inset-bottom)); left:12px; right:12px; text-align:center;
+    font-size:9px; line-height:1.6; letter-spacing:.04em; opacity:.55; }
   .btn{ font:inherit; font-weight:900; letter-spacing:.1em; font-size:14px; cursor:pointer;
     background:var(--gold); color:var(--ink); border:3px solid var(--navy);
     box-shadow:0 4px 0 var(--navy); padding:12px 22px; }
@@ -125,6 +130,7 @@
       <div class="title">CORNER STORE<small>DASH</small></div>
     </div>
     <button class="btn pulse" id="btnTitle">TAP TO START</button>
+    <div class="credits">Engine sound: DerMeehdrescher / Meehdrescher Studios (CC BY-SA 4.0)<br>Sound effects: BigSoundBank &amp; OpenGameArt (CC0) · Map data © OpenStreetMap contributors</div>
   </div>
 
   <div class="ov" id="ovHow">
@@ -734,6 +740,43 @@ function endScreen(won){
   el("btnAgain").style.display = canCont? "none" : "";
   show("ovEnd");
 }
+/* ---------- the drive: 60 s top-down drive to the store, before the first run ----------
+   Lives in /drive/ and loads on demand, so this single-file game gets no bigger. If it can't load
+   (opened from disk, offline, or an old copy with no /drive/ next to it) the run just starts. */
+var DRIVE_URL="./public/drive/drive.js";
+function driveAvailable(){ return /^https?:$/.test(location.protocol) && !/[?&]nodrive/.test(location.search); }
+// Cover the store the instant START is tapped: the drive's code (three.js + modules) takes a moment to
+// arrive, and its own loading screen only exists once it has. Same look as the drive's loader, so the
+// hand-off is seamless; it lifts once the drive's screen is up and styled (or if the drive fails).
+function driveCover(){
+  var c=document.createElement("div");
+  c.setAttribute("style","position:fixed;inset:0;z-index:60;background:#101318;display:grid;place-content:center;gap:8px;text-align:center;color:#fff;font-family:system-ui,-apple-system,'Segoe UI',sans-serif");
+  c.innerHTML='<b style="font:900 34px/1 system-ui,sans-serif;letter-spacing:.12em;color:#ffd400">AUBURN AVE</b><span style="opacity:.75">Get to the corner store</span>';
+  document.body.appendChild(c);
+  var t=setInterval(function(){ var d=document.querySelector(".drive-root"); if(d&&getComputedStyle(d).position==="fixed") lift(); },50);
+  function lift(){ clearInterval(t); if(c.parentNode) c.parentNode.removeChild(c); }
+  return lift;
+}
+function startWithDrive(){
+  if(!driveAvailable()){ startRun(); return; }
+  if(S.mode==="drive") return;                         // a second tap while it loads
+  hide("ovTitle"); hide("ovHow"); S.mode="drive";
+  var lift=driveCover();
+  import(DRIVE_URL).then(function(m){
+    return m.startDrive({ mount: document.body, muted: !!S.muted, onDone: function(r){
+      startRun();
+      if(r && r.bonus){ addScore(r.bonus); S.driveBonus=r.bonus;
+        bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus+(r.tokens? "  ·  "+r.tokens+" EBT":""), 2.2); }
+    }});
+  }).catch(function(e){
+    console.warn("drive unavailable, starting the run:", e);
+    var d=document.querySelector(".drive-root"); if(d&&d.parentNode) d.parentNode.removeChild(d);   // never leave a half-built drive over the store
+    lift(); startRun();
+  });
+}
+// warm the drive's code while the title screen is up, so START feels instant
+function prefetchDrive(){ if(driveAvailable()) setTimeout(function(){ import(DRIVE_URL).catch(function(){}); }, 1200); }
+
 function startRun(){
   hide("ovEnd"); hide("ovTitle"); hide("ovHow");
   S.mode="play"; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
@@ -1221,6 +1264,8 @@ function loop(ts){
   if(S.mode!=="boot") draw();
 }
 function init(){
+  // a held finger is gameplay: no long-press menu or text selection anywhere in the game (except text fields)
+  ["contextmenu","selectstart"].forEach(function(ev){ document.addEventListener(ev,function(e){ if(!/^(INPUT|TEXTAREA)$/.test(e.target&&e.target.tagName)) e.preventDefault(); }); });
   view=el("view"); vctx=view.getContext("2d");
   view.width=IW; view.height=IH;
   var img=new Image();
@@ -1252,7 +1297,8 @@ function init(){
   window.addEventListener("resize",fit);
   setTimeout(fit,300); setTimeout(fit,1000);
   el("btnTitle").addEventListener("click",function(){ hide("ovTitle"); show("ovHow"); });
-  el("btnStart").addEventListener("click",function(){ sfx.start(); startRun(); });
+  el("btnStart").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
+  prefetchDrive();
   el("btnAgain").addEventListener("click",startRun);
   el("btnContinue").addEventListener("click",useContinue);
   el("btnMenu").addEventListener("click",goMenu);
@@ -1286,6 +1332,5 @@ window.__csd={ get S(){return S;}, get player(){return player;}, get bully(){ret
 if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded",init); } else { init(); }
 
 </script>
-<noscript><section id="about"><h2>Corner Store Dash</h2><p>Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand: grab everything on the EBT list, dodge the bully, and make it to checkout. Standalone, plays on phone or desktop, no download.</p><h3>FAQ</h3><p><strong>What is Corner Store Dash?</strong><br/>A free browser arcade game from the EBT (Everything But Trapped) brand: collect everything on the EBT list, dodge the bully, make it to checkout.</p><p><strong>What is EBT?</strong><br/>EBT — Everything But Trapped — is an Atlanta brand run by Kema; Corner Store Dash is its standalone game.</p><p><strong>Who built it?</strong><br/>RARƎ AGENCY / PRODBYKCTW (Melvin D. Brown III, @prodbyKCTW) with partner Kema.</p><p><strong>Is it free?</strong><br/>Yes — no download, no sign-up, plays on phone or desktop.</p><p><a href="https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/llms.txt">llms.txt</a></p></section></noscript>
 </body>
 </html>

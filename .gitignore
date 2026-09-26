@@ -12,3 +12,14 @@ qa-screenshot.png
 Thumbs.db
 .vscode/
 .idea/
+
+# Drive level: raw source data + DCC working files (built, game-ready output goes in public/)
+drive/osm/
+# drive/blender/ is rebuilt by drive/tools/blender_*.py (scene + look-dev renders)
+drive/blender/
+drive/route_v1.svg
+drive/cache/
+drive/ref/
+
+# local HTTPS dev certificate (scripts/serve.mjs)
+.certs/
