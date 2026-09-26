@@ -1,4 +1,6 @@
 .drive-root { position: fixed; inset: 0; z-index: 50; background: #101318; overflow: hidden; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; color: #fff; transition: opacity .45s; touch-action: none; user-select: none; }
+/* holding BRAKE / HORN / steering is gameplay: no text selection, no iOS Copy / Look Up callout */
+.drive-root, .drive-root * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .drive-root.out { opacity: 0; }
 .drive-root canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .drive-hud { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; gap: 8px; pointer-events: none; }

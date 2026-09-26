@@ -7,7 +7,10 @@
 <title>Corner Store Dash — the EBT browser game</title>
 <style>
   :root{ --pink:#E85D9E; --magenta:#C2255C; --gold:#F5C518; --cream:#FFF3E0; --coral:#F08C4B; --navy:#1E2340; --ink:#0A0A0C; }
-  *{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  *{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;
+    /* a held finger is gameplay, never a text selection or iOS's Copy / Look Up menu */
+    -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  input,textarea{ -webkit-user-select:text; user-select:text; }
   html,body{ height:100%; }
   body{ background:var(--ink); color:var(--cream); overflow:hidden;
     font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
@@ -1261,6 +1264,8 @@ function loop(ts){
   if(S.mode!=="boot") draw();
 }
 function init(){
+  // a held finger is gameplay: no long-press menu or text selection anywhere in the game (except text fields)
+  ["contextmenu","selectstart"].forEach(function(ev){ document.addEventListener(ev,function(e){ if(!/^(INPUT|TEXTAREA)$/.test(e.target&&e.target.tagName)) e.preventDefault(); }); });
   view=el("view"); vctx=view.getContext("2d");
   view.width=IW; view.height=IH;
   var img=new Image();

@@ -1,6 +1,6 @@
 # Drive level: "Get to the Store"
 
-A 60-second, top-down, player-steered drive (GTA 1 style) through real downtown Atlanta
+A 70-second, top-down, player-steered drive (GTA 1 style) through real downtown Atlanta
 that ends at the EBT Corner Store and hands straight off to the store level. It lives in
 the same game rather than as a separate app.
 
@@ -78,8 +78,15 @@ obstacles and collisions line up exactly with what's painted on the road.
     are drawn, with a margin that grows with distance, so nobody ever pops in. Phones skip crowd
     shadows.
 - **Pickups:** EBT tokens in lines and weaves (+25). A NEAR MISS against oncoming traffic is +50.
-- **Density:** an event every 58–85 m, tightening slightly as the run goes on. At least one lane
-  is always open.
+- **Density:** an in-lane event every 75–110 m, tightening slightly as the run goes on.
+- **Traffic flow:** oncoming traffic is a steady stream of singles and 2–3 car platoons.
+  - It fills the far lane from the start and is fed from past the store.
+  - Oncoming cars stop for anything in their lane, squeeze past a player over the line, and wave
+    you through once you've stopped behind a blockage.
+  - Slow cars follow, overtake parked cars and work zones when the other lane is clear, check
+    their mirrors, and never rear-end the player.
+  - Cross traffic never stops inside the route's road.
+  - With this traffic a clean run spends ~10 s waiting, hence the 70 s clock.
 - **Finish:** the car slows for the store by itself. Pull right to the curb into the P space.
   bonus = timeLeft × 50 + tokens × 25 + nearMisses × 50 + 500 (clean park) + 300 (no hits).
 - **Balance:** the QA bot parks clean with about 14 s left.

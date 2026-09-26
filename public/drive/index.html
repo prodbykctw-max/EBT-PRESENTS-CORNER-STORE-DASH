@@ -8,12 +8,16 @@
 <style>
   html, body { margin: 0; height: 100%; background: #101318; color: #fff; font-family: system-ui, sans-serif; }
   #done { position: fixed; inset: 0; display: none; place-items: center; text-align: center; }
-  #done button { margin-top: 16px; padding: 10px 18px; font-weight: 800; border-radius: 8px; border: 0; background: #ffd400; }
+  #done h2 { font: 900 34px/1.1 system-ui, sans-serif; letter-spacing: .04em; margin: 0 0 10px; }
+  #done p { margin: 0; opacity: .8; font-size: 16px; }
+  #done pre { display: none; text-align: left; font-size: 11px; opacity: .7; max-width: 90vw; overflow: auto; }
+  #done.qa pre { display: block; }
+  #done button { margin-top: 22px; padding: 14px 28px; font: 800 18px system-ui, sans-serif; color: #101318; border-radius: 10px; border: 0; background: #ffd400; }
 </style>
 </head>
 <body>
 <!-- Standalone test harness for the drive level. The game loads drive.js the same way (dynamic import). -->
-<div id="done"><div><h2 id="dt"></h2><pre id="dr"></pre><button onclick="location.reload()">Drive again</button></div></div>
+<div id="done"><div><h2 id="dt"></h2><p id="ds"></p><pre id="dr"></pre><button onclick="location.reload()">Drive again</button></div></div>
 <script type="module">
   const { startDrive } = await import('./drive.js');
   // ?qa&demo=auburn|arrive: jump to a set piece for screenshots (test harness only)
@@ -33,7 +37,12 @@
   });
   await startDrive({
     muted: bot && !q.has('sound'),
-    onDone: (r) => { done.style.display = 'grid'; dt.textContent = r.parked ? 'Parked at the EBT Corner Store' : 'Too late'; dr.textContent = JSON.stringify(window.__botReport ? { ...r, bot: window.__botReport } : r, null, 1); },
+    onDone: (r) => {
+      done.style.display = 'grid';
+      dt.textContent = r.parked ? (r.cleanPark ? 'Clean park!' : 'Parked') : 'Too late';
+      ds.textContent = r.parked ? `+${r.bonus} bonus · ${r.tokens} EBT · ${r.hits ? r.hits + (r.hits > 1 ? ' hits' : ' hit') : 'no hits'}` : 'The store closed before you got there.';
+      if (q.has('qa')) { done.classList.add('qa'); dr.textContent = JSON.stringify(window.__botReport ? { ...r, bot: window.__botReport } : r, null, 1); }   // test report only in QA
+    },
   });
 </script>
 </body>

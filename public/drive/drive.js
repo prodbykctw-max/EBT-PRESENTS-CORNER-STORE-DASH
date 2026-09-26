@@ -17,7 +17,7 @@ import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
 
 const BASE = new URL('./', import.meta.url);
-const TIME_LIMIT = 60;
+const TIME_LIMIT = 70;   // real traffic (an oncoming stream, queues at work zones) costs ~10 s of waiting on a clean run
 const REAR_AXLE = 1.45; // car.glb origin sits on the rear axle; the runner tracks the car's centre
 // Curbside parking space in front of the EBT Corner Store (world frame; the row faces north onto Auburn).
 const SPOT = { x: 0, y: 9.0, heading: Math.PI, len: 7.0, wid: 3.0 };
@@ -34,6 +34,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   }
   const root = document.createElement('div');
   root.className = 'drive-root';
+  // iOS ignores the CSS on some held elements: stop the long-press menu and text selection outright
+  for (const ev of ['contextmenu', 'selectstart']) root.addEventListener(ev, (e) => e.preventDefault());
   root.innerHTML = '<div class="drive-loading"><b>AUBURN AVE</b><span>Get to the corner store</span><i></i></div>';
   mount.appendChild(root);
   const bar = root.querySelector('.drive-loading i');
@@ -104,6 +106,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   });
   const carModel = carGltf.scene;
   carModel.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  // brake lights: the tail-lamp material flares when you're on the brakes
+  // (the asset optimiser renames materials, so find it by its glow: the purest red emissive on the car)
+  const glowing = new Set(); carModel.traverse((o) => { if (o.isMesh && o.material?.emissive && o.material.emissive.r > 0.3) glowing.add(o.material); });
+  const redness = (m) => (m.emissive.g + m.emissive.b) / m.emissive.r;
+  const tail = [...glowing].sort((a, b) => redness(a) - redness(b))[0];
+  const tailLamps = new Set(tail && redness(tail) < 0.2 ? [tail] : []);
+  for (const m of tailLamps) m.userData.base = { color: m.emissive.clone(), k: m.emissiveIntensity };
+  const BRAKE_GLOW = new THREE.Color(1, 0.06, 0.03);
   const carRig = new THREE.Group(); carRig.add(carModel); carModel.position.z = REAR_AXLE;
   // wheel pivots from the car model: *_SPIN roll about their axle (local X), the front *_STEER turn about up (local Y)
   const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), dq = new THREE.Quaternion();
@@ -153,15 +163,24 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   });
   zone.addEventListener('pointermove', (e) => {
     if (e.pointerId !== touch.id) return;
-    const dx = e.clientX - touch.x0, hw = route.hw(car.s);
-    car.targetD = touch.d0 - dx * (2 * hw) / (root.clientWidth * 0.5); // screen right = road right
+    const dx = e.clientX - touch.x0, hw = route.hw(car.s), lim = hw - 1.03, k = (2 * hw) / (root.clientWidth * 0.5);
+    const want = touch.d0 - dx * k;                                     // screen right = road right
+    car.targetD = Math.max(-lim, Math.min(lim, want));
+    // pushed past the road edge: re-anchor there, so dragging back answers at once (no dead travel)
+    if (want !== car.targetD) { touch.x0 = e.clientX; touch.d0 = car.targetD; }
     knob.style.setProperty('--dx', Math.max(-70, Math.min(70, dx)) + 'px');
   });
   const lift = (e) => { if (e.pointerId !== touch.id) return; touch.id = null; knob.classList.remove('on'); knob.style.setProperty('--dx', '0px'); };
   zone.addEventListener('pointerup', lift); zone.addEventListener('pointercancel', lift);
   for (const b of root.querySelectorAll('[data-k]')) {
-    const on = (e) => { audio.unlock(); if (b.dataset.k === 'horn') honk(); keys.add(b.dataset.k); e.preventDefault(); }, off = () => keys.delete(b.dataset.k);
-    b.addEventListener('pointerdown', on); b.addEventListener('pointerup', off); b.addEventListener('pointerleave', off); b.addEventListener('pointercancel', off);
+    // held until the finger lifts, even if the thumb drifts off the button (pointer capture), with a tick of haptics
+    const on = (e) => {
+      audio.unlock(); if (b.dataset.k === 'horn') honk(); keys.add(b.dataset.k);
+      try { b.setPointerCapture(e.pointerId); } catch {}
+      if (b.dataset.k === 'down') try { navigator.vibrate?.(12); } catch {}
+      e.preventDefault();
+    }, off = () => keys.delete(b.dataset.k);
+    b.addEventListener('pointerdown', on); b.addEventListener('pointerup', off); b.addEventListener('pointercancel', off); b.addEventListener('lostpointercapture', off);
   }
 
   // ---------- HUD ----------
@@ -256,6 +275,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     carRig.rotation.set(st.pitch, p.a - Math.PI / 2, st.roll, 'YXZ');
     carModel.rotation.z = THREE.MathUtils.clamp(-car.dv * 0.012, -0.07, 0.07);   // body roll into the dodge
     carModel.visible = car.invuln <= 0 || Math.floor(car.invuln * 12) % 2 === 0; // blink while recovering
+    const lit = keys.has('down') || car.accel < -4;
+    for (const m of tailLamps) { m.emissive.copy(lit ? BRAKE_GLOW : m.userData.base.color); m.emissiveIntensity = lit ? 4 : m.userData.base.k; }
     wheelRoll = (wheelRoll + car.v * dt / TYRE_R) % (Math.PI * 2);
     for (const w of wheelSpin) w.o.quaternion.copy(w.q0).multiply(dq.setFromAxisAngle(X, wheelRoll));
     const steer = THREE.MathUtils.clamp(Math.atan2(car.dv, Math.max(car.v, 4)) * 1.6, -0.5, 0.5);   // fronts lead the dodge

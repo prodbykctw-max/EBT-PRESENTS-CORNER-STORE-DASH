@@ -1089,6 +1089,8 @@ function loop(ts){
   if(S.mode!=="boot") draw();
 }
 function init(){
+  // a held finger is gameplay: no long-press menu or text selection anywhere in the game (except text fields)
+  ["contextmenu","selectstart"].forEach(function(ev){ document.addEventListener(ev,function(e){ if(!/^(INPUT|TEXTAREA)$/.test(e.target&&e.target.tagName)) e.preventDefault(); }); });
   view=el("view"); vctx=view.getContext("2d");
   view.width=IW; view.height=IH;
   var img=new Image();
