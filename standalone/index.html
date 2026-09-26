@@ -764,6 +764,7 @@ function startWithDrive(){
   var lift=driveCover();
   import(DRIVE_URL).then(function(m){
     return m.startDrive({ mount: document.body, muted: !!S.muted, onDone: function(r){
+      if(r && r.busted){ S.mode=""; startWithDrive(); return; }   // hit a cop: jail, then back to the start of the drive
       startRun();
       if(r && r.bonus){ addScore(r.bonus); S.driveBonus=r.bonus;
         bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus+(r.tokens? "  ·  "+r.tokens+" EBT":""), 2.2); }

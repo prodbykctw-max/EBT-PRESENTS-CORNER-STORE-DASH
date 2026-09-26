@@ -138,6 +138,20 @@ export class DriveAudio {
       }
     }
   }
+  siren() { // a police wail closing in: two detuned oscillators swept by a slow LFO, swelling as it arrives
+    const ctx = this.ctx; if (!ctx || this.sirenOn) return;
+    const t = ctx.currentTime, out = gain(ctx, 0.0001, this.bus.fx), lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 2600; lp.connect(out);
+    const lfo = ctx.createOscillator(), depth = gain(ctx, 380);
+    lfo.frequency.value = 0.32; lfo.connect(depth);
+    const oscs = [['sawtooth', 0], ['square', 7]].map(([type, det]) => {
+      const o = ctx.createOscillator(); o.type = type; o.frequency.value = 1000; o.detune.value = det;
+      depth.connect(o.frequency); const g = gain(ctx, type === 'square' ? 0.25 : 0.5, lp); o.connect(g); o.start(t); return o;
+    });
+    lfo.start(t);
+    out.gain.exponentialRampToValueAtTime(0.05, t + 0.8); out.gain.exponentialRampToValueAtTime(0.32, t + 4);
+    this.sirenOn = { stop: () => { out.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.2); [lfo, ...oscs].forEach((o) => o.stop(ctx.currentTime + 1)); } };
+  }
   chime() { // parked: coin clinks rising
     [1, 1.26, 1.5, 2].forEach((r, i) => this.play('coin', { gain: 0.6, rate: r, delay: i * 0.09 }));
   }
@@ -145,6 +159,7 @@ export class DriveAudio {
   stop() {
     clearInterval(this.bedTimer);
     if (!this.ctx) return;
+    this.sirenOn?.stop();
     const ctx = this.ctx; this.out.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
     setTimeout(() => ctx.close(), 600);
   }

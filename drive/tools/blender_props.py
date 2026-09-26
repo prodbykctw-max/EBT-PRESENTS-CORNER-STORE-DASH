@@ -322,8 +322,175 @@ def tram_mid():
     b.box((0, 0, 3.52), (1.0, 1.2, 0.1), (0.25, 0.25, 0.27))                      # base frame
     return b.finish("prop_tram_mid", bevel=0.05)
 
+# ---------------- city life (no logos, lettering or insignia on any of it) ----------------
+INK = (0.035, 0.035, 0.04)            # police black
+CHROME = (0.7, 0.71, 0.73)
+PEARL = (0.95, 0.955, 0.96)           # just off pure white: never tinted
+SENSOR = (0.09, 0.09, 0.1)
+BOTTLE = (0.62, 0.8, 0.95)
+CAP = (0.1, 0.35, 0.85)
+
+def police():
+    """a full-size police interceptor sedan in plain black-and-white: black nose, tail and lower body, white doors
+    and roof, a light bar (red / blue), push bar and a spotlight. Nothing written on it."""
+    b = Builder()
+    body = [(-2.5, 0.36), (-2.53, 0.76), (-2.33, 0.97), (-1.45, 1.02), (-1.08, 1.03), (1.1, 1.01), (2.2, 0.9),
+            (2.45, 0.77), (2.48, 0.52), (2.4, 0.35), (1.7, 0.3), (-1.7, 0.3)]
+    b.profile(body, 0.95, INK, taper=body_taper(2.05, -2.05))
+    # the white door panels, a skin just proud of the black body
+    b.profile([(-1.35, 0.42), (-1.35, 1.0), (1.12, 1.0), (1.12, 0.42)], 0.962, PEARL, taper=body_taper(2.05, -2.05))
+    green = [(-1.12, 1.01), (-0.55, 1.5), (0.45, 1.52), (1.1, 1.0)]
+    b.profile(green, 0.78, GLASS, taper=lambda y, z: 0.84 if z > 1.25 else 1.0)
+    b.profile([(-0.5, 1.51), (0.42, 1.53), (0.42, 1.56), (-0.5, 1.54)], 0.64, PEARL)            # white roof
+    # light bar: black base, red lamps driver side, blue passenger side, a clear centre
+    b.box((0, -0.05, 1.6), (1.3, 0.3, 0.07), INK)
+    b.box((-0.36, -0.05, 1.68), (0.56, 0.26, 0.1), (0.85, 0.05, 0.05))
+    b.box((0.36, -0.05, 1.68), (0.56, 0.26, 0.1), (0.05, 0.2, 0.95))
+    b.box((0, -0.05, 1.68), (0.14, 0.26, 0.1), (0.9, 0.9, 0.9))
+    b.cyl((-0.86, 0.9, 1.08), 0.07, 0.12, CHROME, axis="Y", seg=10)                         # A-pillar spotlight
+    b.box((0, 2.56, 0.55), (1.5, 0.12, 0.34), INK)                                           # push bar
+    for sx in (-0.5, 0.5): b.box((sx, 2.52, 0.55), (0.08, 0.12, 0.5), INK)
+    for sx in (-0.6, 0.6):
+        b.box((sx, 2.47, 0.7), (0.42, 0.05, 0.12), LAMP); b.box((sx, -2.52, 0.82), (0.44, 0.05, 0.13), TAIL)
+    wheels(b, 2.95, 1.64, r=0.34)
+    return b.finish("prop_police", bevel=0.05)
+
+def robotaxi():
+    """a white self-driving electric crossover: short nose, fastback roof, the spinning lidar dome on a roof
+    pod, sensor pods on the front fenders and rear corners, radar blocks in the bumpers. No branding."""
+    b = Builder()
+    body = [(-2.3, 0.42), (-2.34, 0.98), (-2.15, 1.12), (1.2, 1.1), (2.05, 0.92), (2.3, 0.78), (2.33, 0.5),
+            (2.25, 0.38), (1.6, 0.34), (-1.6, 0.34)]
+    b.profile(body, 0.97, PEARL, taper=body_taper(1.95, -1.95))
+    green = [(-2.1, 1.1), (-1.65, 1.5), (0.35, 1.58), (1.25, 1.1)]
+    b.profile(green, 0.86, GLASS, taper=lambda y, z: 0.86 if z > 1.35 else 1.0)
+    b.profile([(-1.55, 1.52), (0.3, 1.6), (0.3, 1.63), (-1.55, 1.55)], 0.78, PEARL)
+    b.box((0, -0.35, 1.7), (0.72, 1.1, 0.14), PEARL)                                         # roof sensor pod
+    b.cyl((0, -0.1, 1.8), 0.17, 0.07, SENSOR, seg=16)                                        # lidar base
+    b.cyl((0, -0.1, 1.9), 0.12, 0.14, (0.16, 0.17, 0.19), seg=16, r2=0.1)                     # lidar dome
+    b.sphere((0, -0.1, 1.97), 0.1, SENSOR, seg=12)
+    for sx in (-1, 1):
+        b.cyl((sx * 1.0, 1.35, 1.02), 0.1, 0.2, SENSOR, seg=12)                                # fender pods
+        b.cyl((sx * 0.9, -2.05, 1.2), 0.08, 0.16, SENSOR, seg=12)                              # rear corner pods
+        b.box((sx * 0.62, 2.3, 0.72), (0.4, 0.05, 0.08), LAMP); b.box((sx * 0.7, -2.35, 0.95), (0.4, 0.05, 0.08), TAIL)
+    b.box((0, 2.35, 0.5), (0.5, 0.05, 0.14), SENSOR)                                         # front radar
+    b.box((0, 2.34, 0.62), (1.2, 0.04, 0.05), TRIM)
+    wheels(b, 2.99, 1.66, r=0.36)
+    return b.finish("prop_robotaxi", bevel=0.06)
+
+def dog(step):
+    """a medium street dog, ~0.55 m at the shoulder. Coat is WHITE (tinted per dog). step ±1: the trot's two
+    diagonal-pair poses (the runtime alternates them)."""
+    b = Builder()
+    coat, dark = WHITE, (0.05, 0.04, 0.035)
+    b.box((0, 0, 0.5), (0.24, 0.66, 0.24), coat, taper_top=0.92)                    # body
+    b.box((0, 0.28, 0.54), (0.26, 0.2, 0.26), coat)                                 # chest
+    b.box((0, 0.42, 0.66), (0.13, 0.14, 0.2), coat, rot=M.Rotation(-0.6, 4, "X"))    # neck
+    b.box((0, 0.5, 0.76), (0.17, 0.2, 0.16), coat)                                  # head
+    b.box((0, 0.64, 0.73), (0.1, 0.14, 0.09), coat)                                 # muzzle
+    b.box((0, 0.715, 0.75), (0.05, 0.02, 0.04), dark)                               # nose
+    for sx in (-1, 1):
+        b.box((sx * 0.065, 0.46, 0.87), (0.05, 0.03, 0.09), coat, rot=M.Rotation(sx * 0.3, 4, "Y"))   # ears
+        b.box((sx * 0.07, 0.585, 0.79), (0.02, 0.01, 0.02), dark)                   # eyes
+    b.box((0, -0.38, 0.62), (0.05, 0.3, 0.05), coat, rot=M.Rotation(0.7, 4, "X"))    # tail, carried up
+    for (sx, sy, k) in ((-1, 0.24, 1), (1, 0.24, -1), (-1, -0.24, -1), (1, -0.24, 1)):   # diagonal pairs swing together
+        a = 0.38 * step * k
+        v = b.box((0, 0, 0), (0.07, 0.07, 0.42), coat)
+        bmesh.ops.translate(b.bm, vec=(0, 0, -0.21), verts=v)                         # hang from the hip
+        bmesh.ops.rotate(b.bm, verts=v, cent=(0, 0, 0), matrix=M.Rotation(a, 4, "X"))
+        bmesh.ops.translate(b.bm, vec=(sx * 0.08, sy, 0.44), verts=v)
+    return b.finish("prop_dog_" + ("a" if step > 0 else "b"))
+
+def bird(up):
+    """a pigeon (plumage WHITE: tinted grey / slate / dark). up: wings raised or on the downstroke."""
+    b = Builder()
+    b.cyl((0, 0, 0), 0.075, 0.3, WHITE, axis="Y", seg=8, r2=0.045)                  # body, tapering to the tail
+    b.sphere((0, 0.18, 0.03), 0.05, WHITE, seg=8)
+    b.box((0, 0.235, 0.02), (0.02, 0.04, 0.015), (0.35, 0.3, 0.3))                  # beak
+    b.box((0, -0.2, 0), (0.12, 0.1, 0.015), WHITE)                                   # tail fan
+    a = 0.55 if up else -0.35
+    for sx in (-1, 1):
+        v = [b.bm.verts.new(q) for q in ((sx * 0.04, 0.09, 0), (sx * 0.2, 0.07, 0), (sx * 0.34, -0.02, 0), (sx * 0.2, -0.09, 0), (sx * 0.04, -0.08, 0))]
+        f = b.bm.faces.new(v if sx < 0 else v[::-1]); b._paint([f], WHITE)          # broad pigeon wing
+        bmesh.ops.rotate(b.bm, verts=v, cent=(sx * 0.03, 0, 0), matrix=M.Rotation(sx * a, 4, "Y"))
+    return b.finish("prop_bird_" + ("up" if up else "down"))
+
+def bird_sit():
+    """a pigeon on the ground: body tilted up at the chest, wings folded along the back, little legs"""
+    b = Builder()
+    v = b.cyl((0, 0, 0.13), 0.07, 0.28, WHITE, axis="Y", seg=8, r2=0.04)
+    bmesh.ops.rotate(b.bm, verts=v, cent=(0, 0, 0.13), matrix=M.Rotation(0.3, 4, "X"))
+    b.sphere((0, 0.15, 0.22), 0.048, WHITE, seg=8)
+    b.box((0, 0.2, 0.215), (0.02, 0.04, 0.015), (0.35, 0.3, 0.3))
+    for sx in (-1, 1):
+        b.box((sx * 0.06, -0.03, 0.15), (0.03, 0.22, 0.06), WHITE, rot=M.Rotation(0.3, 4, "X"))   # folded wings
+        b.box((sx * 0.025, 0.02, 0.03), (0.012, 0.012, 0.06), (0.75, 0.35, 0.35))                  # pink legs
+    b.box((0, -0.19, 0.08), (0.08, 0.1, 0.012), WHITE, rot=M.Rotation(0.3, 4, "X"))               # tail
+    return b.finish("prop_bird_sit")
+
+def crow(pose):
+    """an American crow (also drawn, smaller and tinted, as a grackle): heavier body, big beak, fan tail,
+    long fingered wings. pose: "up" / "down" (flight) or "sit". Plumage WHITE: tinted near-black per bird."""
+    b = Builder()
+    beak = (0.05, 0.05, 0.055)
+    if pose == "sit":
+        v = b.cyl((0, 0, 0.17), 0.085, 0.36, WHITE, axis="Y", seg=8, r2=0.05)
+        bmesh.ops.rotate(b.bm, verts=v, cent=(0, 0, 0.17), matrix=M.Rotation(0.35, 4, "X"))
+        b.sphere((0, 0.19, 0.29), 0.06, WHITE, seg=8)
+        b.box((0, 0.265, 0.28), (0.03, 0.08, 0.03), beak)
+        for sx in (-1, 1):
+            b.box((sx * 0.075, -0.05, 0.19), (0.035, 0.3, 0.08), WHITE, rot=M.Rotation(0.35, 4, "X"))
+            b.box((sx * 0.03, 0.02, 0.04), (0.014, 0.014, 0.08), beak)
+        b.box((0, -0.25, 0.09), (0.12, 0.14, 0.014), WHITE, rot=M.Rotation(0.35, 4, "X"))
+        return b.finish("prop_crow_sit")
+    b.cyl((0, 0, 0), 0.085, 0.38, WHITE, axis="Y", seg=8, r2=0.05)
+    b.sphere((0, 0.22, 0.02), 0.06, WHITE, seg=8)
+    b.box((0, 0.3, 0.01), (0.03, 0.08, 0.03), beak)
+    b.box((0, -0.27, 0), (0.16, 0.16, 0.014), WHITE)                                # fan tail
+    a = 0.5 if pose == "up" else -0.3
+    for sx in (-1, 1):
+        v = [b.bm.verts.new(q) for q in ((sx * 0.05, 0.1, 0), (sx * 0.26, 0.09, 0), (sx * 0.46, 0.02, 0), (sx * 0.48, -0.06, 0), (sx * 0.26, -0.1, 0), (sx * 0.05, -0.09, 0))]
+        f = b.bm.faces.new(v if sx < 0 else v[::-1]); b._paint([f], WHITE)          # broad, square-ended wing
+        bmesh.ops.rotate(b.bm, verts=v, cent=(sx * 0.04, 0, 0), matrix=M.Rotation(sx * a, 4, "Y"))
+    return b.finish("prop_crow_" + pose)
+
+def seller():
+    """a boy selling cold water at the light: t-shirt (WHITE, tinted), shorts, sneakers; one bottle held up to
+    the drivers, a plastic-wrapped case of bottles on his other arm"""
+    b = Builder()
+    skin = (0.2, 0.12, 0.08)
+    s = 0.86
+    for sx in (-0.09, 0.09):
+        b.box((sx * s, 0, 0.3 * s), (0.12 * s, 0.14 * s, 0.6 * s), skin)                  # legs
+        b.box((sx * s, 0.03, 0.04), (0.13 * s, 0.26 * s, 0.08), (0.92, 0.92, 0.9))        # sneakers
+        b.box((sx * s, 0, 0.62 * s), (0.17 * s, 0.2 * s, 0.34 * s), (0.1, 0.12, 0.2))     # basketball shorts
+    b.box((0, 0, 1.12 * s), (0.44 * s, 0.25 * s, 0.62 * s), WHITE)                        # t-shirt
+    b.sphere((0, 0, 1.6 * s), 0.13 * s, skin)
+    b.box((0, 0.0, 1.71 * s), (0.25 * s, 0.25 * s, 0.06), (0.05, 0.04, 0.04))             # short hair
+    # right arm raised, bottle in hand
+    b.box((0.27 * s, 0.05, 1.52 * s), (0.1 * s, 0.1 * s, 0.56 * s), skin, rot=M.Rotation(-0.25, 4, "X"))
+    b.cyl((0.27 * s, 0.13, 1.93 * s), 0.035, 0.22, BOTTLE, seg=8)
+    b.cyl((0.27 * s, 0.13, 1.93 * s + 0.12), 0.018, 0.03, CAP, seg=8)
+    # left forearm forward under a case of water
+    b.box((-0.27 * s, 0.1, 1.05 * s), (0.1 * s, 0.3 * s, 0.1 * s), skin)
+    b.box((-0.24 * s, 0.22, 1.2 * s), (0.28, 0.2, 0.22), BOTTLE)
+    for i in range(3):
+        for j in range(2): b.cyl((-0.24 * s - 0.09 + i * 0.09, 0.17 + j * 0.1, 1.2 * s + 0.12), 0.02, 0.03, CAP, seg=6)
+    return b.finish("prop_seller")
+
+def cooler():
+    """the sellers' cooler on the corner, with a case of water on the lid"""
+    b = Builder()
+    b.box((0, 0, 0.22), (0.7, 0.42, 0.4), (0.12, 0.3, 0.7))
+    b.box((0, 0, 0.44), (0.72, 0.44, 0.06), (0.93, 0.93, 0.9))
+    b.box((0.1, 0, 0.58), (0.4, 0.27, 0.22), BOTTLE)
+    for i in range(4):
+        for j in range(3): b.cyl((-0.05 + i * 0.1, -0.09 + j * 0.09, 0.7), 0.02, 0.03, CAP, seg=6)
+    return b.finish("prop_cooler")
+
 objs = [sedan(), suv(), bus(), cone(), barricade(), work_sign(), person("walk"), person("stand"), person("stand", sign=True), cyclist(),
-        tree("round"), tree("upright"), street_lamp(), signal_mast(), bench(), trash_can(), hydrant(), shelter(), tram_end(), tram_mid()]
+        tree("round"), tree("upright"), street_lamp(), signal_mast(), bench(), trash_can(), hydrant(), shelter(), tram_end(), tram_mid(),
+        police(), robotaxi(), dog(1), dog(-1), bird(True), bird(False), bird_sit(), crow("up"), crow("down"), crow("sit"), seller(), cooler()]
 for i, o in enumerate(objs):
     o.location = (i * 16, 60, 0)   # spread out in the blend for inspection; export resets below
 

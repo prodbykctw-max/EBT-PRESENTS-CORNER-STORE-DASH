@@ -55,7 +55,10 @@ export function autopilot(d, { log = console.log } = {}) {
       if (!e.alive || e.scenery || !e.solid || e.flying || e.hitDone) continue;
       if (e.type === 'panhandler' && e.leaving) continue;
       const p = route.at(e.s, e.d); if (!world.visible(p.x, p.y, p.z + 0.5, 1)) continue;   // off screen: unseen
-      out.push({ s: e.s, d: e.d, L: e.L, W: e.W + (e.type === 'panhandler' ? 1.2 : 0), vs: e.parked ? 0 : e.v || 0, type: e.type });
+      if (e.type === 'dog' && e.crossing) {   // a dog trotting across: a player reads the path it's on, not just where it is
+        const d1 = e.d + e.crossing * 3.3 * 1.0; out.push({ s: e.s, d: (e.d + d1) / 2, L: 1.2, W: Math.abs(d1 - e.d) + 0.6, vs: 0, type: e.type }); continue;
+      }
+      out.push({ s: e.s, d: e.d, L: e.L, W: e.W + (e.worker ? 0.3 : e.type === 'panhandler' ? 1.2 : 0), vs: e.parked ? 0 : e.v || 0, type: e.type });
     }
     for (const a of world.ambient) {   // cross traffic nosing into the route
       if (a.deck || a.x === undefined || route.distTo(a.x, a.y) > route.hw(car.s) + 3) continue;
@@ -71,7 +74,7 @@ export function autopilot(d, { log = console.log } = {}) {
   const pending = [], act = (fn) => pending.push([performance.now() + REACTION * 1000, fn]);   // decided now, done a beat later
   const tick = () => {
     while (pending.length && pending[0][0] <= performance.now()) pending.shift()[1]();
-    if (d.state !== 'driving') { if (d.state === 'parked' || d.state === 'late') finish(); return; }
+    if (d.state !== 'driving') { if (d.state === 'parked' || d.state === 'late' || d.state === 'busted') finish(); return; }
     report.ticks++;
     const hw = route.hw(car.s), lim = hw - PLAYER.halfW - 0.05, H = hazards();
     const seenTokens = world.tokens.filter((tk) => {

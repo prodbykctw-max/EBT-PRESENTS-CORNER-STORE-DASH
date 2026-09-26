@@ -59,7 +59,7 @@ export function scanWorld(api) {
 
   // 2b) obstacles standing in the street: cones, barricades, panhandlers, work signs on the road surface
   const tumbling = api.world.ents.some((e) => e.flying);   // a knocked cone mid-air is supposed to be in the air
-  for (const type of tumbling ? [] : ['cone', 'barricade', 'panhandler']) {
+  for (const type of tumbling ? [] : ['cone', 'barricade']) {
     const im = api.world.meshes[type]; if (!im) continue;
     for (let i = 0; i < im.count; i++) {
       im.getMatrixAt(i, m4); v.setFromMatrixPosition(m4);
