@@ -7,6 +7,12 @@
       "runtimeArgs": ["scripts/serve.mjs"],
       "port": 5173,
       "autoPort": true
+    },
+    {
+      "name": "pages-local",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8099", "--bind", "127.0.0.1"],
+      "port": 8099
     }
   ]
 }

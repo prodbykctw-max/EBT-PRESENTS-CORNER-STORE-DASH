@@ -740,7 +740,7 @@ function endScreen(won){
 /* ---------- the drive: 60 s top-down drive to the store, before the first run ----------
    Lives in /drive/ and loads on demand, so this single-file game gets no bigger. If it can't load
    (opened from disk, offline, or an old copy with no /drive/ next to it) the run just starts. */
-var DRIVE_URL="./drive/drive.js";
+var DRIVE_URL="./public/drive/drive.js";
 function driveAvailable(){ return /^https?:$/.test(location.protocol) && !/[?&]nodrive/.test(location.search); }
 function startWithDrive(){
   if(!driveAvailable()){ startRun(); return; }

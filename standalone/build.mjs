@@ -40,5 +40,9 @@ const out = shell
 
 writeFileSync(here('index.html'), out);
 copyFileSync(here('index.html'), here('../public/standalone.html'));
-copyFileSync(here('index.html'), here('../index.html')); // repo root -> GitHub Pages serves the game at /
+// repo root -> GitHub Pages serves the game at /. There the drive lives at public/drive/ (the repo's own
+// drive/ folder is the Blender/OSM toolchain), so this copy loads it from there.
+const DRIVE = 'var DRIVE_URL="./drive/drive.js";';
+if (!out.includes(DRIVE)) throw new Error('DRIVE_URL not found in the assembled game');
+writeFileSync(here('../index.html'), out.replace(DRIVE, 'var DRIVE_URL="./public/drive/drive.js";'));
 console.log(`standalone/index.html assembled (${out.length} chars) -> also copied to public/standalone.html and ./index.html`);
