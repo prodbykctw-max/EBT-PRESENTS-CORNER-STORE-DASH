@@ -96,8 +96,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const roadSurface = new TopSurface(city.streets.drivable);
   const surfAt = (x, y, below) => { const h = roadSurface.top(x, -y, below); return h ? h.y : null; };
   // ---------- the run, the car ----------
-  const spot = route.project(SPOT.x, SPOT.y);             // parking space in route coords
-  const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera });
+  // parking space: in front of the store, in the curbside parking lane (or at the right curb if there isn't one)
+  const spotS = route.project(SPOT.x, SPOT.y).s;
+  const spot = { s: spotS, d: route.parkD(spotS, -1) ?? route.lane(spotS, 0) - 0.35 };
+  const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks });
   const car = new RunnerCar(route, 4);
   const crowd = world.crowd = new Crowd({
     route, ground, surfAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree, furniture: city.furniture,
@@ -127,11 +129,13 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const spotGroup = new THREE.Group();
   const lineMat = new THREE.MeshBasicMaterial({ color: 0xffd400, transparent: true, opacity: 0.95, polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
   const addLine = (w, h, ox, oy) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), lineMat); m.rotation.x = -Math.PI / 2; m.position.set(ox, 0.25, oy); m.renderOrder = 2; spotGroup.add(m); };
-  addLine(SPOT.len, 0.18, 0, SPOT.wid / 2); addLine(SPOT.len, 0.18, 0, -SPOT.wid / 2); addLine(0.18, SPOT.wid, SPOT.len / 2, 0); addLine(0.18, SPOT.wid, -SPOT.len / 2, 0);
+  const spotW = Math.min(SPOT.wid, Math.max(2.3, route.park(spot.s) - 0.2));   // fits the parking lane
+  addLine(SPOT.len, 0.18, 0, spotW / 2); addLine(SPOT.len, 0.18, 0, -spotW / 2); addLine(0.18, spotW, SPOT.len / 2, 0); addLine(0.18, spotW, -SPOT.len / 2, 0);
   const pLetter = makeLabel('P', '#ffd400'); pLetter.rotation.x = -Math.PI / 2; pLetter.position.set(0, 0.26, 0); pLetter.material.polygonOffset = true; pLetter.material.polygonOffsetFactor = -6; pLetter.renderOrder = 2; pLetter.scale.set(2.4, 2.4, 1); spotGroup.add(pLetter);
   const beacon = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 40, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0xffd400, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }));
   beacon.position.y = 20; spotGroup.add(beacon);
-  spotGroup.position.copy(toV3(SPOT.x, SPOT.y, ground(SPOT.x, SPOT.y))); spotGroup.rotation.y = SPOT.heading;
+  const sp = route.at(spot.s, spot.d);
+  spotGroup.position.copy(toV3(sp.x, sp.y, ground(sp.x, sp.y))); spotGroup.rotation.y = sp.a;   // box runs along the curb
   scene.add(spotGroup);
 
   // ---------- input: tight and snappy ----------
@@ -140,7 +144,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const keys = new Set();
   let hornT = 0;
   const honk = () => { if (hornT <= 0) { audio.horn(); hornT = 0.6; } };
-  const laneJump = (dir) => { const hw = route.hw(car.s); car.targetD = Math.max(-hw, Math.min(hw, car.targetD + dir * hw / 2)); };
+  // ←/→ step to the next lane centre that way: parking lane, your lane, the oncoming lane, the far parking lane
+  const laneJump = (dir) => {
+    const s = car.s, centres = [route.parkD(s, -1), route.lane(s, 0), route.lane(s, 1), route.parkD(s, 1)].filter((v) => v !== null);
+    const next = dir > 0 ? centres.find((c) => c > car.targetD + 0.3) : [...centres].reverse().find((c) => c < car.targetD - 0.3);
+    if (next !== undefined) car.targetD = next;
+  };
   const kd = (e) => {
     audio.unlock();
     const k = KEYMAP[e.code]; if (!k) return; e.preventDefault();

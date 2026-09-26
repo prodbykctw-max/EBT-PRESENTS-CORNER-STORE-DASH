@@ -51,6 +51,18 @@ export class RouteFrame {
       }
       return best ? [Math.max(7, best.width) / 2, !!best.oneway] : [4.5, false];
     });
+    // curb-to-curb widths measured from the mapped sidewalks (world.json route.curb, every curbStep m) replace
+    // OSM's width guess wherever they exist: Auburn Ave is ~12–14 m kerb to kerb, not the 9 m a "2 lanes" tag gives
+    const C = W.route.curb, step = W.route.curbStep || 10, known = (C || []).map((v, k) => (v == null ? null : [k * step, v])).filter(Boolean);
+    if (known.length) {
+      const measured = (s) => {
+        if (s <= known[0][0]) return known[0][1];
+        if (s >= known.at(-1)[0]) return known.at(-1)[1];
+        let k = 1; while (known[k][0] < s) k++;
+        const [s0, w0] = known[k - 1], [s1, w1] = known[k]; return w0 + (w1 - w0) * (s - s0) / (s1 - s0);
+      };
+      raw.forEach((r, i) => { r[0] = Math.min(8, Math.max(3.6, measured(i) / 2)); });
+    }
     // average the real width over ±15 m: follows the street without "breathing" under the car
     this.HW = raw.map((_, i) => { let a = 0, c = 0; for (let k = Math.max(0, i - 15); k <= Math.min(this.n - 1, i + 15); k++) { a += raw[k][0]; c++; } return a / c; });
     this.ONEWAY = raw.map((r) => r[1]);
@@ -69,8 +81,14 @@ export class RouteFrame {
   }
   hw(s) { return this.HW[Math.round(this.i(s))]; }
   hwAt(x, y) { return this.hw(this.project(x, y).s); }
-  /** centre of lane k (0 = right/your lane, 1 = left) — the road is always laid out as two lanes */
-  lane(s, k) { const hw = this.hw(s); return k === 0 ? -hw / 2 : hw / 2; }
+  /** the road is two travel lanes (≤ 3.45 m each) in the middle; whatever is left out to each curb is a
+   *  curbside parking lane (where it's ≥ 2 m) or a shoulder */
+  travel(s) { return Math.min(this.hw(s), 3.45); }
+  park(s) { return this.hw(s) - this.travel(s); }
+  /** centre of travel lane k (0 = right/your lane, 1 = left) */
+  lane(s, k) { const t = this.travel(s); return k === 0 ? -t / 2 : t / 2; }
+  /** centre of the parking lane on a side (-1 right, +1 left), or null where there's no room for one */
+  parkD(s, side) { const p = this.park(s); return p >= 2 ? side * (this.travel(s) + p / 2) : null; }
   oneway(s) { return this.ONEWAY[Math.round(this.i(s))]; }
   /** project a world point to route space (nearest sample) */
   project(x, y) {
@@ -156,13 +174,13 @@ const SHIRTS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2e2e2e, 0xe8e8e8, 0x3d9a5b, 0x8e
 const BUS_STRIPE = [0x1d5fbf, 0xc62828];
 
 export class World {
-  constructor({ route, props, scene, W, sEnd, audio, surfAt, camera }) {
-    Object.assign(this, { route, scene, W, sEnd, audio, surfAt, camera });
+  constructor({ route, props, scene, W, sEnd, audio, surfAt, camera, marks }) {
+    Object.assign(this, { route, scene, W, sEnd, audio, surfAt, camera, marks });
     this.frustum = new THREE.Frustum(); this._pm = new THREE.Matrix4(); this._sph = new THREE.Sphere();
     this.ents = []; this.tokens = [];
     this.meshes = {};
     const mat = propMaterial();
-    const CAP = { sedan: 40, suv: 30, cone: 120, barricade: 16, panhandler: 6, bus: 8, worksign: 10, cyclist: 8 };   // people on foot: crowd.js
+    const CAP = { sedan: 150, suv: 110, cone: 120, barricade: 16, panhandler: 6, bus: 8, worksign: 10, cyclist: 8 };   // people on foot: crowd.js
     const GEO = { sedan: 'prop_sedan', suv: 'prop_suv', cone: 'prop_cone', barricade: 'prop_barricade', panhandler: 'prop_panhandler',
       bus: 'prop_bus', worksign: 'prop_worksign', cyclist: 'prop_cyclist' };
     for (const [t, cap] of Object.entries(CAP)) {
@@ -209,7 +227,8 @@ export class World {
         // taper the cones from the right curb to the centre line, then run them for 22 m; barricade at the head
         this.add('worksign', { s: s - 38, d: -(hw + 1.6), yawOff: Math.PI });
         // taper from the right edge line to the lane line, then cones along the lane line: the right lane is closed
-        const edge = -hw + 0.35, line = (right + left) / 2 - 0.25;
+        const edge = -hw + 0.35, line = (right + left) / 2 - 0.25;   // closes everything from the curb over (no parking in a work zone)
+        (this.workZones ??= []).push([s - 42, s + 40]);
         for (let q = 0; q <= 5; q++) this.add('cone', { s: s + q * 2.4, d: edge + q / 5 * (line - edge) });
         for (let q = 1; q <= 8; q++) this.add('cone', { s: s + 12 + q * 2.8, d: line });
         this.add('barricade', { s: s + 4, d: right, yawOff: Math.PI });
@@ -224,6 +243,14 @@ export class World {
     }
     // oncoming traffic already on the road, all the way down the far lane (fed from the far end in update)
     for (let s1 = 60; s1 < r.length - 10; s1 += rnd(50, 130)) s1 = this.oncomingPlatoon(s1);
+    // cars parked along both curbs wherever there's a parking lane (~60 % full), clear of junctions and crosswalks
+    const clearAt = (s1) => { for (let k = -8; k <= 8; k++) if (this.marks && this.marks[Math.round(s1) + k] === 0) return false; return true; };
+    for (const side of [-1, 1]) for (let s1 = rnd(6, 12); s1 < r.length - 4; s1 += rnd(6.2, 7.2)) {
+      const pd = r.parkD(s1, side); if (pd === null || !clearAt(s1) || Math.random() > 0.6) continue;
+      if (side < 0 && (this.workZones || []).some(([a, b]) => s1 > a && s1 < b)) continue;   // coned off
+      if (side < 0 && Math.abs(s1 - sStop) < 10) continue;                                    // the store's P space
+      this.add(pick(['sedan', 'sedan', 'suv']), { s: s1, d: pd + side * rnd(-0.1, 0.15), color: pick(PAINT), dir: side > 0 ? -1 : 1, parked: true, curb: true });
+    }
     // a couple of cyclists in the bike lane (people on foot are the crowd: crowd.js)
     for (let q = 0; q < 5; q++) { const s0 = rnd(40, sStop - 60); this.add('cyclist', { s: s0, d: -(r.hw(s0) + 0.55), v: rnd(4.5, 6.5), color: pick(SHIRTS), dir: 1, scenery: true }); }
     this.planAmbient();
@@ -320,7 +347,7 @@ export class World {
     }
     // a blockage in the right lane: something stationary (parked car, work zone, a car waiting at one) and
     // everything stationary right behind it; stretchFrom(s) = far end of the first one within 25 m ahead of s
-    const isStill = (o) => o.alive && !o.scenery && !o.flying && o.d < 0 && (o.solid >= 0.7 || o.type === 'cone') && (o.parked || Math.abs(o.v || 0) < 1);
+    const isStill = (o) => o.alive && !o.scenery && !o.flying && !o.curb && o.d < 0 && (o.solid >= 0.7 || o.type === 'cone') && (o.parked || Math.abs(o.v || 0) < 1);
     const stills = this.ents.filter(isStill).sort((a, b) => a.s - b.s);
     const stretchFrom = (s0) => {
       let end = -1;
@@ -357,7 +384,7 @@ export class World {
         if (ahead) e.v = Math.max(e.v, Math.min(0, ahead.dir === -1 ? ahead.v : 0));
         // the player over the line in front of them: ease over toward their own curb and squeeze past slowly
         // (a real driver doesn't sit nose to nose); stop only if there's no room to get by
-        const lane = r.lane(e.s, 1), room = r.hw(e.s) - 0.95;
+        const lane = r.lane(e.s, 1), room = r.parkD(e.s, 1) !== null ? r.travel(e.s) - 0.3 : r.hw(e.s) - 0.95;   // not into parked cars
         let aim = lane;
         if (car.s < e.s + 3 && e.s - car.s < 22 && car.d > lane - 3.2) {
           aim = Math.min(room, Math.max(lane, car.d + 2.15));
@@ -478,10 +505,13 @@ export class World {
       m4.compose(pos.set(x, z, -y), q.setFromEuler(e3.set(pitch, yaw - Math.PI / 2, roll, 'YXZ')), sc);
       im.setMatrixAt(i, m4); im.setColorAt(i, c.set(color)); counts[type]++;
     };
-    const win0 = car.s - 60, win1 = car.s + 280;
+    // drawn: everything near the car, plus anything farther that the camera can see (the margin grows with
+    // distance, so a turning camera never sweeps an undrawn car into view)
+    const win0 = car.s - 60, win1 = car.s + 280, cam = this.camera?.position;
     for (const e of this.ents) {
-      if (e.s < win0 || e.s > win1) continue;
+      if (e.s < car.s - 400 || e.s > car.s + 800) continue;
       const p = this.route.at(e.s, e.d);
+      if ((e.s < win0 || e.s > win1) && !(cam && this.visible(p.x, p.y, p.z + 0.8, 4 + Math.hypot(p.x - cam.x, p.z - cam.y, -p.y - cam.z) * 0.04))) continue;
       let yaw = p.a + (e.dir === -1 ? Math.PI : 0) + (e.yawOff || 0) + (e.v < 0 && e.scenery ? Math.PI : 0);
       const inStreet = Math.abs(e.d) < this.route.hw(e.s) + 0.2, lvl = inStreet ? LEVEL.ROUTE : LEVEL.TERRAIN;
       // anything standing IN the street (cones, barricades, a panhandler) stands on the rendered road surface
