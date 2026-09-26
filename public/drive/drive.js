@@ -13,6 +13,7 @@ import { TopSurface } from './surface.js';
 import { RouteFrame, RunnerCar, World } from './runner.js';
 import { DriveAudio } from './audio.js';
 import { Crowd } from './crowd.js';
+import { Streetcars } from './tram.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
 
@@ -101,8 +102,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const spot = { s: spotS, d: route.parkD(spotS, -1) ?? route.lane(spotS, 0) - 0.35 };
   const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks });
   const car = new RunnerCar(route, 4);
+  const trams = world.trams = new Streetcars({ W, route, ground, surfAt, scene, props: props.scene, world, audio });
   const crowd = world.crowd = new Crowd({
-    route, ground, surfAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree, furniture: city.furniture,
+    route, ground, surfAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree,
+    furniture: { ...city.furniture, shelter: [...(city.furniture.shelter || []), ...trams.shelters] },   // riders wait at streetcar platforms too
     onRoute: (x, y) => roadSurface.top(x, -y, ground(x, y) + 1.2)?.name === 'route_road',
     visible: (x, y, z, r) => world.visible(x, y, z, r),
   });
@@ -251,6 +254,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     }
     if (state === 'driving') {
       t -= dt; drove += dt;
+      trams.update(dt, car);
       const ev = world.update(dt, car, drove, hornT > 0 ? 1 : 0);
       for (const h of ev.hits) {
         hits++; car.v *= 1 - 0.65 * h.power; car.stun = 0.5 * h.power; car.invuln = 1.0; shake = Math.min(1, 0.4 + h.power * 0.6);
@@ -291,7 +295,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const steer = THREE.MathUtils.clamp(Math.atan2(car.dv, Math.max(car.v, 4)) * 1.6, -0.5, 0.5);   // fronts lead the dodge
     for (const w of wheelSteer) w.o.quaternion.copy(w.q0).multiply(dq.setFromAxisAngle(Y, steer));
     world.render(car, drove);
-    if (state !== 'driving') world.updateFrustum();   // (world.update keeps it current while driving)
+    if (state !== 'driving') { world.updateFrustum(); trams.render(); }   // (world.update keeps the frustum current while driving)
     crowd.update(dt, car, hornT);
     fx.update(dt, camera, renderer);
     beacon.material.opacity = 0.12 + 0.08 * Math.sin(now / 250);

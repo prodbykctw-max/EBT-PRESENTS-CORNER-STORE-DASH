@@ -61,7 +61,7 @@ export function autopilot(d, { log = console.log } = {}) {
       if (a.deck || a.x === undefined || route.distTo(a.x, a.y) > route.hw(car.s) + 3) continue;
       if (!world.visible(a.x, a.y, a.zAbs + 0.8, 2)) continue;
       const pr = route.project(a.x, a.y);
-      out.push({ s: pr.s, d: pr.d, L: 2.4, W: a.type === 'bus' ? 12 : 5, vs: 0, type: a.type + ' (cross)' });
+      out.push({ s: pr.s, d: pr.d, L: 2.4, W: a.type === 'bus' ? 12 : 5, vs: 0, type: 'X' + a.type });
     }
     return out;
   };
@@ -89,13 +89,23 @@ export function autopilot(d, { log = console.log } = {}) {
       for (const h of H) {
         const gap = h.s - car.s, reach = PLAYER.halfL + h.L / 2;
         if (gap < -reach) continue;                                    // already behind us
+        if (approach && h.s - h.L / 2 > d.spot.s + PLAYER.halfL + 1) continue;   // past where we stop to park
         // plan as if moving at least a crawl (a stopped car can still slide across); a car ahead that is pulling away
         // at our pace is something to follow, not a crash
         const closing = Math.max(car.v, 4) - h.vs;
-        const t = gap <= reach ? (h.vs > 0 && car.v <= h.vs + 0.5 && gap > reach * 0.6 ? Infinity : 0)
+        // beside us and behind our middle (and not catching up): driving on can't hit it, only sliding into it can
+        const behindMid = gap < 0 && h.vs <= car.v + 1;
+        const t = behindMid ? Infinity
+          : gap <= reach ? (h.vs > 0 && car.v <= h.vs + 0.5 && gap > reach * 0.6 ? Infinity : 0)
           : closing <= 0 ? Infinity : (gap - reach) / closing;
-        if (t > LOOK_T) continue;
         const need = PLAYER.halfW + h.W / 2 + MARGIN;
+        if (behindMid) {   // don't slide into it: only moves that cross toward it cost anything
+          const away = Math.sign(c - h.d) === Math.sign(car.d - h.d) && Math.abs(c - h.d) >= Math.abs(car.d - h.d);
+          const lo = Math.min(c, car.d), hi = Math.max(c, car.d);
+          if (!away && Math.abs(car.s - h.s) < reach && h.d + need - MARGIN > lo && h.d - need + MARGIN < hi) cost += 3000;
+          continue;
+        }
+        if (t > LOOK_T) continue;
         // the car also has to get there: sweep from where it is now for anything we'd reach at our ACTUAL speed
         // before the move is done (stopped, sliding over clips nothing that isn't already beside us)
         const hitReach = reach - 0.25, tNow = gap <= hitReach ? 0 : (gap - hitReach) / Math.max(car.v - h.vs, 0.01);
@@ -106,7 +116,8 @@ export function autopilot(d, { log = console.log } = {}) {
         if (h.d + need > lo && h.d - need < hi) { cost += 1000 * (LOOK_T + 0.2 - t); soonest = Math.min(soonest, t); }
       }
       // the parking lane is for parking: only as a last resort (and at the store), never to undertake traffic
-      if (!approach && Math.abs(c) > route.travel(car.s) - 0.6) cost += 600;
+      const edge = route.travel(car.s) - 0.6;   // parking lanes: worse than waiting behind anything; our side opens only to park
+      if (c > edge || (c < -edge && !approach)) cost += 4000;
       for (const tk of seenTokens) if (Math.abs(tk.d - c) < 1) cost -= 4;
       if (!best || cost < best.cost) best = { c, cost, soonest };
     }
@@ -117,7 +128,10 @@ export function autopilot(d, { log = console.log } = {}) {
     const mustBrake = best.soonest < 1.3 || nose;
     // one plan at a time: head for the best line whenever it's actually open (braking or not, e.g. pulling out of
     // a queue); when nothing is open, hold the line we're on and brake. Never flip back into a lane that's closed ahead.
-    const line = best.soonest < 1.3 ? car.targetD : best.c;
+    // (and when it's down to a crawl, wait tucked into our own lane if that's clear right beside us, not on the
+    // centre line where oncoming traffic has to squeeze past)
+    const homeHere = !H.some((h) => Math.abs(h.s - car.s) <= PLAYER.halfL + h.L / 2 + 1 && Math.abs(h.d - want) < PLAYER.halfW + h.W / 2 + 0.2);
+    const line = best.soonest < 1.3 ? (car.v < 8 && homeHere ? want : car.targetD) : best.c;
     act(() => { car.targetD = line; });
     recorder.push({ s: Math.round(car.s), d: +car.d.toFixed(2), v: +car.v.toFixed(1), line: +line.toFixed(2), best: +best.c.toFixed(2), soon: isFinite(best.soonest) ? +best.soonest.toFixed(2) : 'inf', brake: mustBrake, nose, seen: H.filter((h) => h.s > car.s && h.s - car.s < 40).map((h) => h.type[0] + Math.round(h.s - car.s) + '@' + h.d.toFixed(1)).join(' ') });
     if (recorder.length > 40) recorder.shift();

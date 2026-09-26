@@ -61,6 +61,20 @@ obstacles and collisions line up exactly with what's painted on the road.
     Nobody gets hurt: if you clip one, he jumps clear and you just lose the moment.
 - **Scenery** (can't be hit): a procedural crowd on both sidewalks (see below), cyclists along the
   curb, and city buses and cars on the cross streets, which wait at the intersections while you pass.
+- **Streets at real width:** curb-to-curb is measured from OSM's mapped sidewalks every 10 m (10–14 m on
+  Auburn). There are two travel lanes, plus a 2.4 m curbside parking lane each side where the width allows,
+  with parked cars (~60 % full) clear of junctions, crosswalks, work zones and the P space. The P space is
+  in the parking lane at the store.
+- **Atlanta Streetcar** (`tram.js`): real OSM track (`railway=tram`) is set into the pavement as steel rails
+  with flangeway grooves.
+  - The car (a generic 3-section, ~25 m S70-class; no logos) runs **westbound on Auburn, toward the player
+    in the oncoming lane**, as the real one does.
+  - It dwells 7–10 s at the real MARTA platforms (shelters, with riders waiting) and stops for anything on
+    its track, ringing its bell (synthesised) at the player.
+  - Oncoming traffic queues behind it.
+  - Each section sits on the track itself, so it bends through curves.
+- **Work zones** run alternating traffic: as the player comes up to one, a flagger holds oncoming cars and the
+  streetcar past its far end, so the open lane is theirs.
 - **Crowd** (`crowd.js`): one parametric low-poly person (~200 tris), drawn as a single InstancedMesh.
   - **Variety:** each person has their own height, build, skin tone, top, bottoms, and hair, cap,
     locs, backpack or hood.
@@ -184,6 +198,7 @@ Run it after any change to world building.
 | `levels.js`, `surface.js` | the height stack, `standOn`, `deckTop`, and triangle height queries |
 | `sky.js` | sky dome and generated environment lighting |
 | `crowd.js` | procedural sidewalk crowd: parametric person, GPU walk cycle, group behaviour |
+| `tram.js` | Atlanta Streetcar: embedded rails from OSM, the westbound car on its real track, platform dwells, bell |
 | `integrity.js`, `autopilot.js` | QA only: world scanner; player-like autopilot with hit and pop-in audits |
 | `runner.js` | route space (RouteFrame), the auto-driving car, obstacle/scenery/traffic population, collisions, instanced rendering |
 | `audio.js`, `sfx/` | recorded engine and effects mix |

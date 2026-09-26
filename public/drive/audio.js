@@ -113,6 +113,19 @@ export class DriveAudio {
     const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.22, t + 0.12); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
     n.connect(bp).connect(g).connect(this.bus.fx); n.start(t);
   }
+  bell(gain = 0.5) { // streetcar gong: "ding-ding", synthesised from bell-like inharmonic partials
+    const ctx = this.ctx; if (!ctx) return;
+    for (const [at, k] of [[0, 1], [0.22, 0.85]]) {
+      const t = ctx.currentTime + at;
+      for (const [f, a] of [[1180, 1], [1180 * 2.76, 0.45], [1180 * 5.4, 0.18], [590, 0.3]]) {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(gain * a * k * 0.25, t + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + (f > 2000 ? 0.35 : 0.9));
+        o.connect(g).connect(this.bus.fx); o.start(t); o.stop(t + 1);
+      }
+    }
+  }
   chime() { // parked: coin clinks rising
     [1, 1.26, 1.5, 2].forEach((r, i) => this.play('coin', { gain: 0.6, rate: r, delay: i * 0.09 }));
   }

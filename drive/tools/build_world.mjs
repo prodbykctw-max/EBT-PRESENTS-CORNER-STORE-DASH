@@ -276,6 +276,16 @@ const curb = stations.map(([x, y, a, b]) => {
   return isFinite(w) && w >= 6 && w <= 18 ? r2(w) : null;
 });
 
+// ---------- Atlanta Streetcar: embedded track and its platforms ----------
+// Track lines (railway=tram) anywhere near the play area, and the MARTA streetcar platforms (curb bulb-outs).
+const allEls = [...OSM.elements, ...EXTRA.elements], tramNodes = new Map([...nodes, ...xn]);
+const trams = allEls.filter((e) => e.type === 'way' && e.tags?.railway === 'tram')
+  .map((w) => w.nodes.map((id) => tramNodes.get(id)).filter(Boolean))
+  .filter((ns) => ns.length > 1 && ns.some(inPlay)).map((ns) => ns.map((n) => toXY(n).map(r2)));
+const tramStops = allEls.filter((e) => e.type === 'way' && e.tags?.railway === 'platform' && /MARTA/.test(e.tags.network || e.tags.operator || ''))
+  .map((w) => w.nodes.map((id) => tramNodes.get(id)).filter(Boolean)).filter((ns) => ns.length > 2 && ns.some(inPlay))
+  .map((ns) => { const ps = ns.map(toXY); return [r2(ps.reduce((a, p) => a + p[0], 0) / ps.length), r2(ps.reduce((a, p) => a + p[1], 0) / ps.length)]; });
+
 // ---------- landmarks ----------
 const landmarks = OSM.elements
   .filter((e) => e.tags?.name && (e.tags.tourism || e.tags.historic || e.tags.amenity === 'place_of_worship'))
@@ -292,7 +302,7 @@ const world = {
   cornerSign: { text: ['FORT ST', 'AUBURN AVE'], pos: toXY(CORNER).map(r2).concat(0) }, // world frame; kept from the intro
   route: { length: Math.round(D.get(t)), pts: route, curbStep: CURB_STEP, curb },   // curb[k]: measured curb-to-curb width (m) at k·curbStep along the route, or null
   elevation: { ...elev, z: elev.z.map((v) => r2(v - Z0)) },
-  buildings, roads, landmarks, areas, points,
+  buildings, roads, landmarks, areas, points, trams, tramStops,   // trams: track polylines; tramStops: platform centres
 };
 fs.writeFileSync(new URL('world.json', CACHE), JSON.stringify(world));
 const tall = buildings.filter((b) => b.kind === 'play').sort((a, b) => b.h - a.h).slice(0, 5);

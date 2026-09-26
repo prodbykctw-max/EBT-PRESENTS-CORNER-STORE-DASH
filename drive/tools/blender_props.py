@@ -273,8 +273,57 @@ def shelter():
     b.box((0, -0.35, 0.5), (2.6, 0.4, 0.06), (0.35, 0.22, 0.12))
     return b.finish("prop_shelter")
 
+# ---------------- Atlanta Streetcar (a generic low-floor, 3-section car in the spirit of the Siemens S70:
+# white body, deep-teal skirt, dark window band, roof pantograph; no operator logos) ----------------
+TRAM_WHITE = (0.94, 0.95, 0.96)       # off-white so it's never tinted
+TRAM_TEAL = (0.0, 0.36, 0.52)
+TRAM_DOOR = (0.8, 0.83, 0.86)
+BELLOWS = (0.05, 0.05, 0.06)
+
+def tram_body(b, y0, y1, doors, nose=False):
+    """one section's shell from y0 to y1 (a cab nose at +Y if nose): white upper, teal skirt, window band, doors"""
+    W2 = 1.325                                                          # 2.65 m wide
+    if nose:   # side profile with a raked, rounded cab front
+        prof = [(y0, 0.32), (y1 - 0.5, 0.32), (y1 - 0.08, 0.7), (y1, 1.35), (y1 - 0.12, 2.75), (y1 - 0.45, 3.25), (y0, 3.25)]
+        b.profile(prof, W2, TRAM_WHITE)
+        b.box((0, y1 - 0.2, 2.0), (2.3, 0.3, 1.2), GLASS, rot=M.Rotation(-0.25, 4, "X"))   # raked windscreen
+        for sx in (-0.85, 0.85):
+            b.box((sx, y1 - 0.02, 0.95), (0.32, 0.06, 0.14), LAMP)                # headlamps
+            b.box((sx, y1 - 0.03, 0.72), (0.28, 0.05, 0.1), TAIL)                 # tail lamps (bidirectional car)
+        b.box((0, y1 - 0.25, 2.95), (1.4, 0.08, 0.26), BLACK)                     # destination sign
+        yb = y1 - 0.5
+    else:
+        b.box((0, (y0 + y1) / 2, 1.785), (2 * W2, y1 - y0, 2.93), TRAM_WHITE)
+        yb = y1
+    b.box((0, (y0 + yb) / 2, 0.52), (2 * W2 + 0.02, yb - y0, 0.4), TRAM_TEAL)     # teal skirt
+    b.box((0, (y0 + yb) / 2, 1.95), (2 * W2 + 0.02, yb - y0 - 0.6, 1.15), GLASS)  # window band
+    b.box((0, (y0 + yb) / 2, 1.3), (2 * W2 + 0.025, yb - y0, 0.06), TRAM_TEAL)    # pinstripe under the windows
+    for yd in doors:                                                              # double doors, both sides
+        for sx in (-W2 - 0.015, W2 + 0.015):
+            b.box((sx, yd, 1.45), (0.03, 1.3, 2.25), TRAM_DOOR)
+            b.box((sx * 1.001, yd, 1.9), (0.035, 1.1, 0.9), GLASS)
+    b.box((0, (y0 + yb) / 2, 0.2), (2.3, yb - y0 - 0.4, 0.3), BLACK)              # underframe / truck skirt
+    b.box((0, (y0 + y1) / 2, 3.35), (1.6, (y1 - y0) * 0.55, 0.22), (0.72, 0.74, 0.76))   # roof equipment
+
+def tram_end():
+    # 9.0 m cab section, cab at +Y; the runtime mirrors it for the rear end
+    b = Builder()
+    tram_body(b, -4.5, 4.5, doors=(-2.2, 1.4), nose=True)
+    b.box((0, -4.55, 1.8), (2.4, 0.1, 2.9), BELLOWS)                              # articulation bellows
+    return b.finish("prop_tram_end", bevel=0.05)
+
+def tram_mid():
+    # 6.8 m middle section with the pantograph
+    b = Builder()
+    tram_body(b, -3.4, 3.4, doors=(0.0,))
+    for a in (0.55, -0.55):                                                       # pantograph: a folded diamond
+        b.box((0, a * 0.9, 3.85), (0.06, 1.4, 0.06), (0.2, 0.2, 0.22), rot=M.Rotation(0.5 if a > 0 else -0.5, 4, "X"))
+    b.box((0, 0, 4.2), (1.7, 0.1, 0.06), (0.2, 0.2, 0.22))                        # collector head
+    b.box((0, 0, 3.52), (1.0, 1.2, 0.1), (0.25, 0.25, 0.27))                      # base frame
+    return b.finish("prop_tram_mid", bevel=0.05)
+
 objs = [sedan(), suv(), bus(), cone(), barricade(), work_sign(), person("walk"), person("stand"), person("stand", sign=True), cyclist(),
-        tree("round"), tree("upright"), street_lamp(), signal_mast(), bench(), trash_can(), hydrant(), shelter()]
+        tree("round"), tree("upright"), street_lamp(), signal_mast(), bench(), trash_can(), hydrant(), shelter(), tram_end(), tram_mid()]
 for i, o in enumerate(objs):
     o.location = (i * 16, 60, 0)   # spread out in the blend for inspection; export resets below
 
