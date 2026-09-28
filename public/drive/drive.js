@@ -218,13 +218,19 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   hud.hint.textContent = `${weather.label} in the ATL`;
 
   const coarse = MOBILE;
+  let sized = '';
   const resize = () => {
-    const w = root.clientWidth, h = root.clientHeight; renderer.setSize(w, h, false); comic.resize(); camera.aspect = w / h;
+    const w = root.clientWidth, h = root.clientHeight; if (!w || !h) return;
+    sized = w + 'x' + h; renderer.setSize(w, h, false); comic.resize(); camera.aspect = w / h;
     camera.fov = THREE.MathUtils.clamp(2 * THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(26)) / camera.aspect)), 44, 70);
     if (coarse) camera.setViewOffset(w, h, 0, h * 0.1, w, h); else camera.clearViewOffset(); // car clears the buttons
     camera.updateProjectionMatrix();
   };
   addEventListener('resize', resize); resize();
+  // phones rotate before they report the new size (iOS especially): also re-check on orientation / visual-viewport
+  // changes, and every frame (cheap string compare), so the picture is never left squashed or stretched
+  addEventListener('orientationchange', () => { setTimeout(resize, 60); setTimeout(resize, 400); });
+  window.visualViewport?.addEventListener('resize', resize);
 
   const api = { camOverride: null }; // test hooks (filled in below)
   // ---------- state ----------
@@ -296,6 +302,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const FIXED = 1 / 120;
   function frame() {
     raf = nextFrame(frame);
+    if (root.clientWidth + 'x' + root.clientHeight !== sized) resize();
     const now = performance.now(), dt = Math.min((now - last) / 1000, 0.05); last = now;
     if (api.pause) { comic.render(); return; }   // QA: freeze-frame for look-dev
     hornT -= dt;
@@ -387,7 +394,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // camera: high and behind along the road (runner framing), rising and reaching further with speed
     // GTA Chinatown Wars framing: steep, nearly overhead, at the original distance (the 30 % zoom-in was undone),
     // pulling up with speed and leading the car so you see what's coming
-    const v = Math.max(0, car.v), h = 17 + v * 0.4, back = h * 0.34, ahead = 3 + v * 0.3;
+    // distance: far enough to show the whole street across (portrait) and enough of it ahead (landscape), at the
+    // original distance in landscape; steep and overhead, pulling up with speed
+    const v = Math.max(0, car.v), vf = THREE.MathUtils.degToRad(camera.fov) / 2, hf = Math.atan(Math.tan(vf) * camera.aspect);
+    const dist = Math.max((12 + v * 0.18) / Math.tan(hf), (7 + v * 0.16) / Math.tan(vf), 17.5 + v * 0.42);
+    const h = dist * 0.947, back = dist * 0.322, ahead = 3 + v * 0.3;
     camA += Math.atan2(Math.sin(route.at(car.s + 6).a - camA), Math.cos(route.at(car.s + 6).a - camA)) * Math.min(1, dt * 3);
     const look = route.at(car.s + ahead, car.d * 0.35);
     let targetPos, targetLook;

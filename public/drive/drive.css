@@ -65,3 +65,17 @@
 .drive-pedals .brake.on { background: rgba(255,60,60,.55); }
 @media (orientation: landscape) and (pointer: coarse) { .drive-steerpad .dp { width: 76px; height: 76px; } .drive-pedals { width: 190px; } }
 @media (pointer: coarse) { .drive-pad { display: flex; } }
+/* portrait phones: pedals stack in a right-hand column (horn, brake, gas) and everything shrinks a size, so the
+   steer pair and the pedals never collide on a narrow screen */
+@media (orientation: portrait) and (pointer: coarse) {
+  .drive-steerpad { gap: 10px; }
+  .drive-steerpad .dp { width: 70px; height: 70px; }
+  .drive-steerpad .dp svg { width: 34px; height: 34px; }
+  .drive-pedals { flex-direction: column; flex-wrap: nowrap; align-items: center; width: auto; gap: 10px; }
+  .drive-pedals .horn { width: 54px; height: 54px; margin-right: 0; }
+  .drive-pedals .brake { width: 74px; height: 74px; }
+  .drive-pedals .gas { width: 84px; height: 84px; }
+  .drive-box { min-width: 0; padding: 4px 7px; }
+  .drive-box b { font-size: 15px; white-space: nowrap; }
+  .drive-box span { font-size: 9px; letter-spacing: .08em; }
+}
