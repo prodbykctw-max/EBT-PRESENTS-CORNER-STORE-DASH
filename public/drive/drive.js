@@ -385,9 +385,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     CUT.uCutPos.value.copy(carRig.position);
 
     // camera: high and behind along the road (runner framing), rising and reaching further with speed
-    // GTA Chinatown Wars framing: steep, nearly overhead, ~30 % closer than before, pulling up with speed and
-    // leading the car so you see what's coming
-    const v = Math.max(0, car.v), h = (15 + v * 0.42) / 1.3, back = h * 0.34, ahead = 2 + v * 0.22;
+    // GTA Chinatown Wars framing: steep, nearly overhead, at the original distance (the 30 % zoom-in was undone),
+    // pulling up with speed and leading the car so you see what's coming
+    const v = Math.max(0, car.v), h = 17 + v * 0.4, back = h * 0.34, ahead = 3 + v * 0.3;
     camA += Math.atan2(Math.sin(route.at(car.s + 6).a - camA), Math.cos(route.at(car.s + 6).a - camA)) * Math.min(1, dt * 3);
     const look = route.at(car.s + ahead, car.d * 0.35);
     let targetPos, targetLook;
