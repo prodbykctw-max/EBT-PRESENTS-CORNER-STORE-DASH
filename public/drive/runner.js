@@ -200,7 +200,7 @@ function cornerFactor(route, s, v) {
 // ---------------------------------------------------------------- world population
 const TYPES = {
   sedan: { L: 4.5, W: 1.8, solid: 1 }, suv: { L: 4.75, W: 1.95, solid: 1 },
-  cone: { L: 0.56, W: 0.56, solid: 0.35 }, barricade: { L: 0.6, W: 1.8, solid: 0.7 },
+  cone: { L: 0.8, W: 0.8, solid: 0.35 },   // drawn 1.45x (HAZARD_SCALE); the hit box matches barricade: { L: 0.6, W: 1.8, solid: 0.7 },
   panhandler: { L: 0.7, W: 0.7, solid: 0.6 },
   // scenery (never collides)
   bus: { L: 12, W: 2.55, solid: 0 }, worksign: { L: 1, W: 1, solid: 0 }, walker: { L: 0.5, W: 0.5, solid: 0 },
@@ -220,6 +220,9 @@ const carType = () => pickWeighted([['sedan', 5], ['suv', 3], ['robotaxi', 0.9],
 const parkedType = () => pickWeighted([['sedan', 5], ['suv', 3], ['police', 0.25]]);
 /** does o block e's lane? vehicles by lane; people and dogs only if they're actually in e's path */
 const blocks = (o, e) => Math.abs(o.d - e.d) < (VEHICLE[o.type] ? 1.8 : (e.W || 1.8) / 2 + (o.W || 0.5) / 2 + 0.25);
+// obstacles drawn bigger than life and ringed with a warning halo while they're in the street ahead
+const HAZARD_SCALE = { cone: 1.45, barricade: 1.25, dog: 1.5, seller: 1.2, panhandler: 1.2 };
+const HALO = { cone: [0.75, 0xff7a1a], barricade: [1.3, 0xff7a1a], dog: [1.1, 0xffd400], seller: [1.0, 0xff3b3b], panhandler: [1.0, 0xff3b3b] };
 const COATS = [0x8a5a32, 0x2a2420, 0xc9a877, 0x6b4a33, 0xe6dccb, 0x4a3b30, 0xa0703f];
 const PAINT = [0xb8bcc2, 0x1d1f24, 0xe9e9e6, 0x7a1a1a, 0x1f3c78, 0x5a5f66, 0x24542f, 0xc4a44a, 0x8a8f96, 0x2b2b30];
 const SHIRTS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2e2e2e, 0xe8e8e8, 0x3d9a5b, 0x8e44ad, 0xff8c1a, 0x1abc9c, 0x7f8c8d];
@@ -247,6 +250,12 @@ export class World {
     const tg = new THREE.CylinderGeometry(0.55, 0.55, 0.12, 20); tg.rotateX(Math.PI / 2);
     this.tokenMesh = new THREE.InstancedMesh(tg, new THREE.MeshStandardMaterial({ color: 0xffc81a, metalness: 0.85, roughness: 0.25, emissive: 0x6b4a00, emissiveIntensity: 0.6 }), 260);
     this.tokenMesh.count = 0; this.tokenMesh.frustumCulled = false; scene.add(this.tokenMesh);
+    // hazard halos: a glowing warning ring on the road under every cone, barricade, dog or person in the street
+    // ahead, so obstacles read at a glance on a phone
+    const hg = new THREE.RingGeometry(0.62, 1.0, 28); hg.rotateX(-Math.PI / 2);
+    this.halo = new THREE.InstancedMesh(hg, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8 }), 200);
+    this.halo.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(600).fill(1), 3);
+    this.halo.count = 0; this.halo.frustumCulled = false; this.halo.renderOrder = 3; scene.add(this.halo);
     this.nextOncoming = 2; this.ambient = [];
     this.stats = { oncoming: 0 };   // QA: how much oncoming traffic a run actually got
     this.plan();
@@ -679,6 +688,7 @@ export class World {
   render(car, t) {
     const counts = {}; for (const k in this.meshes) counts[k] = 0;
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e3 = new THREE.Euler(), c = new THREE.Color(), one = new THREE.Vector3(1, 1, 1), pos = new THREE.Vector3();
+    const sc3 = new THREE.Vector3(); let halos = 0;
     const put = (type, x, y, z, yaw, color, roll = 0, pitch = 0, sc = one) => {
       const im = this.meshes[type], i = counts[type]; if (i >= im.instanceMatrix.count) return;
       m4.compose(pos.set(x, z, -y), q.setFromEuler(e3.set(pitch, yaw - Math.PI / 2, roll, 'YXZ')), sc);
@@ -710,7 +720,13 @@ export class World {
       else if (e.type === 'panhandler') yaw = p.a + Math.PI;
       if (e.flying) { z += e.fz; roll = e.spin; pitch = e.spin * 0.7; }
       if (afoot) { pitch = 0; roll = 0; }
-      put(e.type === 'dog' ? (Math.sin(e.gait) > 0 ? 'dog_a' : 'dog_b') : e.type, p.x, p.y, z, yaw, e.color, roll, pitch);
+      const big = HAZARD_SCALE[e.type];                                       // drawn bigger than life: they read on a phone
+      put(e.type === 'dog' ? (Math.sin(e.gait) > 0 ? 'dog_a' : 'dog_b') : e.type, p.x, p.y, z, yaw, e.color, roll, pitch, big ? sc3.setScalar(big) : one);
+      if (HALO[e.type] && !e.flying && !e.hitDone && Math.abs(e.d) < this.route.hw(e.s) + 0.3 && e.s > car.s - 4 && e.s - car.s < 110 && halos < 200) {
+        const [rad, col] = HALO[e.type], pulse = 1 + 0.12 * Math.sin(t * 7 + e.s);
+        m4.compose(pos.set(p.x, (inStreet ? (this.surfAt(p.x, p.y, p.z + 1.2) ?? z) : z) + 0.14, -p.y), q.identity(), sc3.set(rad * pulse, 1, rad * pulse));
+        this.halo.setMatrixAt(halos, m4); this.halo.setColorAt(halos, c.set(col)); halos++;
+      }
     }
     for (const a of this.ambient) if (a.x !== undefined) {
       const ox = -Math.sin(a.h) * a.lane, oy = Math.cos(a.h) * a.lane, x = a.x + ox, y = a.y + oy, g = this.route.ground;
@@ -723,6 +739,7 @@ export class World {
       put(a.type, x, y, st.z, a.h, a.color, st.roll, st.pitch);
     }
     for (const k in this.meshes) { const im = this.meshes[k]; im.count = counts[k]; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
+    this.halo.count = halos; this.halo.instanceMatrix.needsUpdate = true; this.halo.instanceColor.needsUpdate = true;
     // tokens
     let n = 0; const spin = t * 4;
     for (const tk of this.tokens) {
