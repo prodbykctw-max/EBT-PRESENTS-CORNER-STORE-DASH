@@ -153,11 +153,19 @@ def bus():
     return b.finish("prop_bus", bevel=0.08)
 
 # ---------------- construction ----------------
+CONE_RED = (1.0, 0.2, 0.0)          # deeper red-orange: reads against the yellow centre line, not just grey asphalt
+
 def cone():
+    """a tall highway-style cone, a little bigger than a street cone so it reads from the high chase camera and
+    on a phone: wide black base, red-orange body, two broad white reflective collars (the white and the black
+    are what separate it from the yellow line)"""
     b = Builder()
-    b.box((0, 0, 0.02), (0.42, 0.42, 0.04), BLACK)
-    b.cyl((0, 0, 0.37), 0.16, 0.66, ORANGE, seg=12, r2=0.035)
-    b.cyl((0, 0, 0.44), 0.113, 0.1, REFLECT, seg=12, r2=0.095)
+    b.box((0, 0, 0.03), (0.56, 0.56, 0.06), BLACK)
+    b.cyl((0, 0, 0.5), 0.22, 0.9, CONE_RED, seg=14, r2=0.045)
+    # collars sit just proud of the body: radius follows the taper at their heights
+    b.cyl((0, 0, 0.62), 0.152, 0.14, REFLECT, seg=14, r2=0.13)
+    b.cyl((0, 0, 0.36), 0.2, 0.12, REFLECT, seg=14, r2=0.182)
+    b.cyl((0, 0, 0.96), 0.05, 0.04, BLACK, seg=10, r2=0.045)
     return b.finish("prop_cone")
 
 def barricade():

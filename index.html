@@ -27,37 +27,14 @@
   .sideBtns button{ width:44px; height:44px; background:rgba(30,35,64,.82); border:3px solid var(--gold);
     border-radius:12px; color:var(--gold); font-size:17px; line-height:1; cursor:pointer; }
   .sideBtns button:active{ background:var(--gold); color:var(--ink); transform:translateY(1px); }
-  /* D-pad sits bottom-CENTRE, over the entrance mat, so either thumb reaches it
-     without stretching across the phone the way the old bottom-left corner did.
-     186px of cross with 60px keys: bigger targets, and centred means the travel
-     from rest to any arrow is the same in every direction.
-     Direction is computed from where the thumb sits relative to the pad's
-     centre, not from which key it lands on. That does three things: a thumb on
-     a corner resolves to the nearer axis instead of falling in a dead gap,
-     sliding across the pad re-aims continuously, and the centre is a real dead
-     zone - there is no direction to give there, so it does nothing at all.
-     Every child is pointer-events:none so the container owns the whole gesture
-     and nothing inside is independently clickable. */
-  .dpad{ position:fixed; left:50%; transform:translateX(-50%); z-index:12;
-    bottom:calc(10px + env(safe-area-inset-bottom)); display:grid; touch-action:none;
-    grid-template-columns:repeat(3,60px); grid-template-rows:repeat(3,60px); gap:3px;
-    opacity:.5; transition:opacity .12s ease; }
-  .dpad.live{ opacity:.96; }
-  .dpad > *{ pointer-events:none; }
-  .dpad button{ background:rgba(30,35,64,.85); border:3px solid var(--gold); color:var(--gold);
-    font-size:20px; line-height:1; font-weight:900; border-radius:8px; }
-  .dpad button.on{ background:var(--gold); color:var(--ink); }
-  .dpad #padU{ border-radius:15px 15px 5px 5px; }
-  .dpad #padD{ border-radius:5px 5px 15px 15px; }
-  .dpad #padL{ border-radius:15px 5px 5px 15px; }
-  .dpad #padR{ border-radius:5px 15px 15px 5px; }
-  .dpad .blank{ visibility:hidden; }
-  /* The hub is decoration, not a control - a dashed ring reads as "nothing to
-     press here", and it is a div so it can never take a click or a tab stop. */
-  .dpad .hub{ background:rgba(30,35,64,.38); border:2px dashed rgba(245,197,24,.30);
-    border-radius:50%; }
-  @media (min-width:700px){ .dpad{ display:none; } }
-  @media (prefers-reduced-motion:reduce){ .dpad{ transition:none; } }
+  /* Floating joystick: the whole screen is the controller (see bindTouch).
+     The ring appears where the thumb lands; the knob follows it. */
+  #stick{ position:fixed; left:0; top:0; width:96px; height:96px; border-radius:50%; z-index:11;
+    border:3px solid rgba(245,197,24,.55); background:rgba(30,35,64,.28); pointer-events:none;
+    opacity:0; transition:opacity .12s; }
+  #stick.on{ opacity:1; }
+  #stick i{ position:absolute; left:28px; top:28px; width:40px; height:40px; border-radius:50%;
+    background:rgba(245,197,24,.85); box-shadow:0 2px 8px rgba(0,0,0,.4); }
   .ov{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
     background:rgba(10,10,14,.9); z-index:20; text-align:center; padding:20px; gap:14px; }
   .ov.on{ display:flex; }
@@ -118,11 +95,7 @@
     <button id="btnPause" aria-label="Pause">⏸</button>
     <button id="btnMute" aria-label="Mute sound">🔊</button>
   </div>
-  <div class="dpad" id="dpadBox">
-    <button class="blank"></button><button id="padU" aria-label="Move up">▲</button><button class="blank"></button>
-    <button id="padL" aria-label="Move left">◀</button><div class="hub" aria-hidden="true"></div><button id="padR" aria-label="Move right">▶</button>
-    <button class="blank"></button><button id="padD" aria-label="Move down">▼</button><button class="blank"></button>
-  </div>
+  <div id="stick" aria-hidden="true"><i></i></div>
 
   <div class="ov" id="ovTitle">
     <div class="card">
@@ -139,7 +112,7 @@
       DON'T GET CAUGHT BY THE <b>BULLY</b><br>
       HIT <b>CHECKOUT</b> TO WIN
     </div>
-    <div class="hint">DRAG ANYWHERE OR USE THE D-PAD<br>ARROWS / WASD · P = PAUSE<br>1 CONTINUE PER RUN — ITEMS KEPT<br>FASTER RUN = BIGGER SCORE</div>
+    <div class="hint">DRAG ANYWHERE ON THE SCREEN TO MOVE<br>ARROWS / WASD · P = PAUSE<br>1 CONTINUE PER RUN — ITEMS KEPT<br>FASTER RUN = BIGGER SCORE</div>
     <button class="btn" id="btnStart">START RUN</button>
   </div>
 
@@ -230,21 +203,41 @@ var S={mode:"boot",score:0,got:{},nGot:0,active:false,t:0,runT:0,muted:false,lin
 
 /* ---------- haptics ----------------------------------------------------
    Every touch the player makes answers back. Patterns are deliberately
-   short — a tick you feel and don't notice — except the three moments that
-   should land in your hand: bagging an item, the list going complete, and
-   getting caught.
+   short — a tick you feel and don't notice — except the moments that should
+   land in your hand: bagging an item, the list going complete, getting caught.
    Independent of the mute button on purpose: mute is about not making noise
-   in public, which is exactly when you still want the feel. iOS Safari does
-   not implement the Vibration API, so this is a no-op there and the game is
-   built to be complete without it. */
+   in public, which is exactly when you still want the feel.
+   Android: the Vibration API. iPhone: Safari has no Vibration API, but since
+   iOS 17.4 toggling an <input type="checkbox" switch> plays the system haptic
+   tick, so a hidden one is clicked once per pulse of the pattern (iOS only
+   allows it while the page is handling a touch, so taps and drags always
+   tick; events like a pickup tick when they land mid-gesture). */
 var HAPTICS = typeof navigator !== "undefined" && typeof navigator.vibrate === "function";
-var hapLast = 0;
+var hapLast = 0, hapSwitch = null;
+function hapIOS(){
+  if(hapSwitch===null){
+    hapSwitch=false;
+    try{
+      var lb=document.createElement("label"), inp=document.createElement("input");
+      inp.type="checkbox"; inp.setAttribute("switch",""); lb.appendChild(inp);
+      lb.setAttribute("aria-hidden","true");
+      lb.style.cssText="position:fixed;left:-99px;top:0;width:1px;height:1px;opacity:0;pointer-events:none";
+      document.body.appendChild(lb); hapSwitch=lb;
+    }catch(e){}
+  }
+  if(hapSwitch) try{ hapSwitch.click(); }catch(e){}
+}
 function haptic(pattern, minGapMs){
-  if(!HAPTICS) return;
   var now = (typeof performance !== "undefined" ? performance.now() : Date.now());
   if(minGapMs && now - hapLast < minGapMs) return;
   hapLast = now;
-  try{ navigator.vibrate(pattern); }catch(e){}
+  if(HAPTICS){ try{ navigator.vibrate(pattern); }catch(e){} return; }
+  // iPhone: one tick per "on" segment of the pattern, spaced like the pattern
+  var segs = typeof pattern==="number" ? [0,pattern] : pattern, at=0;
+  for(var i=0;i<segs.length;i++){
+    if(i%2===1){ if(at===0) hapIOS(); else setTimeout(hapIOS, at); }
+    at+=segs[i];
+  }
 }
 var HAP = {
   tap:      12,                    // any button
@@ -536,6 +529,29 @@ function nudgeX(x,ny){
   }
   return 0;
 }
+function cornerSeek(e,sdx,sdy,mag){
+  var ay=Math.abs(sdy), ax=Math.abs(sdx);
+  if(Math.max(ax,ay) < mag*0.8) return false;          // a true diagonal: leave it to the slide
+  var vert = ay>=ax, main = vert ? (sdy>0?1:-1) : (sdx>0?1:-1);
+  var mx = vert ? e.x : e.x+main*mag, my = vert ? e.y+main*mag : e.y;
+  if(boxFree(mx,my)) return false;                      // main direction isn't the blocked one
+  var lean = vert ? sdx : sdy;
+  for(var k=3;k<=36;k+=3){
+    var order = lean<0 ? [-1,1] : [1,-1];               // try the side the stick leans toward first
+    for(var j=0;j<2;j++){
+      var sgn=order[j], ox = vert ? e.x+sgn*k : e.x, oy = vert ? e.y : e.y+sgn*k;
+      if(!boxFree(ox,oy)) continue;
+      if(!boxFree(vert?ox:ox+main*mag, vert?oy+main*mag:oy)) continue;
+      // the sideways run to it must be clear too
+      var ok=true;
+      for(var s=3;s<k&&ok;s+=3){ if(!boxFree(vert?e.x+sgn*s:e.x, vert?e.y:e.y+sgn*s)) ok=false; }
+      if(!ok) continue;
+      if(vert) e.x+=sgn*Math.min(mag,k); else e.y+=sgn*Math.min(mag,k);
+      return true;
+    }
+  }
+  return false;
+}
 function moveEntity(e,dt){
   var dx=e.vx*dt, dy=e.vy*dt;
   var steps=Math.max(1,Math.ceil(Math.max(Math.abs(dx),Math.abs(dy))/3));
@@ -543,6 +559,14 @@ function moveEntity(e,dt){
   var mag=Math.sqrt(sdx*sdx+sdy*sdy);
   for(var i=0;i<steps;i++){
     if(boxFree(e.x+sdx,e.y+sdy)){ e.x+=sdx; e.y+=sdy; continue; }
+    // Round the corner you clearly mean. Pushing mostly one way into a lip (the
+    // EBT LIST sign juts ~20px past the left wall, so up-and-left in that lane
+    // jammed you under it while the slide below bounced you back and forth):
+    // look sideways up to 36px for the nearest spot where the main direction
+    // opens, and walk toward it at full speed, whatever the stick's small
+    // sideways lean says.
+    var seek=cornerSeek(e,sdx,sdy,mag);
+    if(seek){ continue; }
     // full-speed wall slide: pour the whole step into whichever axis is free
     var tryY = Math.abs(sdy)>=Math.abs(sdx);
     var slid=false;
@@ -744,7 +768,7 @@ function endScreen(won){
    Lives in /drive/ and loads on demand, so this single-file game gets no bigger. If it can't load
    (opened from disk, offline, or an old copy with no /drive/ next to it) the run just starts. */
 var DRIVE_URL="./public/drive/drive.js";
-function driveAvailable(){ return /^https?:$/.test(location.protocol) && !/[?&]nodrive/.test(location.search); }
+function driveAvailable(){ return /^https?:$/.test(location.protocol) && !/[?&]nodrive\b/.test(location.search); }
 // Cover the store the instant START is tapped: the drive's code (three.js + modules) takes a moment to
 // arrive, and its own loading screen only exists once it has. Same look as the drive's loader, so the
 // hand-off is seamless; it lifts once the drive's screen is up and styled (or if the drive fails).
@@ -795,11 +819,10 @@ function startRun(){
 }
 
 /* ---------- input ---------- */
-var keys={u:0,d:0,l:0,r:0}, drag=null, padDir=null;
+var keys={u:0,d:0,l:0,r:0}, drag=null;
 function inputVec(){
   if(S.testVec) return S.testVec;
   var x=(keys.r?1:0)-(keys.l?1:0), y=(keys.d?1:0)-(keys.u?1:0);
-  if(padDir){ x=padDir.x; y=padDir.y; }
   if(drag&&drag.on){ x=drag.x; y=drag.y; }
   var m=Math.hypot(x,y);
   if(m>1){ x/=m; y/=m; }
@@ -821,14 +844,35 @@ document.addEventListener("keyup",function(ev){
   if(k==="ArrowRight"||k==="d"||k==="D")keys.r=0;
 });
 function bindTouch(){
-  var c=view;
-  c.addEventListener("touchstart",function(ev){
-    var t=ev.touches[0];
+  /* The whole screen is the controller: put a thumb down anywhere that isn't a
+     button and drag the way you want to walk. A ring appears where you
+     touched and the knob follows your thumb (44px of travel, a 10px dead
+     zone, and the ring drifts along if you keep pulling so you never run
+     out of room). Every touch on the play area is claimed (non-passive,
+     preventDefault), so a held finger is always gameplay: no text
+     selection, no iOS Copy / Look Up / magnifier, no double-tap zoom. */
+  var ring=el("stick"), knob=ring&&ring.firstElementChild;
+  function claim(t){ return !(t&&t.closest&&t.closest("button,input,textarea,a,.ov")); }
+  function showStick(){
+    if(!ring) return;
+    ring.style.transform="translate("+(drag.ax-48)+"px,"+(drag.ay-48)+"px)";
+    knob.style.transform="translate("+(drag.cx-drag.ax)+"px,"+(drag.cy-drag.ay)+"px)";
+    ring.classList.add("on");
+  }
+  function hideStick(){ if(ring) ring.classList.remove("on"); }
+  function find(list){ if(!drag) return null; for(var i=0;i<list.length;i++) if(list[i].identifier===drag.id) return list[i]; return null; }
+  document.addEventListener("touchstart",function(ev){
+    if(!claim(ev.target)) return;
+    ev.preventDefault();
+    if(drag||S.mode!=="play") return;
+    var t=ev.changedTouches[0];
     drag={on:false,ax:t.clientX,ay:t.clientY,cx:t.clientX,cy:t.clientY,x:0,y:0,id:t.identifier};
-  },{passive:true});
-  c.addEventListener("touchmove",function(ev){
-    if(!drag) return;
-    var t=ev.touches[0];
+    haptic(HAP.tap); showStick();
+  },{passive:false});
+  document.addEventListener("touchmove",function(ev){
+    var t=find(ev.changedTouches);
+    if(!t) { if(claim(ev.target)) ev.preventDefault(); return; }
+    ev.preventDefault();
     drag.cx=t.clientX; drag.cy=t.clientY;
     var dx=drag.cx-drag.ax, dy=drag.cy-drag.ay, m=Math.hypot(dx,dy);
     if(m>44){ drag.ax=drag.cx-dx/m*44; drag.ay=drag.cy-dy/m*44; dx=drag.cx-drag.ax; dy=drag.cy-drag.ay; m=44; }
@@ -838,46 +882,28 @@ function bindTouch(){
       drag.on=true; drag.x=dx/m; drag.y=dy/m;
     }
     else drag.on=false;
-  },{passive:true});
-  c.addEventListener("touchend",function(){ drag=null; },{passive:true});
-  c.addEventListener("touchcancel",function(){ drag=null; },{passive:true});
-  /* D-pad. Direction comes from where the thumb sits relative to the pad's
-     centre, not from which key it happens to land on. A thumb on a corner
-     resolves to the nearer axis instead of falling into a dead gap, sliding
-     across the pad re-aims continuously, and the middle is a genuine dead zone:
-     there is no direction to give at the centre, so a touch there does nothing
-     rather than pretending to be a button. The pad's children are
-     pointer-events:none, so the container sees the whole gesture. */
-  var PADV={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
-  var box=el("dpadBox");
-  var padKey={up:el("padU"),down:el("padD"),left:el("padL"),right:el("padR")};
-  function padLight(name){
-    for(var k in padKey) padKey[k].classList.toggle("on", k===name);
-    box.classList.toggle("live", !!name);
+    showStick();
+  },{passive:false});
+  function end(ev){
+    if(find(ev.changedTouches)){ drag=null; hideStick(); }
+    if(claim(ev.target)) ev.preventDefault();
   }
-  function padAim(cx,cy){
-    var r=box.getBoundingClientRect();
-    var dx=cx-(r.left+r.width/2), dy=cy-(r.top+r.height/2);
-    if(Math.hypot(dx,dy) < r.width*0.17) return;   // dead centre: hold, don't steer
-    var name = Math.abs(dx)>Math.abs(dy) ? (dx>0?"right":"left") : (dy>0?"down":"up");
-    var d=PADV[name];
-    if(!padDir || padDir.x!==d[0] || padDir.y!==d[1]) haptic(HAP.turn);
-    padDir={x:d[0],y:d[1]};
-    padLight(name);
-  }
-  function padRelease(){ padDir=null; padLight(null); }
-  function padTouch(ev){
-    var t=ev.touches[0];
-    if(t) padAim(t.clientX,t.clientY);
-    ev.preventDefault();
-  }
-  box.addEventListener("touchstart",padTouch,{passive:false});
-  box.addEventListener("touchmove",padTouch,{passive:false});
-  box.addEventListener("touchend",function(ev){ padRelease(); ev.preventDefault(); },{passive:false});
-  box.addEventListener("touchcancel",padRelease);
-  box.addEventListener("mousedown",function(ev){ padAim(ev.clientX,ev.clientY); ev.preventDefault(); });
-  box.addEventListener("mousemove",function(ev){ if(ev.buttons) padAim(ev.clientX,ev.clientY); });
-  window.addEventListener("mouseup",padRelease);
+  document.addEventListener("touchend",end,{passive:false});
+  document.addEventListener("touchcancel",end,{passive:false});
+  // desktop: click-and-drag on the board works the same way (keys too)
+  view.addEventListener("mousedown",function(ev){
+    if(S.mode!=="play") return;
+    drag={on:false,ax:ev.clientX,ay:ev.clientY,cx:ev.clientX,cy:ev.clientY,x:0,y:0,id:"mouse"}; showStick();
+  });
+  window.addEventListener("mousemove",function(ev){
+    if(!drag||drag.id!=="mouse") return;
+    drag.cx=ev.clientX; drag.cy=ev.clientY;
+    var dx=drag.cx-drag.ax, dy=drag.cy-drag.ay, m=Math.hypot(dx,dy);
+    if(m>44){ drag.ax=drag.cx-dx/m*44; drag.ay=drag.cy-dy/m*44; dx=drag.cx-drag.ax; dy=drag.cy-drag.ay; m=44; }
+    if(m>10){ drag.on=true; drag.x=dx/m; drag.y=dy/m; } else drag.on=false;
+    showStick();
+  });
+  window.addEventListener("mouseup",function(){ if(drag&&drag.id==="mouse"){ drag=null; hideStick(); } });
 }
 
 /* ---------- sprites ---------- */
@@ -1134,17 +1160,7 @@ function draw(){
     // actors: draw upper first for overlap.
     var actors=[player,bully].sort(function(a,b){return a.y-b.y;});
     for(var a2=0;a2<actors.length;a2++) drawActor(g,actors[a2],actors[a2]===bully);
-    // joystick indicator while dragging
-    if(drag&&drag.on&&S.mode==="play"){
-      var rc=view.getBoundingClientRect();
-      var jx=(drag.ax-rc.left)/scale, jy=(drag.ay-rc.top)/scale;
-      g.globalAlpha=0.4;
-      g.strokeStyle=PAL.gold; g.lineWidth=4;
-      g.beginPath(); g.arc(jx,jy,34,0,6.2832); g.stroke();
-      g.fillStyle=PAL.gold;
-      g.beginPath(); g.arc(jx+drag.x*26,jy+drag.y*26,14,0,6.2832); g.fill();
-      g.globalAlpha=1;
-    }
+    // (the joystick is the #stick overlay, drawn by the page: see bindTouch)
     // bubbles
     for(var b2=0;b2<bubbles.length;b2++){
       var bb=bubbles[b2], al=Math.min(1,bb.ttl/0.25);
@@ -1306,11 +1322,12 @@ function init(){
   el("btnPause").addEventListener("click",function(ev){ ev.stopPropagation(); togglePause(); });
   el("btnMenu2").addEventListener("click",function(ev){ ev.stopPropagation(); goMenu(); });
   el("btnSubmit").addEventListener("click",submitScore);
-  // one delegated tick for every button; the d-pad has its own turn haptic
-  document.addEventListener("pointerdown",function(ev){
-    var t=ev.target;
-    if(t&&t.tagName==="BUTTON"&&!(t.closest&&t.closest(".dpad"))) haptic(HAP.tap);
-  },{passive:true});
+  // one delegated tick for every button: on press where vibration exists
+  // (Android); on the tap itself on iPhone, where the switch tick needs a click
+  document.addEventListener(HAPTICS?"pointerdown":"click",function(ev){
+    var t=ev.target&&ev.target.closest&&ev.target.closest("button");
+    if(t) haptic(HAP.tap);
+  },{passive:true,capture:true});
   el("btnMute").addEventListener("click",function(){ S.muted=!S.muted; el("btnMute").textContent=S.muted?"\uD83D\uDD07":"🔊"; });
   [0,1,2].forEach(function(s){
     el("up"+s).addEventListener("click",function(){cycleInit(s,1);});

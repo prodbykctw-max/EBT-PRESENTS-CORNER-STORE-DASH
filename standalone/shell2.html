@@ -27,37 +27,14 @@
   .sideBtns button{ width:44px; height:44px; background:rgba(30,35,64,.82); border:3px solid var(--gold);
     border-radius:12px; color:var(--gold); font-size:17px; line-height:1; cursor:pointer; }
   .sideBtns button:active{ background:var(--gold); color:var(--ink); transform:translateY(1px); }
-  /* D-pad sits bottom-CENTRE, over the entrance mat, so either thumb reaches it
-     without stretching across the phone the way the old bottom-left corner did.
-     186px of cross with 60px keys: bigger targets, and centred means the travel
-     from rest to any arrow is the same in every direction.
-     Direction is computed from where the thumb sits relative to the pad's
-     centre, not from which key it lands on. That does three things: a thumb on
-     a corner resolves to the nearer axis instead of falling in a dead gap,
-     sliding across the pad re-aims continuously, and the centre is a real dead
-     zone - there is no direction to give there, so it does nothing at all.
-     Every child is pointer-events:none so the container owns the whole gesture
-     and nothing inside is independently clickable. */
-  .dpad{ position:fixed; left:50%; transform:translateX(-50%); z-index:12;
-    bottom:calc(10px + env(safe-area-inset-bottom)); display:grid; touch-action:none;
-    grid-template-columns:repeat(3,60px); grid-template-rows:repeat(3,60px); gap:3px;
-    opacity:.5; transition:opacity .12s ease; }
-  .dpad.live{ opacity:.96; }
-  .dpad > *{ pointer-events:none; }
-  .dpad button{ background:rgba(30,35,64,.85); border:3px solid var(--gold); color:var(--gold);
-    font-size:20px; line-height:1; font-weight:900; border-radius:8px; }
-  .dpad button.on{ background:var(--gold); color:var(--ink); }
-  .dpad #padU{ border-radius:15px 15px 5px 5px; }
-  .dpad #padD{ border-radius:5px 5px 15px 15px; }
-  .dpad #padL{ border-radius:15px 5px 5px 15px; }
-  .dpad #padR{ border-radius:5px 15px 15px 5px; }
-  .dpad .blank{ visibility:hidden; }
-  /* The hub is decoration, not a control - a dashed ring reads as "nothing to
-     press here", and it is a div so it can never take a click or a tab stop. */
-  .dpad .hub{ background:rgba(30,35,64,.38); border:2px dashed rgba(245,197,24,.30);
-    border-radius:50%; }
-  @media (min-width:700px){ .dpad{ display:none; } }
-  @media (prefers-reduced-motion:reduce){ .dpad{ transition:none; } }
+  /* Floating joystick: the whole screen is the controller (see bindTouch).
+     The ring appears where the thumb lands; the knob follows it. */
+  #stick{ position:fixed; left:0; top:0; width:96px; height:96px; border-radius:50%; z-index:11;
+    border:3px solid rgba(245,197,24,.55); background:rgba(30,35,64,.28); pointer-events:none;
+    opacity:0; transition:opacity .12s; }
+  #stick.on{ opacity:1; }
+  #stick i{ position:absolute; left:28px; top:28px; width:40px; height:40px; border-radius:50%;
+    background:rgba(245,197,24,.85); box-shadow:0 2px 8px rgba(0,0,0,.4); }
   .ov{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
     background:rgba(10,10,14,.9); z-index:20; text-align:center; padding:20px; gap:14px; }
   .ov.on{ display:flex; }
@@ -118,11 +95,7 @@
     <button id="btnPause" aria-label="Pause">\u23F8</button>
     <button id="btnMute" aria-label="Mute sound">\uD83D\uDD0A</button>
   </div>
-  <div class="dpad" id="dpadBox">
-    <button class="blank"></button><button id="padU" aria-label="Move up">\u25B2</button><button class="blank"></button>
-    <button id="padL" aria-label="Move left">\u25C0</button><div class="hub" aria-hidden="true"></div><button id="padR" aria-label="Move right">\u25B6</button>
-    <button class="blank"></button><button id="padD" aria-label="Move down">\u25BC</button><button class="blank"></button>
-  </div>
+  <div id="stick" aria-hidden="true"><i></i></div>
 
   <div class="ov" id="ovTitle">
     <div class="card">
@@ -139,7 +112,7 @@
       DON'T GET CAUGHT BY THE <b>BULLY</b><br>
       HIT <b>CHECKOUT</b> TO WIN
     </div>
-    <div class="hint">DRAG ANYWHERE OR USE THE D-PAD<br>ARROWS / WASD \u00b7 P = PAUSE<br>1 CONTINUE PER RUN \u2014 ITEMS KEPT<br>FASTER RUN = BIGGER SCORE</div>
+    <div class="hint">DRAG ANYWHERE ON THE SCREEN TO MOVE<br>ARROWS / WASD \u00b7 P = PAUSE<br>1 CONTINUE PER RUN \u2014 ITEMS KEPT<br>FASTER RUN = BIGGER SCORE</div>
     <button class="btn" id="btnStart">START RUN</button>
   </div>
 
