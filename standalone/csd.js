@@ -1093,11 +1093,46 @@ function submitScore(){
 function el(id){ return document.getElementById(id); }
 function show(id){ el(id).classList.add("on"); }
 function hide(id){ el(id).classList.remove("on"); }
+/* Follow camera. The board used to be shrunk to fit the whole store on screen, which made everyone tiny on a
+   phone. Now it's shown bigger (about 1.8x on a phone, never below fit-to-screen) and scrolls to keep the player
+   centred, clamped at the store's walls. The canvas stays full resolution and is only moved/scaled by CSS, so the
+   pixel art stays crisp and nothing in the game's own coordinates changes. The score and the EBT LIST are mirrored into a small HUD
+   so they're always readable. */
+var cam={x:0,y:0,init:false}, fitScale=1;
 function fit(){
   var vw=window.innerWidth||390, vh=window.innerHeight||780;
-  scale=Math.min(vw/IW, vh/IH);
-  view.style.width=Math.floor(IW*scale)+"px";
-  view.style.height=Math.floor(IH*scale)+"px";
+  fitScale=Math.min(vw/IW, vh/IH);
+  scale=Math.max(fitScale, Math.min(0.8, vw/480));
+  view.style.width=Math.round(IW*scale)+"px";
+  view.style.height=Math.round(IH*scale)+"px";
+  cam.init=false; placeView(0);
+}
+function placeView(dt){
+  if(!view) return;
+  var vw=window.innerWidth||390, vh=window.innerHeight||780, W=IW*scale, H=IH*scale;
+  var fx=player?player.x:IW/2, fy=player?player.y:IH/2;
+  // target: player centred (a touch below centre, so you see more of what's ahead), clamped to the board
+  var tx=W<=vw ? (vw-W)/2 : Math.min(0, Math.max(vw-W, vw/2-fx*scale));
+  var ty=H<=vh ? (vh-H)/2 : Math.min(0, Math.max(vh-H, vh*0.52-fy*scale));
+  if(!cam.init||!dt){ cam.x=tx; cam.y=ty; cam.init=true; }
+  else { var k=Math.min(1,dt*8); cam.x+=(tx-cam.x)*k; cam.y+=(ty-cam.y)*k; }
+  view.style.transform="translate("+Math.round(cam.x)+"px,"+Math.round(cam.y)+"px)";
+  drawListHud();
+}
+var listHud=null;
+function drawListHud(){
+  if(!listHud){
+    listHud=document.createElement("canvas"); listHud.id="listHud"; listHud.width=104; listHud.height=280;
+    listHud.setAttribute("aria-hidden","true"); document.body.appendChild(listHud);
+  }
+  var zoomed=scale>fitScale*1.05 && S.mode!=="boot";
+  listHud.style.display=zoomed?"block":"none";
+  if(!zoomed) return;
+  var g=listHud.getContext("2d"); g.imageSmoothingEnabled=false;
+  g.fillStyle="#020204"; g.fillRect(0,0,104,280);
+  g.font="bold 24px ui-monospace,Menlo,monospace"; g.fillStyle=PAL.gold; g.textAlign="center";
+  g.fillText(String(S.score).padStart(4,"0"), 52, 26); g.textAlign="left";                     // the score
+  g.drawImage(view, 0,132,104,246, 0,34,104,246);   // the list panel, straight off the rendered board
 }
 var last=0;
 function update(dt){
@@ -1122,6 +1157,7 @@ function loop(ts){
   var dt=Math.min(0.05,(ts-last)/1000); last=ts;
   update(dt);
   if(S.mode!=="boot") draw();
+  placeView(dt);
 }
 function init(){
   // a held finger is gameplay: no long-press menu or text selection anywhere in the game (except text fields)

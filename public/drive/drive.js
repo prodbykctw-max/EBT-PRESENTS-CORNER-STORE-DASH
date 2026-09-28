@@ -419,7 +419,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // original distance in landscape; steep and overhead, pulling up with speed
     const v = Math.max(0, car.v), vf = THREE.MathUtils.degToRad(camera.fov) / 2, hf = Math.atan(Math.tan(vf) * camera.aspect);
     const dist = Math.max((12 + v * 0.18) / Math.tan(hf), (7 + v * 0.16) / Math.tan(vf), 17.5 + v * 0.42);
-    const h = dist * 0.947, back = dist * 0.322, ahead = 3 + v * 0.3;
+    // aim ahead of the car so it sits in the lower part of the frame and the road in front (obstacles!) is in view;
+    // more lead in landscape, where the screen is short
+    const h = dist * 0.947, back = dist * 0.322, ahead = (camera.aspect > 1 ? 8 : 5) + v * 0.4;
     camA += Math.atan2(Math.sin(route.at(car.s + 6).a - camA), Math.cos(route.at(car.s + 6).a - camA)) * Math.min(1, dt * 3);
     const look = route.at(car.s + ahead, car.d * 0.35);
     let targetPos, targetLook;

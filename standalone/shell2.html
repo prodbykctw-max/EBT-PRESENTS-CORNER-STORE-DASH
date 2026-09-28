@@ -16,7 +16,12 @@
     font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
     touch-action:manipulation; user-select:none; -webkit-user-select:none;
     display:flex; align-items:center; justify-content:center; }
-  canvas#view{ image-rendering:pixelated; image-rendering:crisp-edges; touch-action:none; display:block; }
+  canvas#view{ image-rendering:pixelated; image-rendering:crisp-edges; touch-action:none; display:block;
+    position:fixed; left:0; top:0; transform-origin:0 0; will-change:transform; }
+  /* the EBT LIST, mirrored as a HUD while the camera is zoomed in */
+  #listHud{ position:fixed; left:max(8px, env(safe-area-inset-left)); top:max(56px, calc(env(safe-area-inset-top) + 46px)); z-index:11;
+    width:78px; height:auto; image-rendering:pixelated; border:2px solid rgba(245,197,24,.7); border-radius:6px;
+    background:#020204; pointer-events:none; display:none; }
   #loading{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
     font-weight:900; letter-spacing:.2em; color:var(--gold); z-index:30; background:var(--ink); }
   /* Controls sit in the two bottom corners and stay out of the drag zone in
