@@ -118,16 +118,37 @@ export class RunnerCar {
     Object.assign(this, { route, s: s0, d: -route.hw(s0) / 2, v: 0, dv: 0, targetD: -route.hw(s0) / 2, stun: 0, invuln: 0, brakeT: 0, offBrake: 1, accel: 0 });
   }
   /** tight + snappy: the lateral position is a stiff critically-damped spring on the finger/keys */
-  step(dt, { targetD, brake, gas = 0, top = 30, cruise, stopAt }) {
+  step(dt, { targetD, brake, gas = 0, top = 30, cruise, stopAt, steer, lanes }) {
     const hw = this.route.hw(this.s), lim = hw - PLAYER.halfW - 0.05;
-    this.targetD = Math.max(-lim, Math.min(lim, targetD));
-    const w = 16; // spring stiffness (rad/s): ~0.2 s to settle, no overshoot
-    const acc = w * w * (this.targetD - this.d) - 2 * w * this.dv;
-    // a car can't glide sideways standing still: side speed grows with road speed (a crawl at a standstill,
-    // the full snap at speed)
-    const side = Math.min(18, 3 + Math.abs(this.v) * 0.6);
-    this.dv += acc * dt; this.dv = Math.max(-side, Math.min(side, this.dv));
-    this.d += this.dv * dt; this.d = Math.max(-lim, Math.min(lim, this.d));
+    if (steer === undefined) {
+      // line mode (the QA autopilot): the lateral position is a stiff critically-damped spring on targetD
+      this.targetD = Math.max(-lim, Math.min(lim, targetD));
+      const w = 16; // spring stiffness (rad/s): ~0.2 s to settle, no overshoot
+      const acc = w * w * (this.targetD - this.d) - 2 * w * this.dv;
+      // a car can't glide sideways standing still: side speed grows with road speed
+      const side = Math.min(18, 3 + Math.abs(this.v) * 0.6);
+      this.dv += acc * dt; this.dv = Math.max(-side, Math.min(side, this.dv));
+      this.yaw = Math.atan2(this.dv, Math.max(Math.abs(this.v), 4)) * 0.9;
+    } else {
+      // the player: GTA Chinatown Wars handling. ◀ ▶ turn the nose (quicker at low speed, like a real car's lock);
+      // the car goes where it points. Let go and the lane guide straightens you up into the nearest of the four
+      // lanes (your parking lane, your lane, the oncoming lane, the far parking lane).
+      const sp = Math.abs(this.v), rate = 2.6 / (1 + sp * 0.045);
+      this.yaw = this.yaw || 0;
+      if (steer) this.yaw += steer * rate * dt * (this.v < -0.1 ? -1 : 1);
+      else {
+        const ls = lanes && lanes.length ? lanes : [this.d], lane = ls.reduce((a, c) => Math.abs(c - this.d) < Math.abs(a - this.d) ? c : a, ls[0]);
+        const want = Math.max(-0.22, Math.min(0.22, (lane - this.d) * 0.16)) * (this.v < -0.1 ? -1 : 1);
+        this.yaw += (want - this.yaw) * Math.min(1, dt * 4.5);
+      }
+      this.yaw = Math.max(-0.7, Math.min(0.7, this.yaw));
+      this.dv = this.v * Math.sin(this.yaw);
+      this.targetD = this.d;
+    }
+    // the four lanes are the road: the outermost lane is as far as you go (a scrape straightens you out)
+    const lo = lanes ? Math.max(-lim, Math.min(...lanes) - 0.4) : -lim, hi = lanes ? Math.min(lim, Math.max(...lanes) + 0.4) : lim;
+    this.d += this.dv * dt;
+    if (this.d < lo || this.d > hi) { this.d = Math.max(lo, Math.min(hi, this.d)); if (steer !== undefined) this.yaw *= 0.3; this.scrape = 0.2; }
 
     // speed: YOU drive it. GAS pulls (harder from low speed, easing off near the top), off the gas the car
     // coasts down on engine braking, BRAKE is progressive (a tap bites at ~40 %, holding builds to full in about
@@ -139,7 +160,7 @@ export class RunnerCar {
     if (this.stun > 0) { vmax = Math.min(vmax, 6); this.stun -= dt; }
     if (stopAt !== undefined && this.s < stopAt + 1) vmax = Math.min(vmax, stopAt - this.s > 0.4 ? Math.max(1.2, Math.sqrt(2 * 3.4 * (stopAt - this.s))) : 0);   // parking assist: eases you into the space
     const v0 = this.v;
-    const reversing = brake && (this.v < -0.05 || this.stopT > 0.35);
+    const reversing = brake && (this.v < -0.05 || this.stopT > 0.5);   // half a second at a standstill first
     if (reversing) {
       this.v = Math.max(-5, this.v - 3.5 * dt);                                   // back up, gently, to 11 mph
     } else if (brake) {
@@ -159,7 +180,7 @@ export class RunnerCar {
   }
   get pose() {
     const p = this.route.at(this.s, this.d);
-    p.a += Math.atan2(this.dv, Math.max(this.v, 4)) * 0.9; // nose into the dodge
+    p.a += this.yaw || 0;   // where the nose points
     return p;
   }
 }
@@ -498,8 +519,11 @@ export class World {
       // cyclists turn around at the ends of the mapped street instead of piling up there
       if (e.scenery && e.v && (e.s < 3 || e.s > r.length - 3)) { e.v = Math.abs(e.v) * (e.s < 3 ? 1 : -1); e.s = Math.max(3, Math.min(r.length - 3, e.s)); }
       if (e.dir === -1 && e.s < car.s - 40 && !seen(e)) e.alive = false;  // oncoming car passed and out of view
-      if (e.dir === 1 && !e.parked && !e.scenery && e.s > r.length - 30 && !seen(e)) e.alive = false; // drove on out of view
-      if (e.s < -20 || e.s > r.length + 20) e.alive = false;           // off the mapped street either way
+      if (e.dir === 1 && !e.parked && !e.scenery && e.s > r.length - 30) {
+        if (!seen(e)) e.alive = false;                                 // drove on out of view
+        else if (e.s > r.length - 12) Object.assign(e, { parked: true, v: 0, backup: false });   // the street ends in sight: it pulls up there
+      }
+      if ((e.s < -20 || e.s > r.length + 20) && (!seen(e) || e.s < -60 || e.s > r.length + 60)) e.alive = false;   // off the mapped street, out of sight
 
       // collision / near miss (route space box test)
       if (e.solid && !e.scenery && !e.hitDone) {
