@@ -39,3 +39,15 @@ export const HAP = {
   parked: [0, 30, 55, 30, 55, 60],
   busted: [0, 60, 80, 60, 80, 200],
 };
+
+/** iPhone: since iOS 26.5 Safari only plays the switch haptic for a REAL tap on a switch's label (the scripted
+ *  label.click() above no longer buzzes). So every button gets an invisible label + switch laid over it: your
+ *  finger taps the label, the switch flips, the phone ticks. (It fires on the tap itself, as iOS does for any
+ *  switch; a long hold that iOS doesn't count as a tap gets no tick.) Android keeps navigator.vibrate. */
+export function tapHaptic(el) {
+  if (VIBRATE || !el || el.querySelector(':scope > .hapl')) return;
+  const lb = document.createElement('label'); lb.className = 'hapl'; lb.setAttribute('aria-hidden', 'true');
+  const inp = document.createElement('input'); inp.type = 'checkbox'; inp.setAttribute('switch', ''); inp.tabIndex = -1;
+  inp.addEventListener('click', (e) => e.stopPropagation());        // the label's own click is the one the button hears
+  lb.appendChild(inp); el.appendChild(lb);
+}

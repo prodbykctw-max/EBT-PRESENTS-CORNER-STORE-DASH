@@ -29,6 +29,10 @@
   .sideBtns button:active{ background:var(--gold); color:var(--ink); transform:translateY(1px); }
   /* Floating joystick: the whole screen is the controller (see bindTouch).
      The ring appears where the thumb lands; the knob follows it. */
+  /* iPhone haptics: an invisible switch label over each button (see csd.js) */
+  button{ position:relative; }
+  .hapl{ position:absolute; inset:0; border-radius:inherit; z-index:2; }
+  .hapl input{ position:absolute; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; margin:0; }
   #stick{ position:fixed; left:0; top:0; width:96px; height:96px; border-radius:50%; z-index:11;
     border:3px solid rgba(245,197,24,.55); background:rgba(30,35,64,.28); pointer-events:none;
     opacity:0; transition:opacity .12s; }
@@ -1329,6 +1333,14 @@ function init(){
   });
   el("ovPause").addEventListener("click",function(){ hide("ovPause"); if(S.mode==="paused"){S.mode="play"; last=0;} });
   bindTouch();
+  // iPhone: since iOS 26.5 only a REAL tap on a switch's label plays the haptic (a scripted label.click() no longer
+  // buzzes), so every button gets an invisible label + switch laid over it: your tap flips it and the phone ticks.
+  if(!HAPTICS) Array.prototype.forEach.call(document.querySelectorAll("button"),function(b){
+    var lb=document.createElement("label"), inp=document.createElement("input");
+    lb.className="hapl"; lb.setAttribute("aria-hidden","true"); inp.type="checkbox"; inp.setAttribute("switch",""); inp.tabIndex=-1;
+    inp.addEventListener("click",function(e){ e.stopPropagation(); });   // the label's own click is the one the button hears
+    lb.appendChild(inp); b.appendChild(lb);
+  });
   requestAnimationFrame(loop);
 }
 window.__csd={ get S(){return S;}, get player(){return player;}, get bully(){return bully;}, get items(){return ITEMS;},

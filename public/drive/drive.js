@@ -16,7 +16,7 @@ import { Crowd } from './crowd.js';
 import { Streetcars } from './tram.js';
 import { Signals } from './signals.js';
 import { Birds } from './birds.js';
-import { haptic, HAP } from './haptics.js';
+import { haptic, HAP, tapHaptic } from './haptics.js';
 import { Look } from './look.js';
 import { WIND } from './landscape.js';
 import { ImpactFX } from './fx.js';
@@ -44,7 +44,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   for (const ev of ['contextmenu', 'selectstart']) root.addEventListener(ev, (e) => e.preventDefault());
   // a held finger is driving, never a long-press menu, magnifier or text selection (iOS ignores CSS alone for
   // these on a long hold): claim every touch except on the two tap-to-click buttons (skip, drive again)
-  root.addEventListener('touchstart', (e) => { if (!e.target.closest?.('[data-skip], [data-pause], .drive-paused button, .drive-busted button')) e.preventDefault(); }, { passive: false });
+  root.addEventListener('touchstart', (e) => { if (!e.target.closest?.('[data-skip], [data-pause], .drive-paused button, .drive-busted button, .dp')) e.preventDefault(); }, { passive: false });   // (buttons: a real tap, so iOS plays its switch haptic)
   root.innerHTML = '<div class="drive-loading"><b>AUBURN AVE</b><span>Get to the corner store</span><i></i></div>';
   mount.appendChild(root);
   const bar = root.querySelector('.drive-loading i');
@@ -221,9 +221,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       keys.add(k); b.classList.add('on');
     };
     const release = () => { keys.delete(k); b.classList.remove('on'); };
-    b.addEventListener('touchstart', (e) => { for (const t of e.changedTouches) fingers.add(t.identifier); press(); e.preventDefault(); }, { passive: false });
-    const lift = (e) => { for (const t of e.changedTouches) fingers.delete(t.identifier); if (!fingers.size) release(); e.preventDefault(); };
-    b.addEventListener('touchend', lift, { passive: false }); b.addEventListener('touchcancel', lift, { passive: false });
+    b.addEventListener('touchstart', (e) => { for (const t of e.changedTouches) fingers.add(t.identifier); press(); }, { passive: true });
+    const lift = (e) => { for (const t of e.changedTouches) fingers.delete(t.identifier); if (!fingers.size) release(); };
+    b.addEventListener('touchend', lift); b.addEventListener('touchcancel', lift);
+    tapHaptic(b);
     b.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') return; press(); try { b.setPointerCapture(e.pointerId); } catch {} e.preventDefault(); });
     const up = (e) => { if (e.pointerType !== 'touch') release(); };
     b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
@@ -312,6 +313,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const card = document.createElement('div'); card.className = 'drive-busted';
     card.innerHTML = '<h2>BUSTED</h2><p>You hit a police car. You’re going to jail.</p><button type="button">Drive again</button>';
     card.querySelector('button').addEventListener('click', () => { haptic(HAP.tap); finish(); }, { once: true });
+    tapHaptic(card.querySelector('button'));
     root.appendChild(card);
     if (QA && window.__botReport) setTimeout(() => { if (root.isConnected) finish(); }, 2500);   // the autopilot doesn't wait for a tap
   }
@@ -473,6 +475,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   root.querySelector('[data-pause]').addEventListener('click', () => { haptic(HAP.tap); setPaused(true); });
   root.querySelector('[data-resume]').addEventListener('click', () => { haptic(HAP.tap); setPaused(false); });
   root.querySelector('[data-quit]').addEventListener('click', skip);
+  for (const el of root.querySelectorAll('[data-skip], [data-pause], [data-resume], [data-quit]')) tapHaptic(el);
   // leaving the app mid-drive pauses it (a call, a text, the home screen): nothing happens while you're away
   const onHide = () => { if (document.hidden && (state === 'driving' || state === 'countdown')) setPaused(true); };
   document.addEventListener('visibilitychange', onHide);
