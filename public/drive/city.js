@@ -64,14 +64,15 @@ export const HERO_BOX = { x0: -21, x1: 35, y0: -12, y1: 4 };
 const inHero = (x, y) => x > HERO_BOX.x0 - 4 && x < HERO_BOX.x1 + 4 && y > HERO_BOX.y0 - 6 && y < HERO_BOX.y1 + 2;
 
 // ---------------- buildings: merged walls with a procedural facade shader + textured roofs ----------------
+// GTA Chinatown Wars palette: comic, sunny and saturated rather than photographic
 const PALETTE = { // [r,g,b] wall tints by style
-  brick: [[0.55, 0.27, 0.2], [0.48, 0.24, 0.19], [0.62, 0.36, 0.26], [0.42, 0.22, 0.18]],
-  stucco: [[0.78, 0.74, 0.66], [0.7, 0.66, 0.58], [0.82, 0.8, 0.74], [0.64, 0.6, 0.55]],
-  office: [[0.6, 0.6, 0.6], [0.52, 0.53, 0.55], [0.7, 0.68, 0.64], [0.45, 0.47, 0.5]],
-  tower: [[0.3, 0.36, 0.42], [0.26, 0.3, 0.33], [0.36, 0.4, 0.44], [0.22, 0.26, 0.3]],
+  brick: [[0.78, 0.3, 0.2], [0.66, 0.24, 0.17], [0.86, 0.42, 0.26], [0.58, 0.2, 0.2]],
+  stucco: [[0.62, 0.86, 0.72], [0.98, 0.72, 0.52], [0.96, 0.62, 0.7], [0.98, 0.88, 0.5], [0.58, 0.78, 0.95]],
+  office: [[0.9, 0.82, 0.62], [0.55, 0.72, 0.9], [0.95, 0.6, 0.48], [0.7, 0.86, 0.76]],
+  tower: [[0.2, 0.55, 0.65], [0.22, 0.42, 0.7], [0.3, 0.62, 0.62], [0.26, 0.36, 0.58]],
 };
 
-const ROOFS = [[0.34, 0.34, 0.35], [0.46, 0.45, 0.43], [0.93, 0.93, 0.9], [0.86, 0.87, 0.88], [0.52, 0.47, 0.4], [0.28, 0.29, 0.31]];
+const ROOFS = [[0.38, 0.62, 0.62], [0.82, 0.46, 0.3], [0.94, 0.94, 0.9], [0.6, 0.62, 0.66], [0.9, 0.78, 0.46], [0.4, 0.44, 0.6]];
 
 function styleOf(b, r) {
   if (b.h >= 45) return 3;                                  // glass tower
@@ -90,7 +91,7 @@ function buildBuildings(W, tex, ground) {
     let cx = 0, cy = 0; for (const [x, y] of pts) { cx += x; cy += y; } cx /= pts.length; cy /= pts.length;
     if (inHero(cx, cy)) continue;                           // the hand-built row replaces these lots
     const r = hash(b.id % 2147483647), style = styleOf(b, r);
-    const tint = Object.values(PALETTE)[style][(r * 4) | 0];
+    const pal = Object.values(PALETTE)[style], tint = pal[(r * pal.length) | 0];
     const z0 = b.base + LEVEL.TERRAIN - 0.6 + (b.canopy ? b.h - 0.6 : (b.minH || 0)), z1 = b.base + b.h; // walls start below grade: never float
     // walls
     let run = 0;

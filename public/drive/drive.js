@@ -17,6 +17,7 @@ import { Streetcars } from './tram.js';
 import { Signals } from './signals.js';
 import { Birds } from './birds.js';
 import { haptic, HAP } from './haptics.js';
+import { Look } from './look.js';
 import { WIND } from './landscape.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
@@ -82,7 +83,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   renderer.toneMapping = THREE.CustomToneMapping; renderer.toneMappingExposure = 1.0;
   root.prepend(renderer.domElement);
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(42, 1, 1, 3000);
+  const camera = new THREE.PerspectiveCamera(42, 1, 4, 3000);   // near 4 m: the camera never gets closer, and the ink pass needs the depth precision
+  const comic = new Look(renderer, scene, camera, { mobile: MOBILE });   // GTA Chinatown Wars ink + comic shading
 
   // shared tiling textures come from the hero glTF materials, so they download once
   const tex = {};
@@ -108,7 +110,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   scene.add(city.group, hero.scene);
 
   // lights: the sun follows the car so its shadow map stays sharp where you are
-  const hemi = new THREE.HemisphereLight(0xbcd3ec, 0x5d574f, 1.2);
+  const hemi = new THREE.HemisphereLight(0xcfe3ff, 0x7a6a55, 1.2);   // warm bounce: flat, sunny comic light
   const sun = new THREE.DirectionalLight(0xffffff, 3);
   sun.castShadow = true; sun.shadow.mapSize.set(MOBILE ? 1024 : 2048, MOBILE ? 1024 : 2048);
   Object.assign(sun.shadow.camera, { left: -110, right: 110, top: 110, bottom: -110, near: 1, far: 600 });
@@ -186,18 +188,16 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   };
   const ku = (e) => { const k = KEYMAP[e.code]; if (k) keys.delete(k); };
   addEventListener('keydown', kd); addEventListener('keyup', ku);
-  const laneOf = (d) => Math.round(d / 3.4);   // which lane-width band the car is steering into (for haptic ticks)
-  let steerLane = null;
-  /** held ◀ / ▶ slide the car's line across the road: brisker the faster you go, like turning into a lane */
-  const steerInput = (dt) => {
-    const dir = (keys.has('left') ? 1 : 0) - (keys.has('right') ? 1 : 0);
-    if (!dir) { steerLane = null; return; }
-    const hw = route.hw(car.s), lim = hw - 1.03, rate = 3.4 + Math.min(Math.abs(car.v), 30) * 0.13;
-    const want = car.targetD + dir * rate * dt;
-    car.targetD = Math.max(-lim, Math.min(lim, want));
-    if (want !== car.targetD) haptic(HAP.edge, 400);                                 // up against the curb
-    const ln = laneOf(car.targetD); if (steerLane !== null && ln !== steerLane) haptic(HAP.lane, 70);   // a tick per lane line
-    steerLane = ln;
+  // the four lanes (your parking lane, your lane, the oncoming lane, the far parking lane, where the street has them):
+  // the drive guide the car settles into when you let go of the steering, and the edges of the road you drive on
+  const laneCentres = (s) => [route.parkD(s, -1), route.lane(s, 0), route.lane(s, 1), route.parkD(s, 1)].filter((v) => v !== null);
+  const BOT = new URLSearchParams(location.search).has('bot');   // the QA autopilot steers by line (car.targetD)
+  let laneWas = null;
+  const steerFeel = () => {                                       // a haptic tick each time you cross into a new lane
+    const cs = laneCentres(car.s), i = cs.reduce((b, c, k) => Math.abs(c - car.d) < Math.abs(cs[b] - car.d) ? k : b, 0);
+    if (laneWas !== null && i !== laneWas) haptic(HAP.lane, 90);
+    laneWas = i;
+    if (car.scrape > 0) { haptic(HAP.edge, 400); car.scrape = 0; }
   };
   for (const b of root.querySelectorAll('[data-k]')) {
     // held until the finger lifts, even if the thumb drifts off the button (pointer capture), with a tick of haptics
@@ -219,7 +219,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
   const coarse = MOBILE;
   const resize = () => {
-    const w = root.clientWidth, h = root.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h;
+    const w = root.clientWidth, h = root.clientHeight; renderer.setSize(w, h, false); comic.resize(); camera.aspect = w / h;
     camera.fov = THREE.MathUtils.clamp(2 * THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(26)) / camera.aspect)), 44, 70);
     if (coarse) camera.setViewOffset(w, h, 0, h * 0.1, w, h); else camera.clearViewOffset(); // car clears the buttons
     camera.updateProjectionMatrix();
@@ -297,7 +297,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   function frame() {
     raf = nextFrame(frame);
     const now = performance.now(), dt = Math.min((now - last) / 1000, 0.05); last = now;
-    if (api.pause) { renderer.render(scene, camera); return; }   // QA: freeze-frame for look-dev
+    if (api.pause) { comic.render(); return; }   // QA: freeze-frame for look-dev
     hornT -= dt;
     if (state === 'countdown') {
       countdown -= dt;
@@ -305,7 +305,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       if (countdown <= 0) { state = 'driving'; flash('GO!', 700); hud.hint.textContent = ''; haptic(HAP.go); }
     }
     const braking = keys.has('down');
-    if (state === 'driving') steerInput(dt);
+    if (state === 'driving') steerFeel();
     const approaching = car.s > spot.s - 95;
     if (state === 'driving' || state === 'parked' || state === 'late' || state === 'busted') {
       acc += dt;
@@ -313,7 +313,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         acc -= FIXED;
         car.step(FIXED, {
           targetD: car.targetD, brake: braking || state !== 'driving', gas: state === 'driving' && keys.has('gas') ? 1 : 0,
-          stopAt: approaching ? spot.s : undefined,
+          stopAt: approaching ? spot.s : undefined, lanes: laneCentres(car.s),
+          steer: BOT ? undefined : state === 'driving' ? (keys.has('left') ? 1 : 0) - (keys.has('right') ? 1 : 0) : 0,
         });
       }
     }
@@ -384,7 +385,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     CUT.uCutPos.value.copy(carRig.position);
 
     // camera: high and behind along the road (runner framing), rising and reaching further with speed
-    const v = car.v, h = 17 + v * 0.4, back = 14 + v * 0.45, ahead = 10 + v * 0.35; // car sits in the lower third
+    // GTA Chinatown Wars framing: steep, nearly overhead, ~30 % closer than before, pulling up with speed and
+    // leading the car so you see what's coming
+    const v = Math.max(0, car.v), h = (15 + v * 0.42) / 1.3, back = h * 0.34, ahead = 2 + v * 0.22;
     camA += Math.atan2(Math.sin(route.at(car.s + 6).a - camA), Math.cos(route.at(car.s + 6).a - camA)) * Math.min(1, dt * 3);
     const look = route.at(car.s + ahead, car.d * 0.35);
     let targetPos, targetLook;
@@ -423,7 +426,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     hud.light.className = 'drive-light' + (nl ? ' on ' + nl.aspect : '');
     if (nl) hud.lightDist.textContent = Math.round(nl.gap) + ' m';
     hud.tokens.textContent = tokens;
-    renderer.render(scene, camera);
+    comic.render();
   }
 
   function finish() {
@@ -438,9 +441,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   root.querySelector('[data-skip]').addEventListener('click', () => { haptic(HAP.tap); Object.assign(result, { hits, tokens, nearMisses }); finish(); });
   frame();
   // test hooks (drive QA + screenshots)
-  Object.assign(api, { car, world, route, spot, keys, result, audio, fx, city, 
+  Object.assign(api, { car, world, route, spot, keys, result, audio, fx, city, comic, 
     three: { scene, camera, carRig, THREE, renderer },
-    snapshot: (q = 0.85) => { renderer.render(scene, camera); return renderer.domElement.toDataURL('image/jpeg', q); } });
+    snapshot: (q = 0.85) => { comic.render(); return renderer.domElement.toDataURL('image/jpeg', q); } });
   // live getters (Object.assign would have frozen their values at assignment time)
   Object.defineProperties(api, { state: { get: () => state }, time: { get: () => t } });
   window.__drive = api;

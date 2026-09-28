@@ -117,13 +117,16 @@ obstacles and collisions line up exactly with what's painted on the road.
 
 ## Controls (mobile-first: the game is played on phones)
 
-You drive it (GTA Chinatown Wars layout): steer bottom left, pedals bottom right, all held buttons.
+You drive it, GTA Chinatown Wars style: steer bottom left, pedals bottom right, all held buttons. ◀ ▶ turn the
+car's nose and it goes where it points. Let go and the **lane guide** straightens you up into the nearest of the four
+lanes (your parking lane, your lane, the oncoming lane, the far parking lane); the outermost lanes are the edge of the
+road. The camera is near-overhead and about 30 % closer than before, pulling up with speed.
 
 | Phone | Keyboard | Action |
 | --- | --- | --- |
-| **◀ / ▶** | ← / → or A / D | Steer across the road while held (brisker the faster you go), a haptic tick per lane line |
+| **◀ / ▶** | ← / → or A / D | Turn the nose while held (tighter at low speed); a haptic tick per lane crossed |
 | **GAS** | ↑ / W | Accelerate (to 67 mph; corners cap it). Off the gas the car coasts down |
-| **BRAKE** | ↓ / S | Progressive brake; keep holding at a standstill to **reverse** (to 11 mph) |
+| **BRAKE** | ↓ / S | Progressive brake; keep holding for half a second at a standstill to **reverse** (to 11 mph) |
 | **HORN** | Space / H | Anyone on foot in your path up ahead hops clear, dogs bolt, the crowd flinches |
 | SKIP | | Skip the drive |
 
@@ -136,8 +139,14 @@ too. Sources and licenses are in `public/drive/sfx/CREDITS.txt`. The V8 is CC BY
 (DerMeehdrescher / Meehdrescher Studios) and **needs a credit in the game's credits**; the rest is CC0.
 `drive/tools/build_sfx.py` cuts, normalizes and makes the loops seamless (349 KB total).
 
-**Look:** a custom tone map (Khronos Neutral shoulder, then +40 % saturation and a touch of contrast) instead of
-AgX's desaturated film grade, for GTA Chinatown Wars-style colour at no extra render cost.
+**Look** (`look.js`, one full-screen pass): GTA Chinatown Wars comic style for the whole world.
+- Ink outlines on silhouettes (depth jumps) and on creases (Laplacian of 1/depth: building corners, roof lines, car
+  panels, curbs).
+- Light cel banding and lifted, sunny light.
+- A saturated custom tone map (Khronos Neutral shoulder, +40 % saturation, a touch of contrast) instead of AgX.
+- A comic building palette: warm brick, pastel stucco, coloured offices, teal glass.
+
+The camera's near plane is 4 m for depth precision.
 
 ## Budgets (hard limits)
 

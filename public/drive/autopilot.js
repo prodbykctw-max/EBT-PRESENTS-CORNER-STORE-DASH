@@ -144,6 +144,9 @@ export function autopilot(d, { log = console.log } = {}) {
     if (recorder.length > 40) recorder.shift();
     // no clear gap inside ~1.3 s at this speed: brake like a player would, and hold it (wait) until one opens
     if (mustBrake !== wantBrake) { wantBrake = mustBrake; act(() => { braking = mustBrake; key('ArrowDown', braking); key('ArrowUp', !braking); if (braking) report.brakes++; }); }
+    // stopped and waiting: off the brake (holding it at a standstill reverses), still off the gas
+    if (braking && car.v < 0.4 && car.v > -0.05) act(() => { if (braking) key('ArrowDown', false); });
+    if (braking && car.v >= 0.4) key('ArrowDown', true);
     const beg = H.find((h) => h.type === 'panhandler' && h.s - car.s < 55 && h.s > car.s && Math.abs(h.d - best.c) < 2.5);
     if (beg && d.time - lastHonk > 1.5) { lastHonk = d.time; act(() => { key('KeyH', true); key('KeyH', false); report.honks++; }); }
     // sanity: a stalled car, a car off the road, a broken pose
