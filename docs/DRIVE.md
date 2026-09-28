@@ -117,11 +117,14 @@ obstacles and collisions line up exactly with what's painted on the road.
 
 ## Controls (mobile-first: the game is played on phones)
 
+You drive it (GTA Chinatown Wars layout): steer bottom left, pedals bottom right, all held buttons.
+
 | Phone | Keyboard | Action |
 | --- | --- | --- |
-| Drag anywhere | ← / → (one lane per tap) | Dodge. The car follows your thumb 1:1 across the road (half the screen width = the full road) on a stiff, critically-damped spring, so it's tight and snappy |
-| **BRAKE** | ↓ / S | Full stop, held until you let go (wait for a gap) |
-| **HORN** | Space / H | Horn: clears panhandlers |
+| **◀ / ▶** | ← / → or A / D | Steer across the road while held (brisker the faster you go), a haptic tick per lane line |
+| **GAS** | ↑ / W | Accelerate (to 67 mph; corners cap it). Off the gas the car coasts down |
+| **BRAKE** | ↓ / S | Progressive brake; keep holding at a standstill to **reverse** (to 11 mph) |
+| **HORN** | Space / H | Anyone on foot in your path up ahead hops clear, dogs bolt, the crowd flinches |
 | SKIP | | Skip the drive |
 
 ## Sound
@@ -132,6 +135,9 @@ horn, token clink and crash (sheet metal, plus glass on big hits, over a low thu
 too. Sources and licenses are in `public/drive/sfx/CREDITS.txt`. The V8 is CC BY-SA 4.0
 (DerMeehdrescher / Meehdrescher Studios) and **needs a credit in the game's credits**; the rest is CC0.
 `drive/tools/build_sfx.py` cuts, normalizes and makes the loops seamless (349 KB total).
+
+**Look:** a custom tone map (Khronos Neutral shoulder, then +40 % saturation and a touch of contrast) instead of
+AgX's desaturated film grade, for GTA Chinatown Wars-style colour at no extra render cost.
 
 ## Budgets (hard limits)
 

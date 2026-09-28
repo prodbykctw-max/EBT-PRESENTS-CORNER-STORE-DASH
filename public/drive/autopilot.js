@@ -69,13 +69,14 @@ export function autopilot(d, { log = console.log } = {}) {
     return out;
   };
 
-  let braking = false, wantBrake = false, lastHonk = 0, slowFor = 0;
+  let gasOn = false, braking = false, wantBrake = false, lastHonk = 0, slowFor = 0;
   const recorder = [];   // flight recorder: the last ~2 s of decisions, attached to every hit
   const pending = [], act = (fn) => pending.push([performance.now() + REACTION * 1000, fn]);   // decided now, done a beat later
   const tick = () => {
     while (pending.length && pending[0][0] <= performance.now()) pending.shift()[1]();
     if (d.state !== 'driving') { if (d.state === 'parked' || d.state === 'late' || d.state === 'busted') finish(); return; }
     report.ticks++;
+    if (!gasOn && !braking) { gasOn = true; key('ArrowUp', true); }   // on the gas, like a player (off it to brake)
     const hw = route.hw(car.s), lim = hw - PLAYER.halfW - 0.05, H = hazards();
     const seenTokens = world.tokens.filter((tk) => {
       if (!tk.alive || tk.s < car.s || tk.s - car.s > 35) return false;
@@ -142,7 +143,7 @@ export function autopilot(d, { log = console.log } = {}) {
     recorder.push({ s: Math.round(car.s), d: +car.d.toFixed(2), v: +car.v.toFixed(1), line: +line.toFixed(2), best: +best.c.toFixed(2), soon: isFinite(best.soonest) ? +best.soonest.toFixed(2) : 'inf', brake: mustBrake, nose, seen: H.filter((h) => h.s > car.s && h.s - car.s < 40).map((h) => h.type[0] + Math.round(h.s - car.s) + '@' + h.d.toFixed(1)).join(' ') });
     if (recorder.length > 40) recorder.shift();
     // no clear gap inside ~1.3 s at this speed: brake like a player would, and hold it (wait) until one opens
-    if (mustBrake !== wantBrake) { wantBrake = mustBrake; act(() => { braking = mustBrake; key('ArrowDown', braking); if (braking) report.brakes++; }); }
+    if (mustBrake !== wantBrake) { wantBrake = mustBrake; act(() => { braking = mustBrake; key('ArrowDown', braking); key('ArrowUp', !braking); if (braking) report.brakes++; }); }
     const beg = H.find((h) => h.type === 'panhandler' && h.s - car.s < 55 && h.s > car.s && Math.abs(h.d - best.c) < 2.5);
     if (beg && d.time - lastHonk > 1.5) { lastHonk = d.time; act(() => { key('KeyH', true); key('KeyH', false); report.honks++; }); }
     // sanity: a stalled car, a car off the road, a broken pose
@@ -154,7 +155,7 @@ export function autopilot(d, { log = console.log } = {}) {
   const timer = setInterval(tick, 50);
   let done = false;
   function finish() {
-    if (done) return; done = true; clearInterval(timer); if (braking) key('ArrowDown', false);
+    if (done) return; done = true; clearInterval(timer); if (braking) key('ArrowDown', false); key('ArrowUp', false);
     report.traffic = { ...world.stats };
     log('BOT DONE', JSON.stringify({ popIn: report.popIn.length, popOut: report.popOut.length, teleports: report.teleports.length, hits: report.hits.length, errors: report.errors.length, stalls: report.stalls, offroad: report.offroad, brakes: report.brakes, honks: report.honks }));
   }

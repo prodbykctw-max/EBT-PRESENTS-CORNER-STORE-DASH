@@ -19,19 +19,9 @@
 @keyframes drive-busted-in { from { opacity: 0; } to { opacity: 1; } }
 .drive-hint { position: absolute; bottom: 120px; left: 0; right: 0; text-align: center; font-weight: 700; font-size: 18px; text-shadow: 0 2px 6px #000; pointer-events: none; }
 /* touch controls: the whole screen is the steering zone; buttons sit on top of it, bottom right */
-.drive-steer { position: absolute; inset: 0; display: none; touch-action: none; }
-.drive-knob { position: absolute; width: 0; height: 0; pointer-events: none; opacity: 0; transition: opacity .12s; }
-.drive-knob.on { opacity: 1; }
-.drive-knob::before { content: ''; position: absolute; left: -70px; top: -4px; width: 140px; height: 8px; border-radius: 4px; background: rgba(255,255,255,.28); }
-.drive-knob i { position: absolute; left: -24px; top: -24px; width: 48px; height: 48px; border-radius: 50%; background: rgba(255,212,0,.85); box-shadow: 0 2px 10px rgba(0,0,0,.5); transform: translateX(var(--dx, 0px)); }
-.drive-touch { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); display: none; flex-direction: column; align-items: flex-end; gap: 12px; }
-.drive-touch button { border-radius: 50%; border: 2px solid rgba(255,255,255,.4); background: rgba(10,12,16,.6); color: #fff; font-weight: 900; letter-spacing: .04em; touch-action: none; }
-.drive-touch .brake { width: 92px; height: 92px; font-size: 15px; }
-.drive-touch .horn { width: 64px; height: 64px; font-size: 12px; margin-right: 14px; }
-.drive-touch button:active { background: rgba(255,212,0,.5); }
 .drive-tip { position: absolute; left: 0; right: 0; bottom: 36%; text-align: center; font-weight: 800; font-size: 17px; text-shadow: 0 2px 8px #000; pointer-events: none; display: none; animation: tipfade 5s forwards; }
 @keyframes tipfade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
-@media (pointer: coarse) { .drive-touch, .drive-steer, .drive-tip { display: flex; } .drive-tip { display: block; } .drive-box { min-width: 64px; padding: 4px 8px; } .drive-box b { font-size: 16px; } }
+@media (pointer: coarse) { .drive-pad { display: flex; } .drive-tip { display: block; } .drive-box { min-width: 64px; padding: 4px 8px; } .drive-box b { font-size: 16px; } }
 .drive-skip { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 12px; padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.2); background: rgba(10,12,16,.7); color: #fff; font-weight: 800; }
 .drive-loading { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; text-align: center; background: #101318; z-index: 2; }
 .drive-loading b { font: 900 34px/1 system-ui, sans-serif; letter-spacing: .12em; color: #ffd400; }
@@ -52,3 +42,26 @@
 .drive-light.Y i:nth-child(2) { background: #ffbe14; box-shadow: 0 0 10px #ffbe14; }
 .drive-light.G i:nth-child(3) { background: #26e070; box-shadow: 0 0 10px #26e070; }
 .drive-light b { font: 700 10px/1 system-ui, sans-serif; opacity: .8; margin-top: 1px; }
+
+/* GTA Chinatown Wars-style touch controls: white-ringed dark discs. Steer bottom left, pedals bottom right. */
+.drive-pad { position: absolute; bottom: max(16px, env(safe-area-inset-bottom)); display: none; gap: 12px; align-items: flex-end; z-index: 3; }
+.drive-steerpad { left: max(14px, env(safe-area-inset-left)); }
+.drive-pedals { right: max(14px, env(safe-area-inset-right)); flex-wrap: wrap; justify-content: flex-end; width: 196px; }
+.drive-pad .dp { position: relative; border-radius: 50%; border: 3px solid rgba(255,255,255,.92); background: rgba(12,14,20,.55);
+  box-shadow: 0 0 0 2px rgba(0,0,0,.35), inset 0 0 0 4px rgba(0,0,0,.25); color: #fff; touch-action: none; display: grid; place-content: center;
+  font: 900 14px/1 system-ui, sans-serif; letter-spacing: .05em; transition: transform .06s, background .06s; }
+.drive-pad .dp::after { content: ''; position: absolute; inset: 6px; border-radius: 50%; border: 2px dashed rgba(255,255,255,.35); pointer-events: none; }
+.drive-pad .dp.on { background: rgba(255,212,0,.55); transform: scale(.94); }
+.drive-pad .dp svg { width: 34px; height: 34px; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.drive-steerpad .dp { width: 84px; height: 84px; }
+.drive-steerpad .dp svg { width: 40px; height: 40px; }
+.drive-pedals .horn { width: 62px; height: 62px; margin-right: 110px; }
+.drive-pedals .horn svg { width: 24px; height: 24px; }
+.drive-pedals .horn b { font-size: 9px; margin-top: 1px; }
+.drive-pedals .brake { width: 86px; height: 86px; }
+.drive-pedals .brake small { font-size: 8px; opacity: .8; margin-top: 3px; }
+.drive-pedals .gas { width: 98px; height: 98px; font-size: 17px; border-color: #7dff9a; }
+.drive-pedals .gas.on { background: rgba(60,220,110,.55); }
+.drive-pedals .brake.on { background: rgba(255,60,60,.55); }
+@media (orientation: landscape) and (pointer: coarse) { .drive-steerpad .dp { width: 76px; height: 76px; } .drive-pedals { width: 190px; } }
+@media (pointer: coarse) { .drive-pad { display: flex; } }

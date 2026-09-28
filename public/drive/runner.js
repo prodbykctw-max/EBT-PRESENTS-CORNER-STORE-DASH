@@ -118,29 +118,41 @@ export class RunnerCar {
     Object.assign(this, { route, s: s0, d: -route.hw(s0) / 2, v: 0, dv: 0, targetD: -route.hw(s0) / 2, stun: 0, invuln: 0, brakeT: 0, offBrake: 1, accel: 0 });
   }
   /** tight + snappy: the lateral position is a stiff critically-damped spring on the finger/keys */
-  step(dt, { targetD, brake, cruise, stopAt }) {
+  step(dt, { targetD, brake, gas = 0, top = 30, cruise, stopAt }) {
     const hw = this.route.hw(this.s), lim = hw - PLAYER.halfW - 0.05;
     this.targetD = Math.max(-lim, Math.min(lim, targetD));
     const w = 16; // spring stiffness (rad/s): ~0.2 s to settle, no overshoot
     const acc = w * w * (this.targetD - this.d) - 2 * w * this.dv;
     // a car can't glide sideways standing still: side speed grows with road speed (a crawl at a standstill,
     // the full snap at speed)
-    const side = Math.min(18, 3 + this.v * 0.6);
+    const side = Math.min(18, 3 + Math.abs(this.v) * 0.6);
     this.dv += acc * dt; this.dv = Math.max(-side, Math.min(side, this.dv));
     this.d += this.dv * dt; this.d = Math.max(-lim, Math.min(lim, this.d));
 
-    // speed: cruise ramps up; corners, brake, stun and the parking stop pull it down
-    let vt = cruise * cornerFactor(this.route, this.s, this.v);
-    // BRAKE is progressive: a tap bites at ~40 %, holding it builds to full (18 m/s²) in about a quarter
-    // second and holds you stopped. Let go and there's a beat before the engine pulls again.
-    this.brakeT = brake ? this.brakeT + dt : 0; this.offBrake = brake ? 0 : this.offBrake + dt;
-    if (brake) vt = 0;
-    if (this.stun > 0) { vt = Math.min(vt, 6); this.stun -= dt; }
-    if (stopAt !== undefined) vt = Math.min(vt, Math.sqrt(Math.max(0, 2 * 3.4 * (stopAt - this.s))));
-    const bite = Math.min(1, 0.4 + this.brakeT * 2.4);
-    const a = vt > this.v ? (this.offBrake < 0.12 ? 0 : 6.5 * Math.min(1, 0.5 + this.offBrake)) : (brake ? 18 * bite : 9);
+    // speed: YOU drive it. GAS pulls (harder from low speed, easing off near the top), off the gas the car
+    // coasts down on engine braking, BRAKE is progressive (a tap bites at ~40 %, holding builds to full in about
+    // a quarter second), and holding BRAKE at a standstill backs up. `cruise` (old auto-drive) still works for tools.
+    if (cruise !== undefined && !gas && !brake) { gas = cruise > 0 ? 1 : 0; top = cruise || top; }
+    this.brakeT = brake ? this.brakeT + dt : 0;
+    this.stopT = brake && Math.abs(this.v) < 0.4 ? (this.stopT || 0) + dt : 0;
+    let vmax = top * cornerFactor(this.route, this.s, Math.max(0, this.v));
+    if (this.stun > 0) { vmax = Math.min(vmax, 6); this.stun -= dt; }
+    if (stopAt !== undefined && this.s < stopAt + 1) vmax = Math.min(vmax, stopAt - this.s > 0.4 ? Math.max(1.2, Math.sqrt(2 * 3.4 * (stopAt - this.s))) : 0);   // parking assist: eases you into the space
     const v0 = this.v;
-    this.v += Math.sign(vt - this.v) * Math.min(Math.abs(vt - this.v), a * dt);
+    const reversing = brake && (this.v < -0.05 || this.stopT > 0.35);
+    if (reversing) {
+      this.v = Math.max(-5, this.v - 3.5 * dt);                                   // back up, gently, to 11 mph
+    } else if (brake) {
+      const bite = Math.min(1, 0.4 + this.brakeT * 2.4), dec = 18 * bite * dt;
+      this.v = this.v > 0 ? Math.max(0, this.v - dec) : Math.min(0, this.v + dec);
+    } else if (gas) {
+      if (this.v < 0) this.v = Math.min(0, this.v + 12 * dt);                    // stop the reverse first
+      else if (this.v < vmax) this.v = Math.min(vmax, this.v + (7.5 - 4 * this.v / top) * gas * dt);
+      else this.v = Math.max(vmax, this.v - 9 * dt);                            // over the corner / assist limit
+    } else {
+      const coast = this.v > vmax ? 9 : 1.6;                                    // engine braking
+      this.v = this.v > 0 ? Math.max(0, this.v - coast * dt) : Math.min(0, this.v + 3 * dt);
+    }
     this.accel = this.accel * 0.85 + ((this.v - v0) / dt) * 0.15;   // smoothed, for weight transfer / brake lights
     this.s += this.v * dt;
     this.invuln = Math.max(0, this.invuln - dt);
@@ -419,7 +431,19 @@ export class World {
         continue;
       }
       if (!e.parked) e.s += (e.v || 0) * dt;
-      if (e.worker && !e.leaving) this.work(e, dt, car);
+      // HORN clears the way: anyone on foot in your path up ahead hops out of it (sideways, away from your line)
+      // and waits a beat; a dog bolts for the sidewalk
+      if (ON_FOOT.has(e.type) && hornT > 0 && !e.leaving && e.s > car.s - 2 && e.s - car.s < 40 && Math.abs(e.d - car.d) < 2) {
+        if (e.type === 'dog') { if (!e.bolt) Object.assign(e, { crossing: 0, bolt: Math.sign(e.d - car.d || 1) }); }
+        else Object.assign(e, { dodge: Math.sign(e.d - car.d || 1), dodgeT: 2.2 });
+      }
+      if (e.dodgeT > 0) {
+        e.dodgeT -= dt;
+        if (Math.abs(e.d - car.d) < 2.3 || Math.abs(e.s - car.s) > 6) e.d += e.dodge * 3.4 * dt * (Math.abs(e.d - car.d) < 2.3 ? 1 : 0);
+        e.hd = e.dodge > 0 ? Math.PI / 2 : -Math.PI / 2; e.v = 0;
+        if (e.dodgeT <= 0) e.dodge = 0;
+      }
+      else if (e.worker && !e.leaving) this.work(e, dt, car);
       else if (e.type === 'dog') this.dog(e, dt, car, seen);
       else if (e.type === 'panhandler' || e.type === 'seller') {
         if (e.leaving) { e.d += (e.home2 - e.d) * Math.min(1, dt * 3); }
