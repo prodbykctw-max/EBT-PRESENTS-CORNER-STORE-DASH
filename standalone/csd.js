@@ -1181,6 +1181,14 @@ function init(){
   });
   el("ovPause").addEventListener("click",function(){ hide("ovPause"); if(S.mode==="paused"){S.mode="play"; last=0;} });
   bindTouch();
+  // iPhone: since iOS 26.5 only a REAL tap on a switch's label plays the haptic (a scripted label.click() no longer
+  // buzzes), so every button gets an invisible label + switch laid over it: your tap flips it and the phone ticks.
+  if(!HAPTICS) Array.prototype.forEach.call(document.querySelectorAll("button"),function(b){
+    var lb=document.createElement("label"), inp=document.createElement("input");
+    lb.className="hapl"; lb.setAttribute("aria-hidden","true"); inp.type="checkbox"; inp.setAttribute("switch",""); inp.tabIndex=-1;
+    inp.addEventListener("click",function(e){ e.stopPropagation(); });   // the label's own click is the one the button hears
+    lb.appendChild(inp); b.appendChild(lb);
+  });
   requestAnimationFrame(loop);
 }
 window.__csd={ get S(){return S;}, get player(){return player;}, get bully(){return bully;}, get items(){return ITEMS;},

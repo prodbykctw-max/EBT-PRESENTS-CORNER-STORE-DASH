@@ -89,3 +89,7 @@
 .drive-paused button { justify-self: center; min-width: 200px; padding: 14px 24px; border-radius: 12px; border: 0; background: #ffd400; color: #111; font: 800 18px system-ui, sans-serif; }
 .drive-paused button.alt { background: rgba(255,255,255,.14); color: #fff; font-size: 15px; }
 .drive-root.is-paused .drive-pad, .drive-root.is-paused .drive-pausebtn { visibility: hidden; }
+/* iPhone haptics: an invisible switch label over each button (see haptics.js tapHaptic) */
+.hapl { position: absolute; inset: 0; border-radius: inherit; z-index: 2; -webkit-tap-highlight-color: transparent; }
+.hapl input { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; margin: 0; }
+.drive-skip, .drive-paused button, .drive-busted button { position: relative; }
