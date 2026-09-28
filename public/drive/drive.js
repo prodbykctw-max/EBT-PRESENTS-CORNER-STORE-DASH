@@ -44,7 +44,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   for (const ev of ['contextmenu', 'selectstart']) root.addEventListener(ev, (e) => e.preventDefault());
   // a held finger is driving, never a long-press menu, magnifier or text selection (iOS ignores CSS alone for
   // these on a long hold): claim every touch except on the two tap-to-click buttons (skip, drive again)
-  root.addEventListener('touchstart', (e) => { if (!e.target.closest?.('[data-skip], .drive-busted button')) e.preventDefault(); }, { passive: false });
+  root.addEventListener('touchstart', (e) => { if (!e.target.closest?.('[data-skip], [data-pause], .drive-paused button, .drive-busted button')) e.preventDefault(); }, { passive: false });
   root.innerHTML = '<div class="drive-loading"><b>AUBURN AVE</b><span>Get to the corner store</span><i></i></div>';
   mount.appendChild(root);
   const bar = root.querySelector('.drive-loading i');
@@ -180,7 +180,19 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const keys = new Set();
   let hornT = 0;
   const honk = () => { if (hornT <= 0) { audio.horn(); hornT = 0.6; } };
+  // ---------- pause ----------
+  let paused = false;
+  const setPaused = (p) => {
+    if (p && !(state === 'driving' || state === 'countdown')) return;              // nothing to pause at the finish
+    paused = p; keys.clear();                                                     // no stuck gas / steering on resume
+    for (const b of root.querySelectorAll('[data-k].on')) b.classList.remove('on');
+    root.querySelector('.drive-paused').hidden = !p;
+    root.classList.toggle('is-paused', p);
+    try { p ? audio.ctx?.suspend() : audio.ctx?.resume(); } catch {}
+    last = performance.now();                                                     // resume without a time jump
+  };
   const kd = (e) => {
+    if (e.code === 'KeyP' || e.code === 'Escape') { e.preventDefault(); setPaused(!paused); return; }
     audio.unlock();
     const k = KEYMAP[e.code]; if (!k) return; e.preventDefault();
     if (k === 'horn') honk();
@@ -200,14 +212,21 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (car.scrape > 0) { haptic(HAP.edge, 400); car.scrape = 0; }
   };
   for (const b of root.querySelectorAll('[data-k]')) {
-    // held until the finger lifts, even if the thumb drifts off the button (pointer capture), with a tick of haptics
-    const on = (e) => {
-      audio.unlock(); if (b.dataset.k === 'horn') honk(); keys.add(b.dataset.k); b.classList.add('on');
-      try { b.setPointerCapture(e.pointerId); } catch {}
-      haptic(HAP.tap);
-      e.preventDefault();
-    }, off = () => { keys.delete(b.dataset.k); b.classList.remove('on'); };
-    b.addEventListener('pointerdown', on); b.addEventListener('pointerup', off); b.addEventListener('pointercancel', off); b.addEventListener('lostpointercapture', off);
+    // held buttons. Touch drives them from raw touch events (what iOS always delivers, even with the page's
+    // long-press guard on), each button tracking its own finger(s), so GAS + steer + HORN work together; a mouse
+    // or pen uses pointer events with capture.
+    const k = b.dataset.k, fingers = new Set();
+    const press = () => {
+      if (!keys.has(k)) { audio.unlock(); if (k === 'horn') honk(); haptic(HAP.tap); }
+      keys.add(k); b.classList.add('on');
+    };
+    const release = () => { keys.delete(k); b.classList.remove('on'); };
+    b.addEventListener('touchstart', (e) => { for (const t of e.changedTouches) fingers.add(t.identifier); press(); e.preventDefault(); }, { passive: false });
+    const lift = (e) => { for (const t of e.changedTouches) fingers.delete(t.identifier); if (!fingers.size) release(); e.preventDefault(); };
+    b.addEventListener('touchend', lift, { passive: false }); b.addEventListener('touchcancel', lift, { passive: false });
+    b.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') return; press(); try { b.setPointerCapture(e.pointerId); } catch {} e.preventDefault(); });
+    const up = (e) => { if (e.pointerType !== 'touch') release(); };
+    b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
   }
 
   // ---------- HUD ----------
@@ -304,7 +323,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     raf = nextFrame(frame);
     if (root.clientWidth + 'x' + root.clientHeight !== sized) resize();
     const now = performance.now(), dt = Math.min((now - last) / 1000, 0.05); last = now;
-    if (api.pause) { comic.render(); return; }   // QA: freeze-frame for look-dev
+    if (paused || api.pause) { comic.render(); return; }   // paused (or QA freeze-frame): the world holds still   // QA: freeze-frame for look-dev
     hornT -= dt;
     if (state === 'countdown') {
       countdown -= dt;
@@ -441,7 +460,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   }
 
   function finish() {
-    cancelFrame(raf); audio.stop();
+    cancelFrame(raf); audio.stop(); document.removeEventListener('visibilitychange', onHide);
     removeEventListener('keydown', kd); removeEventListener('keyup', ku); removeEventListener('resize', resize);
     root.classList.add('out');
     setTimeout(() => { renderer.dispose(); root.remove(); onDone({ ...result }); }, 450);
@@ -449,7 +468,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
   progress(1, 'Ready');
   root.querySelector('.drive-loading').remove();
-  root.querySelector('[data-skip]').addEventListener('click', () => { haptic(HAP.tap); Object.assign(result, { hits, tokens, nearMisses }); finish(); });
+  const skip = () => { haptic(HAP.tap); paused = false; Object.assign(result, { hits, tokens, nearMisses }); finish(); };
+  root.querySelector('[data-skip]').addEventListener('click', skip);
+  root.querySelector('[data-pause]').addEventListener('click', () => { haptic(HAP.tap); setPaused(true); });
+  root.querySelector('[data-resume]').addEventListener('click', () => { haptic(HAP.tap); setPaused(false); });
+  root.querySelector('[data-quit]').addEventListener('click', skip);
+  // leaving the app mid-drive pauses it (a call, a text, the home screen): nothing happens while you're away
+  const onHide = () => { if (document.hidden && (state === 'driving' || state === 'countdown')) setPaused(true); };
+  document.addEventListener('visibilitychange', onHide);
   frame();
   // test hooks (drive QA + screenshots)
   Object.assign(api, { car, world, route, spot, keys, result, audio, fx, city, comic, 
@@ -482,6 +508,8 @@ const HUD_HTML = `
 <div class="drive-pop"></div>
 <div class="drive-hint"></div>
 <button class="drive-skip" data-skip aria-label="Skip the drive">SKIP ▸▸</button>
+<button class="drive-pausebtn" data-pause aria-label="Pause"><i></i><i></i></button>
+<div class="drive-paused" hidden><b>PAUSED</b><button type="button" data-resume>RESUME ▶</button><button type="button" class="alt" data-quit>SKIP DRIVE ▸▸</button></div>
 <div class="drive-pad drive-steerpad">
   <button class="dp left" data-k="left" aria-label="Steer left"><svg viewBox="0 0 24 24"><path d="M15 4 7 12l8 8"/></svg></button>
   <button class="dp right" data-k="right" aria-label="Steer right"><svg viewBox="0 0 24 24"><path d="M9 4l8 8-8 8"/></svg></button>
