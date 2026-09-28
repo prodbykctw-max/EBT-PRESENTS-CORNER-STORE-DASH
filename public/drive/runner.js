@@ -141,7 +141,7 @@ export class RunnerCar {
       if (steer) this.yaw += steer * omega * dt * back;
       else {
         const ls = lanes && lanes.length ? lanes : [this.d], lane = ls.reduce((a, c) => Math.abs(c - this.d) < Math.abs(a - this.d) ? c : a, ls[0]);
-        const want = Math.max(-0.11, Math.min(0.11, (lane - this.d) * 0.08)) * back;   // light lane pull
+        const want = Math.max(-0.055, Math.min(0.055, (lane - this.d) * 0.04)) * back;  // light lane pull (quarter of the original)
         this.yaw += (want - this.yaw) * Math.min(1, dt * 3.2);                      // assist: back parallel to the road
       }
       this.yaw = Math.max(-0.75, Math.min(0.75, this.yaw));
