@@ -474,7 +474,7 @@ function updateBully(dt){
     if(!b.wander || b.repath<=0){
       b.repath=1.8+Math.random();
       var ang=Math.random()*6.2832, r=60+Math.random()*90;
-      var p=snapToField(Math.round(SPAWN_B.x+Math.cos(ang)*r), Math.round(SPAWN_B.y+Math.sin(ang)*r));
+      var hm=b.home||SPAWN_B, p=snapToField(Math.round(hm.x+Math.cos(ang)*r), Math.round(hm.y+Math.sin(ang)*r));
       b.wander=p;
     }
     tx=b.wander.x; ty=b.wander.y;
@@ -566,7 +566,7 @@ function caught(){
 function useContinue(){
   S.continues--;
   player.x=SPAWN_P.x; player.y=SPAWN_P.y; player.vx=0; player.vy=0;
-  bully.x=SPAWN_B.x; bully.y=SPAWN_B.y; bully.vx=0; bully.vy=0;
+  var bs=pickBullySpawn(); bully.x=bs.x; bully.y=bs.y; bully.home=bs; bully.vx=0; bully.vy=0;
   bully.path=null; bully.pi=0; bully.stuckT=0; bully.noLos=0; bully.taunt=2.5; bully.repath=0;
   if(S.active) S.aggroT=Math.max(S.aggroT||0, CONTINUE_GRACE);
   hide("ovEnd"); S.mode="play"; last=0;
@@ -654,6 +654,18 @@ function startWithDrive(){
 // warm the drive's code while the title screen is up, so START feels instant
 function prefetchDrive(){ if(driveAvailable()) setTimeout(function(){ import(DRIVE_URL).catch(function(){}); }, 1200); }
 
+/** a different corner of the store every run: any open floor at least ~560px from the entrance (so he never starts
+ *  on top of you), and not right on the checkout pads. He loiters around that spot until the first pickup. */
+function pickBullySpawn(){
+  for(var tries=0;tries<400;tries++){
+    var x=20+Math.random()*(IW-40), y=110+Math.random()*1300;
+    if(!boxFree(x,y)) continue;
+    if(Math.hypot(x-SPAWN_P.x,y-SPAWN_P.y)<560) continue;
+    if(x>700&&y>300&&y<760) continue;                     // the checkout lanes
+    return {x:Math.round(x),y:Math.round(y)};
+  }
+  return {x:SPAWN_B.x,y:SPAWN_B.y};
+}
 function startRun(){
   hide("ovEnd"); hide("ovTitle"); hide("ovHow");
   S.mode="play"; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
@@ -664,7 +676,8 @@ function startRun(){
   S.activeIdx=0;
   S.curPos=pickSpawnPos(currentItem());
   player={x:SPAWN_P.x,y:SPAWN_P.y,vx:0,vy:0,face:"U",anim:0};
-  bully={x:SPAWN_B.x,y:SPAWN_B.y,vx:0,vy:0,face:"D",anim:0,repath:0,path:null,pi:0,taunt:2,wander:null};
+  var bs=pickBullySpawn();
+  bully={x:bs.x,y:bs.y,home:bs,vx:0,vy:0,face:"D",anim:0,repath:0,path:null,pi:0,taunt:2,wander:null};
   bubbles=[];
   try{ ac().resume(); }catch(e){}
   startMusic();
@@ -774,18 +787,16 @@ function drawGridPx(g,rows,pal,ox,oy,sc,flip){
 var P_PAL={k:"#14100E",s:"#7A4E2B",w:"#F2F0EA",t:"#D8D4CC",p:"#23283E",h:"#101010"};
 var B_PAL={c:"#181820",s:"#8A5A32",r:"#A62633",m:"#7E1C28",p:"#2C2118",h:"#0E0E0E",e:"#FFFFFF",k:"#14100E"};
 // Player sprite sheet: 3 rows (D=front, U=back, R=right; L is R mirrored at draw time) x
-// 4 walk-cycle columns, baked from the 3D character model (see
+// 8 walk-cycle columns (standalone/tools/bake_characters.py), baked from the 3D character model (see
 // corner-store-dash-character/character.blend). pD/pU/pR pixel-grids below are now unused
 // by the player (kept only because bD/bR still reference the shared SP table / drawGridPx).
-var PLAYER_CELL=96, PLAYER_COLS=4, PLAYER_DISPLAY=72;
+var PLAYER_CELL=96, PLAYER_COLS=8, PLAYER_DISPLAY=84;
 var PLAYER_ROWS={D:0,U:1,R:2};
 var playerImg=new Image(), playerReady=false;
-// Bully sprite sheet: same 3-row (D/U/R) layout as the player, but a single static
-// pose per row (no baked walk cycle — the auto-rig on this model didn't come out
-// usable) rendered from the bully 3D model (see corner-store-dash-character/bully/bully.blend).
-// Movement still gets a subtle step wobble via a 1px draw-offset, matching the feel
-// the old hand-drawn bully sprite had.
-var BULLY_CELL=96, BULLY_DISPLAY=76;
+// Bully sprite sheet: the same rigged model and walk cycle as the player, recoloured (red hoodie, black pants,
+// black kicks) by standalone/tools/compose_sheets.py and drawn bigger, so he walks as well as the player does.
+// (The separate bully model's rig had no walk and its auto-rig couldn't lower his arms.)
+var BULLY_CELL=96, BULLY_COLS=8, BULLY_DISPLAY=96;
 var BULLY_ROWS={D:0,U:1,R:2};
 var bullyImg=new Image(), bullyReady=false;
 // Item/cart atlas: high-res 3D renders (AutoSprite), packed left-to-right,
@@ -830,48 +841,28 @@ var SP={
       "..s.rrrrrrrr.....","....rrrrrrrr.....","....pppppppp.....","....pppppppp.....",
       "....ppp..ppp.....","....ppp..ppp.....","....hhh..hhh....."]
 };
-function drawActor(g,e,isBully){
-  if(!isBully){ drawPlayerSprite(g,e); return; }
-  var w=BULLY_DISPLAY, h=BULLY_DISPLAY;
-  var ox=Math.round(e.x-w/2), oy=Math.round(e.y-h+4);
-  // shadow
-  g.fillStyle="rgba(20,16,20,0.25)";
-  g.fillRect(Math.round(e.x-w/2+4), Math.round(e.y-2), w-8, 6);
-  if(!bullyReady) return; // first frame or two before the sheet decodes
-  var row = e.face==="U" ? BULLY_ROWS.U : (e.face==="D" ? BULLY_ROWS.D : BULLY_ROWS.R);
-  var sx=0, sy=row*BULLY_CELL;
-  // no baked walk cycle for the bully — reuse the old sprite's 1px step wobble instead
-  var step=Math.floor(e.anim*3)%2;
-  var bob=(step&&(e.vx||e.vy))?1:0;
+function drawActor(g,e,isBully){ drawSheet(g,e,isBully); }
+// Both characters are the same rigged model walking its real walk cycle (standalone/tools/bake_characters.py):
+// 8 frames per direction, paced by distance walked so the feet don't skate (one full stride cycle every
+// STRIDE px). The bully is that model recoloured (red hoodie, black pants and kicks) and drawn bigger.
+var STRIDE=88;
+function drawSheet(g,e,isBully){
+  var img=isBully?bullyImg:playerImg, ready=isBully?bullyReady:playerReady;
+  var w=isBully?BULLY_DISPLAY:PLAYER_DISPLAY, h=w, CELL=isBully?BULLY_CELL:PLAYER_CELL;
+  var ROWS=isBully?BULLY_ROWS:PLAYER_ROWS, COLS=isBully?BULLY_COLS:PLAYER_COLS;
+  var oy=Math.round(e.y-h+4);
+  g.fillStyle="rgba(20,16,20,0.25)";                       // shadow
+  g.fillRect(Math.round(e.x-w/2+6), Math.round(e.y-2), w-12, 6);
+  if(!ready) return;
+  var row = e.face==="U" ? ROWS.U : (e.face==="D" ? ROWS.D : ROWS.R);
+  var moving=(e.vx||e.vy);
+  var frame = moving ? Math.floor(e.anim*60/STRIDE*COLS)%COLS : 0;
+  var sx=frame*CELL, sy=row*CELL;
   if(e.face==="L"){
-    g.save();
-    g.translate(e.x,0);
-    g.scale(-1,1);
-    g.drawImage(bullyImg, sx, sy, BULLY_CELL, BULLY_CELL, Math.round(-w/2)-bob, oy, w, h);
+    g.save(); g.translate(e.x,0); g.scale(-1,1);
+    g.drawImage(img, sx, sy, CELL, CELL, Math.round(-w/2), oy, w, h);
     g.restore();
-  } else {
-    g.drawImage(bullyImg, sx, sy, BULLY_CELL, BULLY_CELL, ox+bob, oy, w, h);
-  }
-}
-function drawPlayerSprite(g,e){
-  var w=PLAYER_DISPLAY, h=PLAYER_DISPLAY;
-  var ox=Math.round(e.x-w/2), oy=Math.round(e.y-h+4);
-  // shadow
-  g.fillStyle="rgba(20,16,20,0.25)";
-  g.fillRect(Math.round(e.x-w/2+4), Math.round(e.y-2), w-8, 6);
-  if(!playerReady) return; // first frame or two before the sheet decodes
-  var row = e.face==="U" ? PLAYER_ROWS.U : (e.face==="D" ? PLAYER_ROWS.D : PLAYER_ROWS.R);
-  var frame = (e.vx||e.vy) ? Math.floor(e.anim*2)%PLAYER_COLS : 0;
-  var sx=frame*PLAYER_CELL, sy=row*PLAYER_CELL;
-  if(e.face==="L"){
-    g.save();
-    g.translate(e.x,0);
-    g.scale(-1,1);
-    g.drawImage(playerImg, sx, sy, PLAYER_CELL, PLAYER_CELL, Math.round(-w/2), oy, w, h);
-    g.restore();
-  } else {
-    g.drawImage(playerImg, sx, sy, PLAYER_CELL, PLAYER_CELL, ox, oy, w, h);
-  }
+  } else g.drawImage(img, sx, sy, CELL, CELL, Math.round(e.x-w/2), oy, w, h);
 }
 var ICONS={
  APPLE:[".rrr.","rrrrr","rrrrr",".rrr.","..g.."],
