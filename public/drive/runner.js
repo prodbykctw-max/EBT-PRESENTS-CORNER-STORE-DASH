@@ -130,25 +130,30 @@ export class RunnerCar {
       this.dv += acc * dt; this.dv = Math.max(-side, Math.min(side, this.dv));
       this.yaw = Math.atan2(this.dv, Math.max(Math.abs(this.v), 4)) * 0.9;
     } else {
-      // the player: GTA Chinatown Wars handling. ◀ ▶ turn the nose (quicker at low speed, like a real car's lock);
-      // the car goes where it points. Let go and the lane guide straightens you up into the nearest of the four
+      // the player: GTA Chinatown Wars-style handling (its documented behaviour; Rockstar never published the
+      // numbers). ◀ ▶ turn the nose: no turning standing still, the sharpest turns at city speeds, wider as you go
+      // faster. The car's path lags its nose a little (it slides into a turn, then grips). Hands off the arrows,
+      // the steering assist straightens you parallel to the road, with a light pull toward the nearest of the four
       // lanes (your parking lane, your lane, the oncoming lane, the far parking lane).
-      const sp = Math.abs(this.v), rate = 2.6 / (1 + sp * 0.045);
-      this.yaw = this.yaw || 0;
-      if (steer) this.yaw += steer * rate * dt * (this.v < -0.1 ? -1 : 1);
+      const sp = Math.abs(this.v), back = this.v < -0.1 ? -1 : 1;
+      this.yaw = this.yaw || 0; this.travel = this.travel ?? this.yaw;
+      const omega = 2.4 * Math.min(1, sp / 6) / (1 + sp * 0.04);                   // turn rate, rad/s
+      if (steer) this.yaw += steer * omega * dt * back;
       else {
         const ls = lanes && lanes.length ? lanes : [this.d], lane = ls.reduce((a, c) => Math.abs(c - this.d) < Math.abs(a - this.d) ? c : a, ls[0]);
-        const want = Math.max(-0.11, Math.min(0.11, (lane - this.d) * 0.08)) * (this.v < -0.1 ? -1 : 1);   // half-strength guide
-        this.yaw += (want - this.yaw) * Math.min(1, dt * 4.5);
+        const want = Math.max(-0.11, Math.min(0.11, (lane - this.d) * 0.08)) * back;   // light lane pull
+        this.yaw += (want - this.yaw) * Math.min(1, dt * 3.2);                      // assist: back parallel to the road
       }
-      this.yaw = Math.max(-0.7, Math.min(0.7, this.yaw));
-      this.dv = this.v * Math.sin(this.yaw);
+      this.yaw = Math.max(-0.75, Math.min(0.75, this.yaw));
+      const grip = Math.max(4.5, 7 - sp * 0.1);                                     // path catches up with the nose
+      this.travel += (this.yaw - this.travel) * Math.min(1, dt * grip);
+      this.dv = this.v * Math.sin(this.travel);
       this.targetD = this.d;
     }
     // the four lanes are the road: the outermost lane is as far as you go (a scrape straightens you out)
     const lo = lanes ? Math.max(-lim, Math.min(...lanes) - 0.4) : -lim, hi = lanes ? Math.min(lim, Math.max(...lanes) + 0.4) : lim;
     this.d += this.dv * dt;
-    if (this.d < lo || this.d > hi) { this.d = Math.max(lo, Math.min(hi, this.d)); if (steer !== undefined) this.yaw *= 0.3; this.scrape = 0.2; }
+    if (this.d < lo || this.d > hi) { this.d = Math.max(lo, Math.min(hi, this.d)); if (steer !== undefined) { this.yaw *= 0.3; this.travel *= 0.3; } this.scrape = 0.2; }
 
     // speed: YOU drive it. GAS pulls (harder from low speed, easing off near the top), off the gas the car
     // coasts down on engine braking, BRAKE is progressive (a tap bites at ~40 %, holding builds to full in about
