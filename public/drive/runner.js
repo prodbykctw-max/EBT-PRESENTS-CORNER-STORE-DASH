@@ -138,7 +138,7 @@ export class RunnerCar {
       if (steer) this.yaw += steer * rate * dt * (this.v < -0.1 ? -1 : 1);
       else {
         const ls = lanes && lanes.length ? lanes : [this.d], lane = ls.reduce((a, c) => Math.abs(c - this.d) < Math.abs(a - this.d) ? c : a, ls[0]);
-        const want = Math.max(-0.22, Math.min(0.22, (lane - this.d) * 0.16)) * (this.v < -0.1 ? -1 : 1);
+        const want = Math.max(-0.11, Math.min(0.11, (lane - this.d) * 0.08)) * (this.v < -0.1 ? -1 : 1);   // half-strength guide
         this.yaw += (want - this.yaw) * Math.min(1, dt * 4.5);
       }
       this.yaw = Math.max(-0.7, Math.min(0.7, this.yaw));
