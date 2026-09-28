@@ -68,7 +68,18 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const MOBILE = matchMedia('(pointer: coarse)').matches;
   renderer.setPixelRatio(Math.min(devicePixelRatio, MOBILE ? 1.5 : 2)); // phones: fill-rate is the budget
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
-  renderer.toneMapping = THREE.AgXToneMapping; renderer.toneMappingExposure = 1.0;
+  // The look: GTA Chinatown Wars colour, not a washed-out film grade. A hue-true filmic shoulder (Khronos
+  // Neutral), then saturation and a touch of contrast on top, in the same pass (no post-processing cost on phones).
+  THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace(
+    'vec3 CustomToneMapping( vec3 color ) { return color; }',
+    `vec3 CustomToneMapping( vec3 color ) {
+      vec3 c = NeutralToneMapping( color );
+      float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+      c = max( vec3( 0.0 ), mix( vec3( l ), c, 1.4 ) );
+      c = pow( c, vec3( 1.1 ) ) * 1.08;
+      return clamp( c, 0.0, 1.0 );
+    }`);
+  renderer.toneMapping = THREE.CustomToneMapping; renderer.toneMappingExposure = 1.0;
   root.prepend(renderer.domElement);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(42, 1, 1, 3000);
@@ -161,60 +172,41 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   spotGroup.position.copy(toV3(sp.x, sp.y, ground(sp.x, sp.y))); spotGroup.rotation.y = sp.a;   // box runs along the curb
   scene.add(spotGroup);
 
-  // ---------- input: tight and snappy ----------
-  // Phone: drag anywhere and the car follows your thumb across the road 1:1 (half the screen width = the
-  // whole road). Keys: ←/→ jump a lane, ↓ brake, Space/H horn.
+  // ---------- input: you drive it (GTA Chinatown Wars layout) ----------
+  // Phone: ◀ ▶ steer (bottom left), GAS, BRAKE (hold at a stop to reverse) and HORN (bottom right), all held
+  // buttons. Keys: ↑/W gas, ↓/S brake / reverse, ←/→ or A/D steer, Space/H horn.
   const keys = new Set();
   let hornT = 0;
   const honk = () => { if (hornT <= 0) { audio.horn(); hornT = 0.6; } };
-  // ←/→ step to the next lane centre that way: parking lane, your lane, the oncoming lane, the far parking lane
-  const laneJump = (dir) => {
-    const s = car.s, centres = [route.parkD(s, -1), route.lane(s, 0), route.lane(s, 1), route.parkD(s, 1)].filter((v) => v !== null);
-    const next = dir > 0 ? centres.find((c) => c > car.targetD + 0.3) : [...centres].reverse().find((c) => c < car.targetD - 0.3);
-    if (next !== undefined) car.targetD = next;
-  };
   const kd = (e) => {
     audio.unlock();
     const k = KEYMAP[e.code]; if (!k) return; e.preventDefault();
-    if (k === 'left' && !keys.has('left')) laneJump(1);
-    if (k === 'right' && !keys.has('right')) laneJump(-1);
     if (k === 'horn') honk();
     keys.add(k);
   };
   const ku = (e) => { const k = KEYMAP[e.code]; if (k) keys.delete(k); };
   addEventListener('keydown', kd); addEventListener('keyup', ku);
-  const touch = { id: null, x0: 0, d0: 0, lane: 0 };
   const laneOf = (d) => Math.round(d / 3.4);   // which lane-width band the car is steering into (for haptic ticks)
-  const knob = root.querySelector('.drive-knob'), zone = root.querySelector('.drive-steer');
-  zone.addEventListener('pointerdown', (e) => {
-    audio.unlock();
-    if (touch.id !== null) return;
-    Object.assign(touch, { id: e.pointerId, x0: e.clientX, d0: car.targetD, lane: laneOf(car.targetD) });
-    haptic(HAP.tap);
-    try { zone.setPointerCapture(e.pointerId); } catch {}
-    knob.style.left = e.clientX + 'px'; knob.style.top = e.clientY + 'px'; knob.classList.add('on');
-    e.preventDefault();
-  });
-  zone.addEventListener('pointermove', (e) => {
-    if (e.pointerId !== touch.id) return;
-    const dx = e.clientX - touch.x0, hw = route.hw(car.s), lim = hw - 1.03, k = (2 * hw) / (root.clientWidth * 0.5);
-    const want = touch.d0 - dx * k;                                     // screen right = road right
+  let steerLane = null;
+  /** held ◀ / ▶ slide the car's line across the road: brisker the faster you go, like turning into a lane */
+  const steerInput = (dt) => {
+    const dir = (keys.has('left') ? 1 : 0) - (keys.has('right') ? 1 : 0);
+    if (!dir) { steerLane = null; return; }
+    const hw = route.hw(car.s), lim = hw - 1.03, rate = 3.4 + Math.min(Math.abs(car.v), 30) * 0.13;
+    const want = car.targetD + dir * rate * dt;
     car.targetD = Math.max(-lim, Math.min(lim, want));
-    // pushed past the road edge: re-anchor there, so dragging back answers at once (no dead travel)
-    if (want !== car.targetD) { touch.x0 = e.clientX; touch.d0 = car.targetD; haptic(HAP.edge, 250); }
-    const ln = laneOf(car.targetD); if (ln !== touch.lane) { touch.lane = ln; haptic(HAP.lane, 70); }   // a tick per lane line crossed
-    knob.style.setProperty('--dx', Math.max(-70, Math.min(70, dx)) + 'px');
-  });
-  const lift = (e) => { if (e.pointerId !== touch.id) return; touch.id = null; knob.classList.remove('on'); knob.style.setProperty('--dx', '0px'); };
-  zone.addEventListener('pointerup', lift); zone.addEventListener('pointercancel', lift);
+    if (want !== car.targetD) haptic(HAP.edge, 400);                                 // up against the curb
+    const ln = laneOf(car.targetD); if (steerLane !== null && ln !== steerLane) haptic(HAP.lane, 70);   // a tick per lane line
+    steerLane = ln;
+  };
   for (const b of root.querySelectorAll('[data-k]')) {
     // held until the finger lifts, even if the thumb drifts off the button (pointer capture), with a tick of haptics
     const on = (e) => {
-      audio.unlock(); if (b.dataset.k === 'horn') honk(); keys.add(b.dataset.k);
+      audio.unlock(); if (b.dataset.k === 'horn') honk(); keys.add(b.dataset.k); b.classList.add('on');
       try { b.setPointerCapture(e.pointerId); } catch {}
       haptic(HAP.tap);
       e.preventDefault();
-    }, off = () => keys.delete(b.dataset.k);
+    }, off = () => { keys.delete(b.dataset.k); b.classList.remove('on'); };
     b.addEventListener('pointerdown', on); b.addEventListener('pointerup', off); b.addEventListener('pointercancel', off); b.addEventListener('lostpointercapture', off);
   }
 
@@ -240,7 +232,6 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3();
   let camA = route.at(0).a, arrivalFrom = null;
   const result = { arrived: false, parked: false, timeLeft: 0, cleanPark: false, hits: 0, tokens: 0, nearMisses: 0, bonus: 0 };
-  const cruise = () => Math.min(32, 18 + drove * 0.5); // ~40 → ~72 mph: the run speeds up like a runner should
 
   function park() {
     state = 'parked';
@@ -314,13 +305,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       if (countdown <= 0) { state = 'driving'; flash('GO!', 700); hud.hint.textContent = ''; haptic(HAP.go); }
     }
     const braking = keys.has('down');
+    if (state === 'driving') steerInput(dt);
     const approaching = car.s > spot.s - 95;
     if (state === 'driving' || state === 'parked' || state === 'late' || state === 'busted') {
       acc += dt;
       while (acc >= FIXED) {
         acc -= FIXED;
         car.step(FIXED, {
-          targetD: car.targetD, brake: braking || state !== 'driving', cruise: state === 'driving' ? cruise() : 0,
+          targetD: car.targetD, brake: braking || state !== 'driving', gas: state === 'driving' && keys.has('gas') ? 1 : 0,
           stopAt: approaching ? spot.s : undefined,
         });
       }
@@ -420,7 +412,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
     // the pedal the engine hears: light throttle to hold speed, more to pull away (never floored for long), none
     // coasting or on the brakes
-    const pedal = state === 'driving' && !braking ? Math.max(0, Math.min(1, 0.14 + car.accel / 11)) : 0;
+    const pedal = state === 'driving' && keys.has('gas') && !braking ? Math.max(0.2, Math.min(1, 0.3 + car.accel / 9)) : 0;
     audio.update(car.v, pedal, Math.min(1, Math.abs(car.dv) / 14 + (braking && car.v > 6 ? 0.6 : 0)), dt);
     hud.time.textContent = t.toFixed(1);
     hud.time.classList.toggle('low', t < 10);
@@ -455,7 +447,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   return api;
 }
 
-const KEYMAP = { ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', Space: 'horn', KeyH: 'horn' };
+const KEYMAP = { ArrowUp: 'gas', KeyW: 'gas', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', Space: 'horn', KeyH: 'horn' };
 
 function makeLabel(text, color) {
   const c = document.createElement('canvas'); c.width = c.height = 128;
@@ -476,11 +468,14 @@ const HUD_HTML = `
 <div class="drive-pop"></div>
 <div class="drive-hint"></div>
 <button class="drive-skip" data-skip aria-label="Skip the drive">SKIP ▸▸</button>
-<div class="drive-steer" aria-label="Drag to steer"></div>
-<div class="drive-knob"><i></i></div>
-<div class="drive-touch">
-  <button class="horn" data-k="horn" aria-label="Horn">HORN</button>
-  <button class="brake" data-k="down" aria-label="Brake">BRAKE</button>
+<div class="drive-pad drive-steerpad">
+  <button class="dp left" data-k="left" aria-label="Steer left"><svg viewBox="0 0 24 24"><path d="M15 4 7 12l8 8"/></svg></button>
+  <button class="dp right" data-k="right" aria-label="Steer right"><svg viewBox="0 0 24 24"><path d="M9 4l8 8-8 8"/></svg></button>
 </div>
-<div class="drive-tip">Drag to dodge · grab the EBT tokens</div>
+<div class="drive-pad drive-pedals">
+  <button class="dp horn" data-k="horn" aria-label="Horn"><svg viewBox="0 0 24 24"><path d="M4 10h3l6-4v12l-6-4H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg><b>HORN</b></button>
+  <button class="dp brake" data-k="down" aria-label="Brake, hold to reverse"><b>BRAKE</b><small>HOLD = REV</small></button>
+  <button class="dp gas" data-k="gas" aria-label="Gas"><b>GAS</b></button>
+</div>
+<div class="drive-tip">GAS to go · ◀ ▶ to steer · HORN clears the way</div>
 <div class="drive-osm">© OpenStreetMap contributors</div>`;
