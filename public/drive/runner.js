@@ -162,7 +162,7 @@ function cornerFactor(route, s, v) {
 // ---------------------------------------------------------------- world population
 const TYPES = {
   sedan: { L: 4.5, W: 1.8, solid: 1 }, suv: { L: 4.75, W: 1.95, solid: 1 },
-  cone: { L: 0.45, W: 0.45, solid: 0.35 }, barricade: { L: 0.6, W: 1.8, solid: 0.7 },
+  cone: { L: 0.56, W: 0.56, solid: 0.35 }, barricade: { L: 0.6, W: 1.8, solid: 0.7 },
   panhandler: { L: 0.7, W: 0.7, solid: 0.6 },
   // scenery (never collides)
   bus: { L: 12, W: 2.55, solid: 0 }, worksign: { L: 1, W: 1, solid: 0 }, walker: { L: 0.5, W: 0.5, solid: 0 },

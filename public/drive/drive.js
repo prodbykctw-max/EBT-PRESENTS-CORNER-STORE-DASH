@@ -16,6 +16,7 @@ import { Crowd } from './crowd.js';
 import { Streetcars } from './tram.js';
 import { Signals } from './signals.js';
 import { Birds } from './birds.js';
+import { haptic, HAP } from './haptics.js';
 import { WIND } from './landscape.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
@@ -40,6 +41,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   root.className = 'drive-root';
   // iOS ignores the CSS on some held elements: stop the long-press menu and text selection outright
   for (const ev of ['contextmenu', 'selectstart']) root.addEventListener(ev, (e) => e.preventDefault());
+  // a held finger is driving, never a long-press menu, magnifier or text selection (iOS ignores CSS alone for
+  // these on a long hold): claim every touch except on the two tap-to-click buttons (skip, drive again)
+  root.addEventListener('touchstart', (e) => { if (!e.target.closest?.('[data-skip], .drive-busted button')) e.preventDefault(); }, { passive: false });
   root.innerHTML = '<div class="drive-loading"><b>AUBURN AVE</b><span>Get to the corner store</span><i></i></div>';
   mount.appendChild(root);
   const bar = root.querySelector('.drive-loading i');
@@ -179,12 +183,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   };
   const ku = (e) => { const k = KEYMAP[e.code]; if (k) keys.delete(k); };
   addEventListener('keydown', kd); addEventListener('keyup', ku);
-  const touch = { id: null, x0: 0, d0: 0 };
+  const touch = { id: null, x0: 0, d0: 0, lane: 0 };
+  const laneOf = (d) => Math.round(d / 3.4);   // which lane-width band the car is steering into (for haptic ticks)
   const knob = root.querySelector('.drive-knob'), zone = root.querySelector('.drive-steer');
   zone.addEventListener('pointerdown', (e) => {
     audio.unlock();
     if (touch.id !== null) return;
-    Object.assign(touch, { id: e.pointerId, x0: e.clientX, d0: car.targetD });
+    Object.assign(touch, { id: e.pointerId, x0: e.clientX, d0: car.targetD, lane: laneOf(car.targetD) });
+    haptic(HAP.tap);
     try { zone.setPointerCapture(e.pointerId); } catch {}
     knob.style.left = e.clientX + 'px'; knob.style.top = e.clientY + 'px'; knob.classList.add('on');
     e.preventDefault();
@@ -195,7 +201,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const want = touch.d0 - dx * k;                                     // screen right = road right
     car.targetD = Math.max(-lim, Math.min(lim, want));
     // pushed past the road edge: re-anchor there, so dragging back answers at once (no dead travel)
-    if (want !== car.targetD) { touch.x0 = e.clientX; touch.d0 = car.targetD; }
+    if (want !== car.targetD) { touch.x0 = e.clientX; touch.d0 = car.targetD; haptic(HAP.edge, 250); }
+    const ln = laneOf(car.targetD); if (ln !== touch.lane) { touch.lane = ln; haptic(HAP.lane, 70); }   // a tick per lane line crossed
     knob.style.setProperty('--dx', Math.max(-70, Math.min(70, dx)) + 'px');
   });
   const lift = (e) => { if (e.pointerId !== touch.id) return; touch.id = null; knob.classList.remove('on'); knob.style.setProperty('--dx', '0px'); };
@@ -205,7 +212,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const on = (e) => {
       audio.unlock(); if (b.dataset.k === 'horn') honk(); keys.add(b.dataset.k);
       try { b.setPointerCapture(e.pointerId); } catch {}
-      if (b.dataset.k === 'down') try { navigator.vibrate?.(12); } catch {}
+      haptic(HAP.tap);
       e.preventDefault();
     }, off = () => keys.delete(b.dataset.k);
     b.addEventListener('pointerdown', on); b.addEventListener('pointerup', off); b.addEventListener('pointercancel', off); b.addEventListener('lostpointercapture', off);
@@ -241,7 +248,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     result.cleanPark = Math.abs(car.d - spot.d) < 0.8;
     result.bonus = Math.round(result.timeLeft * 50 + tokens * 25 + nearMisses * 50 + (result.cleanPark ? 500 : 0) + (hits === 0 ? 300 : 0));
     flash(result.cleanPark ? 'CLEAN PARK! 🅿️' : 'PARKED 🅿️', 2600);
-    audio.chime(); endT = 0;
+    audio.chime(); endT = 0; haptic(HAP.parked);
   }
 
   // ---------- BUSTED: hit a police car and the run is over ----------
@@ -281,14 +288,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     lightsOn(poseOf(e));
     const backup = world.add('police', { s: Math.max(-15, car.s - 60), d: car.d, v: 18, cruise: 18, dir: 1, color: 0xffffff, backup: true });
     lightsOn(poseOf(backup)); busted.backup = backup;
-    audio.siren(); try { navigator.vibrate?.([60, 80, 60, 80, 200]); } catch {}
+    audio.siren(); haptic(HAP.busted);
   }
   function showBusted() {
     if (root.querySelector('.drive-busted')) return;
     hud.msg.classList.remove('on');
     const card = document.createElement('div'); card.className = 'drive-busted';
     card.innerHTML = '<h2>BUSTED</h2><p>You hit a police car. You’re going to jail.</p><button type="button">Drive again</button>';
-    card.querySelector('button').addEventListener('click', () => finish(), { once: true });
+    card.querySelector('button').addEventListener('click', () => { haptic(HAP.tap); finish(); }, { once: true });
     root.appendChild(card);
     if (QA && window.__botReport) setTimeout(() => { if (root.isConnected) finish(); }, 2500);   // the autopilot doesn't wait for a tap
   }
@@ -304,7 +311,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (state === 'countdown') {
       countdown -= dt;
       hud.msg.textContent = countdown > 0 ? String(Math.ceil(countdown)) : 'GO!'; hud.msg.classList.add('on');
-      if (countdown <= 0) { state = 'driving'; flash('GO!', 700); hud.hint.textContent = ''; }
+      if (countdown <= 0) { state = 'driving'; flash('GO!', 700); hud.hint.textContent = ''; haptic(HAP.go); }
     }
     const braking = keys.has('down');
     const approaching = car.s > spot.s - 95;
@@ -325,7 +332,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       for (const h of ev.hits) {
         hits++; car.v *= 1 - 0.65 * h.power; car.stun = 0.5 * h.power; car.invuln = 1.0; shake = Math.min(1, 0.4 + h.power * 0.6);
         if (h.power > 0.9) { t -= 1; flash('−1s  ' + h.label, 700); } else if (h.label) flash(h.label, 700);
-        audio.crash(h.power); try { navigator.vibrate?.(h.power > 0.9 ? [30, 40, 60] : 25); } catch {}
+        audio.crash(h.power); haptic(h.power > 0.9 ? HAP.crash : HAP.bump);
         if (h.e.type !== 'panhandler') { // sparks where the metal meets; plastic chips off cones and barricades
           const cp = car.pose, ep = route.at(h.e.s, h.e.d);
           const at = toV3((cp.x + ep.x) / 2, (cp.y + ep.y) / 2, (cp.z + ep.z) / 2 + 0.6);
@@ -333,8 +340,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         }
         if (h.busted) { bust(h.e); break; }
       }
-      if (ev.nearMiss) { nearMisses += ev.nearMiss; pop('NEAR MISS +50'); audio.whoosh(); }
-      if (ev.tokens) { tokens += ev.tokens; pop('+' + ev.tokens * 25); audio.token(); }
+      if (ev.nearMiss) { nearMisses += ev.nearMiss; pop('NEAR MISS +50'); audio.whoosh(); haptic(HAP.nearMiss); }
+      if (ev.tokens) { tokens += ev.tokens; pop('+' + ev.tokens * 25); audio.token(); haptic(HAP.token, 60); }
       if (approaching) hud.hint.textContent = Math.abs(car.d - spot.d) < 0.8 ? 'Nice — hold the curb' : 'Pull right to the curb ▸';
       if (state === 'driving' && approaching && car.v < 0.3 && Math.abs(car.s - spot.s) < 2) park();
       if (state === 'driving' && t <= 0) { t = 0; state = 'late'; Object.assign(result, { hits, tokens, nearMisses }); flash('TOO LATE — walk it in', 2600); endT = 0; }
@@ -436,7 +443,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
   progress(1, 'Ready');
   root.querySelector('.drive-loading').remove();
-  root.querySelector('[data-skip]').addEventListener('click', () => { Object.assign(result, { hits, tokens, nearMisses }); finish(); });
+  root.querySelector('[data-skip]').addEventListener('click', () => { haptic(HAP.tap); Object.assign(result, { hits, tokens, nearMisses }); finish(); });
   frame();
   // test hooks (drive QA + screenshots)
   Object.assign(api, { car, world, route, spot, keys, result, audio, fx, city, 
