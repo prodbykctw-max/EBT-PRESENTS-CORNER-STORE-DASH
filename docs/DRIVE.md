@@ -120,7 +120,7 @@ obstacles and collisions line up exactly with what's painted on the road.
 You drive it, GTA Chinatown Wars style: steer bottom left, pedals bottom right, all held buttons. ◀ ▶ turn the
 car's nose and it goes where it points. Let go and the **lane guide** straightens you up into the nearest of the four
 lanes (your parking lane, your lane, the oncoming lane, the far parking lane); the outermost lanes are the edge of the
-road. The camera is near-overhead and about 30 % closer than before, pulling up with speed.
+road. The camera is near-overhead at its original distance, pulling up with speed.
 
 | Phone | Keyboard | Action |
 | --- | --- | --- |
