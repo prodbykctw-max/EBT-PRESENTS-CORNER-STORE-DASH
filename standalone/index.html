@@ -825,7 +825,7 @@ function pickBullySpawn(){
 }
 function startRun(){
   hide("ovEnd"); hide("ovTitle"); hide("ovHow");
-  S.mode="play"; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
+  S.mode="play"; S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
   // one item live on the board at a time, in a fresh random order each run —
   // you can't memorize a route, and the bully's position matters more.
   S.order=ITEMS.map(function(_,i){return i;});
@@ -1255,23 +1255,32 @@ function hide(id){ el(id).classList.remove("on"); }
    centred, clamped at the store's walls. The canvas stays full resolution and is only moved/scaled by CSS, so the
    pixel art stays crisp and nothing in the game's own coordinates changes. The score and the EBT LIST are mirrored into a small HUD
    so they're always readable. */
-var cam={x:0,y:0,init:false}, fitScale=1;
+var cam={x:0,y:0,init:false}, fitScale=1, zoomScale=1, sizedAt=0;
+// entering the store: the whole layout first (INTRO_SHOW s), then the camera zooms in on you (INTRO_ZOOM s),
+// and the run starts once it has (update() holds everyone still until then)
+var INTRO_SHOW=1.6, INTRO_ZOOM=1.0;
 function fit(){
   var vw=window.innerWidth||390, vh=window.innerHeight||780;
   fitScale=Math.min(vw/IW, vh/IH);
-  scale=Math.max(fitScale, Math.min(0.8, vw/480));
-  view.style.width=Math.round(IW*scale)+"px";
-  view.style.height=Math.round(IH*scale)+"px";
+  zoomScale=Math.max(fitScale, Math.min(0.8, vw/480));
   cam.init=false; placeView(0);
 }
 function placeView(dt){
   if(!view) return;
+  // how zoomed: full store on the menus and during the intro's first beat, easing into the follow zoom
+  var z=0;
+  if(S.mode==="play"||S.mode==="paused"||S.mode==="end"){
+    var it=S.intro||0;
+    if(it<=0) z=1; else if(it<INTRO_ZOOM){ var k=1-it/INTRO_ZOOM; z=k*k*(3-2*k); }
+  }
+  scale=fitScale+(zoomScale-fitScale)*z;
+  if(Math.abs(scale-sizedAt)>1e-4){ sizedAt=scale; view.style.width=(IW*scale)+"px"; view.style.height=(IH*scale)+"px"; }
   var vw=window.innerWidth||390, vh=window.innerHeight||780, W=IW*scale, H=IH*scale;
   var fx=player?player.x:IW/2, fy=player?player.y:IH/2;
   // target: player centred (a touch below centre, so you see more of what's ahead), clamped to the board
   var tx=W<=vw ? (vw-W)/2 : Math.min(0, Math.max(vw-W, vw/2-fx*scale));
   var ty=H<=vh ? (vh-H)/2 : Math.min(0, Math.max(vh-H, vh*0.52-fy*scale));
-  if(!cam.init||!dt){ cam.x=tx; cam.y=ty; cam.init=true; }
+  if(!cam.init||!dt||(S.intro||0)>0){ cam.x=tx; cam.y=ty; cam.init=true; }   // (the intro zoom is exact, no lag)
   else { var k=Math.min(1,dt*8); cam.x+=(tx-cam.x)*k; cam.y+=(ty-cam.y)*k; }
   view.style.transform="translate("+Math.round(cam.x)+"px,"+Math.round(cam.y)+"px)";
   drawListHud();
@@ -1293,6 +1302,7 @@ function drawListHud(){
 }
 var last=0;
 function update(dt){
+  if(S.mode==="play"&&S.intro>0){ S.intro=Math.max(0,S.intro-dt); S.t+=dt; return; }   // the store reveal: nobody moves yet
   if(S.mode==="play"){
     S.t+=dt; S.runT+=dt;
     var v=inputVec();
