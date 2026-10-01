@@ -124,7 +124,9 @@ the road's heading, the front wheels stay straight and the body doesn't lean; it
 are up to four lanes, right to left: your parking lane, your lane, the oncoming lane, the far parking lane. Parking
 lanes only exist where the street is wide enough, so ◀ ▶ skip one that isn't there, and if the one you're in runs
 out the car moves onto the road beside it. The car stays centred in its lane as the street widens and narrows.
-The camera sits behind the car (rear third-person), following each lane change and pulling back with speed.
+The camera sits behind the car (rear third-person chase view): about 8 m behind and 3 m up at a standstill, easing back
+and up with speed, aimed ahead of the car so the car sits in the lower part of the screen with the street ahead in
+view. It follows each lane change.
 
 (Code: `drive.js` laneAt / laneShift / followLane and the camera rig; `runner.js` Car.step's lateral path.)
 
@@ -175,7 +177,7 @@ to the store level's startup cost.
 The facade art comes from the intro video's designs, repainted as straight-on elevation textures
 (Higgsfield `gpt_image_2`, with intro frames as reference). They are stored in `drive/art/facades/`
 as 2048 px JPGs. Each shop is a real box: CC0 brick sides (Poly Haven, `fetch_pbr.mjs`), a roof with a
-parapet cap and rooftop units (the overhead camera mostly sees roofs), and a modeled awning and sign
+parapet cap and rooftop units (the original overhead camera mostly saw roofs), and a modeled awning and sign
 board UV-projected from the same facade image, so paint and depth line up.
 **To fix before shipping:** the EBT facade shows real chip brands in the window. Paint them out.
 
@@ -270,7 +272,7 @@ into `drive/art/foliage/`; photo-scanned tree models run 0.3–17 M triangles, f
 | --- | --- |
 | `drive.js` | `startDrive({ mount, onDone })`: loader, scene, loop, HUD, parking, arrival, QA hooks (`window.__drive`) |
 | `city.js` | the height function, the OSM buildings (procedural facades, roofs, rooftop units), and orchestration |
-| `roads.js` | street and route surfaces (markings in the shader), junction and corner pads, curbs, crosswalks, and the freeway (deck, barriers, soffit, pier bents, overpass cutaway) |
+| `roads.js` | street and route surfaces (markings in the shader), junction and corner pads, curbs, crosswalks, and the freeway (deck, barriers, soffit, pier bents, overpass cutaway; the cutaway is inactive since the camera moved behind the car, because drive.js parks it) |
 | `landscape.js` | terrain mesh, parks/lawns/lots, grass tufts, contact shadows, streetscape (trees, lamps, signal masts, benches, bins, hydrants, shelters) |
 | `levels.js`, `surface.js` | the height stack, `standOn`, `deckTop`, and triangle height queries |
 | `sky.js` | sky dome and generated environment lighting |

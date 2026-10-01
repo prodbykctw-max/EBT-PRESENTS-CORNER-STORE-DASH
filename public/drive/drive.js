@@ -445,24 +445,26 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     fx.update(dt, camera, renderer);
     beacon.material.opacity = 0.12 + 0.08 * Math.sin(now / 250);
     spotGroup.visible = state === 'driving' || state === 'countdown';
-    // overpass cutaway follows the car (a soft hole in anything above it)
-    CUT.uCutPos.value.copy(carRig.position);
+    // The overpass cutaway (roads.js) was built for the overhead camera: it cut a round hole in the freeway deck above
+    // the car so the I-75/85 Connector couldn't hide it. From behind, the camera is under the deck with the car and can
+    // always see it, so the hole would only be a gap in the bridge's ceiling right over your head (route 1010-1078 m).
+    // Parked far above the world, it cuts nothing.
+    CUT.uCutPos.value.set(0, 1e9, 0);
 
-    // camera: behind the car, rear third-person, anchored on the car's own position so it follows every lane
-    // change. Same distance logic as before (reaching further with speed, leading the car so you see what's
-    // coming) - only the height-to-trail ratio changed, from overhead to behind.
-    // distance: far enough to show the whole street across (portrait) and enough of it ahead (landscape), pulling
-    // back further as speed rises
-    const v = Math.max(0, car.v), vf = THREE.MathUtils.degToRad(camera.fov) / 2, hf = Math.atan(Math.tan(vf) * camera.aspect);
-    const dist = Math.max((12 + v * 0.18) / Math.tan(hf), (7 + v * 0.16) / Math.tan(vf), 17.5 + v * 0.42);
-    // aim ahead of the car so it sits in the lower part of the frame and the road in front (obstacles!) is in view;
-    // more lead in landscape, where the screen is short
-    // Rear third-person instead of the overhead angle. Height was 3x the
-    // trail distance, which is what makes it look down at the roof; flipping
-    // the ratio puts the camera behind the car at about windscreen height.
-    // Nothing else in the rig moves: same dist, lerp, lookAt, shake, and the
-    // same swing down to the storefronts on arrival.
-    const h = dist * 0.30, back = dist * 0.92, ahead = (camera.aspect > 1 ? 8 : 5) + v * 0.4;
+    // camera: rear third-person chase view, low and close behind the car, anchored on the car's own position so it
+    // follows every lane change.
+    // Sized to the CAR, not the street. The overhead camera sized its distance to fit the whole street across the
+    // screen, which is right when looking down; behind the car, that same distance put the camera ~37 m back and the
+    // car shrank to a speck (measured in the running game: 34.7 m behind at 19 mph, ~35 px wide on a phone with the
+    // 70 deg portrait lens). Instead: 8 m behind and 3 m up at a standstill, easing back and up with speed so you see
+    // further ahead when you're going fast. 8 m keeps the rear bumper well past the camera's 4 m near plane (line 86),
+    // so the car is never sliced.
+    const v = Math.max(0, car.v);
+    const back = 8 + v * 0.12, h = 3 + v * 0.03;
+    // aim at a point ahead of the car and a little above the road, so the car sits in the lower part of the frame, the
+    // street ahead (obstacles!) fills the middle and the horizon sits high; more lead in landscape, where the screen
+    // is short
+    const ahead = (camera.aspect > 1 ? 18 : 14) + v * 0.5;
     camA += Math.atan2(Math.sin(route.at(car.s + 6).a - camA), Math.cos(route.at(car.s + 6).a - camA)) * Math.min(1, dt * 3);
     const look = route.at(car.s + ahead, car.d * 0.35);
     let targetPos, targetLook;
@@ -474,7 +476,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       targetLook = toV3(p.x, p.y, p.z).lerp(toV3(-3, 0, ground(-3, 0) + 4.2), e);
     } else {
       targetPos = toV3(p.x - Math.cos(camA) * back, p.y - Math.sin(camA) * back, p.z + h);
-      targetLook = toV3(look.x, look.y, look.z);
+      targetLook = toV3(look.x, look.y, look.z + 1.2);
     }
     if (!camPos.lengthSq()) { camPos.copy(targetPos); camLook.copy(targetLook); }
     if (state === 'parked' || state === 'late') { camPos.copy(targetPos); camLook.copy(targetLook); }
