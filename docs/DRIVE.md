@@ -1,7 +1,8 @@
 # Drive level: "Get to the Store"
 
-A 70-second, top-down, player-steered drive (GTA 1 style) through real downtown Atlanta
-that ends at the EBT Corner Store and hands straight off to the store level. It lives in
+A 70-second drive through real downtown Atlanta, seen from behind the car (rear third-person), where
+◀ ▶ move the whole car one lane at a time. It ends at the EBT Corner Store and hands straight off to the
+store level. It lives in
 the same game rather than as a separate app.
 
 ## Route (approved)
@@ -44,8 +45,8 @@ Map: `drive/route_v1.png`. To regenerate it, run `node drive/tools/route.mjs` an
 
 ## Game design: "Temple Run with cars"
 
-The car **auto-drives** the route and speeds up from about 40 to 72 mph. You don't steer the road; you
-**dodge**. Everything runs in route space (s = metres along the route, d = metres across it), so lanes,
+You drive it: GAS and BRAKE set your speed, and ◀ ▶ move the whole car one lane to get around what's in
+your way (see Controls). Everything runs in route space (s = metres along the route, d = metres across it), so lanes,
 obstacles and collisions line up exactly with what's painted on the road.
 
 - **Road:** one continuous two-lane road is drawn along the whole route (unbroken double-yellow,
@@ -117,14 +118,19 @@ obstacles and collisions line up exactly with what's painted on the road.
 
 ## Controls (mobile-first: the game is played on phones)
 
-You drive it, GTA Chinatown Wars style: steer bottom left, pedals bottom right, all held buttons. ◀ ▶ turn the
-car's nose and it goes where it points. Let go and the **lane guide** straightens you up into the nearest of the four
-lanes (your parking lane, your lane, the oncoming lane, the far parking lane); the outermost lanes are the edge of the
-road. The camera is near-overhead at its original distance, pulling up with speed.
+You drive it: lane buttons bottom left, pedals bottom right, all held buttons. **Stiff lane steering:** each press
+of ◀ or ▶ moves the whole car exactly one lane, and holding does nothing more. The car never turns: its nose stays on
+the road's heading, the front wheels stay straight and the body doesn't lean; it slides across as one block. There
+are up to four lanes, right to left: your parking lane, your lane, the oncoming lane, the far parking lane. Parking
+lanes only exist where the street is wide enough, so ◀ ▶ skip one that isn't there, and if the one you're in runs
+out the car moves onto the road beside it. The car stays centred in its lane as the street widens and narrows.
+The camera sits behind the car (rear third-person), following each lane change and pulling back with speed.
+
+(Code: `drive.js` laneAt / laneShift / followLane and the camera rig; `runner.js` Car.step's lateral path.)
 
 | Phone | Keyboard | Action |
 | --- | --- | --- |
-| **◀ / ▶** | ← / → or A / D | Turn the nose while held (tighter at low speed); a haptic tick per lane crossed |
+| **◀ / ▶** | ← / → or A / D | Move the whole car one lane per press (holding does nothing more); a haptic tick per lane crossed |
 | **GAS** | ↑ / W | Accelerate (to 67 mph; corners cap it). Off the gas the car coasts down |
 | **BRAKE** | ↓ / S | Progressive brake; keep holding for half a second at a standstill to **reverse** (to 11 mph) |
 | **HORN** | Space / H | Anyone on foot in your path up ahead hops clear, dogs bolt, the crowd flinches |
@@ -277,7 +283,7 @@ into `drive/art/foliage/`; photo-scanned tree models run 0.3–17 M triangles, f
 | `audio.js`, `sfx/` | recorded engine and effects mix |
 | `props.glb` | traffic, bus, panhandler, cyclist, cones, barricade, sign (vertex colour; white = per-instance tint) |
 | `weather.js` | live Atlanta weather → sky, sun, shadows, haze, wet roads |
-| `hero.glb`, `car.glb` | Blender exports (meshopt + WebP). The player car is the user-supplied "Crimson Demon X" model (`drive/ref/car/`, dimensioned to the production Challenger SRT Demon, no badges); `drive/tools/blender_car.py` turns it nose-forward, puts the origin on the rear axle, decimates 78k to 36.5k tris and keeps the `*_STEER` / `*_SPIN` wheel pivots the runtime rolls and steers |
+| `hero.glb`, `car.glb` | Blender exports (meshopt + WebP). The player car is the user-supplied "Crimson Demon X" model (`drive/ref/car/`, dimensioned to the production Challenger SRT Demon, no badges); `drive/tools/blender_car.py` turns it nose-forward, puts the origin on the rear axle, decimates 78k to 36.5k tris and keeps the `*_STEER` / `*_SPIN` wheel pivots; the runtime rolls the wheels and holds the steer pivots straight (lane changes slide the whole car) |
 | `vendor/` | three.js r186 (MIT), imports rewritten to relative paths so no import map is needed |
 
 **Game hook:** in `standalone/csd.js`, START RUN calls `startWithDrive()`. That
