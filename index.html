@@ -185,7 +185,20 @@ var ITEMS=[
  {id:"MILK",        x:190,y:292,  shelf:{x:128,y:160,w:122,h:70},  pts:100, icon:"milk"},
  {id:"RICE & BEANS",x:612,y:280,  shelf:{x:492,y:155,w:242,h:70},  pts:200, icon:"beans"}
 ];
-var PADS=[[402,390,430,465],[402,550,430,635],[402,728,430,812]];
+/* Pay zones, one per register, on the customer side of each counter.
+   These used to sit at x=402..430 — out in the centre walkway, a good 100px
+   clear of the counters, with a "PAY ->" arrow pointing at the registers you
+   were not actually standing at. Now each pad hugs the counter it belongs to.
+
+   Measured off the board art with the game's own floorish() classifier rather
+   than by eye: the three counter bodies occupy x 504..712 at y 324..476,
+   504..656 and 680..832. x=500 is the rightmost centre the player can occupy
+   along the full height of every band (boxFree needs x+3 clear, and the
+   counter edge is 504), so the pads stop there and the player ends up flush
+   against the register. Sampling the band's maximum instead would give 512,
+   but that only holds on the inset banner rows — the pad would reach past
+   where you can stand for most of its height. */
+var PADS=[[452,348,500,468],[452,528,500,648],[452,704,500,824]];
 var SPAWN_P={x:415,y:1380}, SPAWN_B={x:650,y:320};
 /* Bully speed curve, cut 30% across the board (was 90/205/8/253). At the old
    numbers he topped out at 253 against the player's 260 - 97% of your speed
@@ -1086,9 +1099,11 @@ var LIGHTS=[
   // as daylight bleeding in rather than more of the same store light
   {t:"strip",x:420,y:1580,w:700,h:30,ry:80,c:[214,230,255],i:0.72,flick:0.00},
   // checkout terminal screens — the cool half of the warm/cool split
-  {t:"pt",x:648,y:348,r:135,c:[120,190,255],i:0.60,flick:0.07},
-  {t:"pt",x:648,y:534,r:135,c:[120,190,255],i:0.60,flick:0.07},
-  {t:"pt",x:648,y:706,r:135,c:[120,190,255],i:0.60,flick:0.07},
+  // on the actual terminal screens — the counter bands measure y 324..476,
+  // 504..656 and 680..832, and the screen art sits ~76px into each
+  {t:"pt",x:612,y:400,r:135,c:[120,190,255],i:0.60,flick:0.07},
+  {t:"pt",x:612,y:580,r:135,c:[120,190,255],i:0.60,flick:0.07},
+  {t:"pt",x:612,y:756,r:135,c:[120,190,255],i:0.60,flick:0.07},
   // ENTRANCE vertical neon on the right wall
   {t:"strip",x:762,y:712,w:26,h:200,ry:150,c:[255,105,185],i:0.80,flick:0.03},
   // EXIT sign over the top doorway
@@ -1253,6 +1268,22 @@ function fxLightPass(t){
     gi.addColorStop(1,"rgba(255,214,110,0)");
     fxL.fillStyle=gi;
     fxL.fillRect((S.curPos.x-150)*k,(S.curPos.y-150)*k,300*k,300*k);
+  }
+  // Once the list is done the pads ARE the objective, and they are painted
+  // into the scene like everything else — so the darkness pass dims them
+  // exactly when they start to matter. Give each live register a green pool
+  // that pulses with the pad's own blink, so "where do I pay" survives the
+  // grade. Costs nothing until checkout actually unlocks.
+  if(S.nGot===ITEMS.length&&(S.mode==="play"||S.mode==="end")){
+    var pulse=0.55+0.45*Math.sin(t*6);
+    for(var pl=0;pl<PADS.length;pl++){
+      var pp=PADS[pl], pcx=(pp[0]+pp[2])/2*k, pcy=(pp[1]+pp[3])/2*k, prr=170*k;
+      var gpad=fxL.createRadialGradient(pcx,pcy,0,pcx,pcy,prr);
+      gpad.addColorStop(0,"rgba(90,255,150,"+(0.30+0.30*pulse).toFixed(3)+")");
+      gpad.addColorStop(1,"rgba(90,255,150,0)");
+      fxL.fillStyle=gpad;
+      fxL.fillRect(pcx-prr,pcy-prr,prr*2,prr*2);
+    }
   }
   // the bully throws a red wash that grows as he closes — readable threat
   // information you feel before you consciously read it
@@ -1665,9 +1696,16 @@ function draw(){
         g.strokeStyle="#3ADB76"; g.lineWidth=3;
         g.strokeRect(pd[0],pd[1],pd[2]-pd[0],pd[3]-pd[1]);
       }
+      // one label per register rather than a single arrow pointing across the
+      // floor — with three live pads, "which one" should not need an arrow
       g.font="bold 20px ui-monospace,monospace";
-      g.fillStyle="#3ADB76";
-      g.fillText("PAY \u2192", 340, 470);
+      g.lineWidth=4;
+      for(var p4=0;p4<PADS.length;p4++){
+        var pq=PADS[p4], lw=g.measureText("PAY").width;
+        var lx=(pq[0]+pq[2])/2-lw/2, ly=(pq[1]+pq[3])/2+7;
+        g.strokeStyle=PAL.navy; g.strokeText("PAY",lx,ly);
+        g.fillStyle="#3ADB76"; g.fillText("PAY",lx,ly);
+      }
     }
     // actors: draw upper first for overlap.
     var actors=[player,bully].sort(function(a,b){return a.y-b.y;});
