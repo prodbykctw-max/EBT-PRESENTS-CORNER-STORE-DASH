@@ -256,6 +256,16 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // ---------- state ----------
   let t = TIME_LIMIT, drove = 0, hits = 0, tokens = 0, nearMisses = 0, state = 'countdown', countdown = 3, shake = 0, endT = 0;
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3();
+  const laneLatch = { left: false, right: false };
+  /** move targetD one lane across. dir +1 = left, -1 = right (d is metres left of the centre line). */
+  function laneShift(dir) {
+    const ls = laneCentres(car.s).slice().sort((a, b) => a - b);
+    if (!ls.length) return;
+    const cur = ls.reduce((a, c) => Math.abs(c - car.targetD) < Math.abs(a - car.targetD) ? c : a, ls[0]);
+    const i = ls.indexOf(cur) + dir;
+    if (i < 0 || i >= ls.length) return;
+    car.targetD = ls[i];
+  }
   let camA = route.at(0).a, arrivalFrom = null;
   const result = { arrived: false, parked: false, timeLeft: 0, cleanPark: false, hits: 0, tokens: 0, nearMisses: 0, bonus: 0 };
 
@@ -333,6 +343,13 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       if (countdown <= 0) { state = 'driving'; flash('GO!', 700); hud.hint.textContent = ''; haptic(HAP.go); }
     }
     const braking = keys.has('down');
+    // Lane-latched steering: a press moves the whole car exactly one lane and
+    // holding does nothing further. The car does not turn - runner.js leaves
+    // yaw alone on the lateral path, so it stays parallel to the road.
+    if (state === 'driving') {
+      if (keys.has('left')) { if (!laneLatch.left) { laneLatch.left = true; laneShift(1); } } else laneLatch.left = false;
+      if (keys.has('right')) { if (!laneLatch.right) { laneLatch.right = true; laneShift(-1); } } else laneLatch.right = false;
+    }
     if (state === 'driving') steerFeel();
     const approaching = car.s > spot.s - 95;
     if (state === 'driving' || state === 'parked' || state === 'late' || state === 'busted') {
@@ -342,7 +359,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         car.step(FIXED, {
           targetD: car.targetD, brake: braking || state !== 'driving', gas: state === 'driving' && keys.has('gas') ? 1 : 0,
           stopAt: approaching ? spot.s : undefined, lanes: laneCentres(car.s),
-          steer: BOT ? undefined : state === 'driving' ? (keys.has('left') ? 1 : 0) - (keys.has('right') ? 1 : 0) : 0,
+          // steer omitted on purpose: that selects runner.js's lateral path,
+          // which springs d toward targetD and never touches yaw.
         });
       }
     }
@@ -421,7 +439,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const dist = Math.max((12 + v * 0.18) / Math.tan(hf), (7 + v * 0.16) / Math.tan(vf), 17.5 + v * 0.42);
     // aim ahead of the car so it sits in the lower part of the frame and the road in front (obstacles!) is in view;
     // more lead in landscape, where the screen is short
-    const h = dist * 0.947, back = dist * 0.322, ahead = (camera.aspect > 1 ? 8 : 5) + v * 0.4;
+    // Rear third-person instead of the overhead angle. Height was 3x the
+    // trail distance, which is what makes it look down at the roof; flipping
+    // the ratio puts the camera behind the car at about windscreen height.
+    // Nothing else in the rig moves: same dist, lerp, lookAt, shake, and the
+    // same swing down to the storefronts on arrival.
+    const h = dist * 0.30, back = dist * 0.92, ahead = (camera.aspect > 1 ? 8 : 5) + v * 0.4;
     camA += Math.atan2(Math.sin(route.at(car.s + 6).a - camA), Math.cos(route.at(car.s + 6).a - camA)) * Math.min(1, dt * 3);
     const look = route.at(car.s + ahead, car.d * 0.35);
     let targetPos, targetLook;
