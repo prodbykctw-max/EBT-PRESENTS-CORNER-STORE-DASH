@@ -33,8 +33,10 @@
 | Store game source | `standalone/csd.js` (+ `shell2.html`, `*.b64` art). **Edit these, then run `npm run build:standalone`**, which regenerates `standalone/index.html`, `public/standalone.html` and `./index.html`. Never hand-edit those three. |
 | Drive level (three.js) | `public/drive/`. Entry: `startDrive()` in `drive.js`. The store game loads it with `import("./drive/drive.js")` (`DRIVE_URL` in `csd.js`) when START is tapped, and starts the store run when it ends. |
 | Drive car physics | `public/drive/runner.js`: `Car.step()` (speed, lateral spring toward `targetD`, `yaw`), `pose` (position + heading) |
-| Drive steering + camera | `public/drive/drive.js`: `laneAt` / `laneShift` / `followLane` (stiff one-lane-per-press steering), the chase camera (`back`, `h`, `ahead` in the camera block: distance behind, height, how far ahead it aims), wheel pivots, body lean. The overpass cutaway (`CUT`, from `roads.js`) follows the car and is still needed with the chase camera (the Connector's deck is ~2.1 m above the route; without the hole it blocks the view), and drive.js lowers where it starts to 1.45 m above the car (`uCutPos.y -= 0.75`) because at the bottom of the deck's dip the underside is 1.8 m above the car, and grows its radius (`uCutR`) from 11 m to reach the camera at speed, capped at 25 m. Near plane is 2 m, with 2.5 m minimum ground clearance under the camera |
+| Drive steering + camera | `public/drive/drive.js`: `laneAt` / `laneShift` / `followLane` / `tapLane` (stiff one-lane-per-press steering; `tapLane` runs from the touch/key event itself so no tap is missed; the car is drawn between the 120 Hz physics steps via `prevS`/`prevD`), the chase camera (`back`, `h`, `ahead` in the camera block: distance behind, height, how far ahead it aims), wheel pivots, body lean. The overpass cutaway (`CUT`, from `roads.js`) follows the car and is still needed with the chase camera (the Connector's deck is ~2.1 m above the route; without the hole it blocks the view), and drive.js lowers where it starts to 1.45 m above the car (`uCutPos.y -= 0.75`) because at the bottom of the deck's dip the underside is 1.8 m above the car, and grows its radius (`uCutR`) from 11 m to reach the camera at speed, capped at 25 m. Near plane is 2 m, with 2.5 m minimum ground clearance under the camera |
 | Drive look (ink + cel shading) | `public/drive/look.js` |
+| Drive sound | `public/drive/audio.js`: `ENGINE_LEVEL` (engine loudness), the squeal fed by `sideSlip` in `drive.js` |
+| Start screens | `standalone/shell2.html`: `ovTitle`, `ovDriveHow` (drive how-to-play), `ovHow` (store how-to-play, shown on arriving at the store), both how-to-plays on plain black; flow in `csd.js`: `btnTitle` → `btnDrive` → `startWithDrive()` → `showStoreHow()` → `btnStart` → `startStoreRun()` |
 | Drive route, lanes, parking spot | `runner.js` route: `lane(s,k)`, `parkD(s,side)`, `travel(s)`; `drive.js`: `spot` |
 | Store tuning | Constants at the top of `standalone/csd.js` (`ITEMS`, `PADS`, speeds) |
 | Design notes | `docs/` (may lag the code; see rule 1) |
@@ -42,7 +44,8 @@
 ## Running and testing
 
 - `npm run dev` serves `public/` at http://localhost:5173 (`scripts/serve.mjs`).
-  - Full game: `/standalone.html` (START runs the drive, then the store).
+  - Full game: `/standalone.html` (TAP TO START → drive how-to-play → START DRIVE → the drive → store how-to-play →
+    START RUN → the store run).
   - Drive alone: **`/drive/index.html`**. Not `/drive/`: the dev server doesn't serve folder URLs, so that 404s.
     Options: `?qa` (test mode), `?bot` (autopilot drives it), `?demo=auburn|arrive` (jump to a set piece).
 - If the server won't start, an old one holds the port (`EADDRINUSE`): find it with

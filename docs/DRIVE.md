@@ -124,6 +124,10 @@ the road's heading, the front wheels stay straight and the body doesn't lean; it
 are up to four lanes, right to left: your parking lane, your lane, the oncoming lane, the far parking lane. Parking
 lanes only exist where the street is wide enough, so ◀ ▶ skip one that isn't there, and if the one you're in runs
 out the car moves onto the road beside it. The car stays centred in its lane as the street widens and narrows.
+A press acts the moment it happens (`tapLane`, from the touch or key event itself, so even a lightning tap between two
+frames counts), and the car is half way into the next lane in about 60 ms and fully in it in about 0.2 s, at any speed:
+a stiff critically damped spring (w = 28) with no side-speed cap. The car is drawn between the 120 Hz physics steps,
+so the move stays smooth whatever the screen's frame rate.
 The camera sits behind the car (rear third-person chase view): about 8 m behind and 3 m up at a standstill, easing back
 and up with speed, aimed ahead of the car so the car sits in the lower part of the screen with the street ahead in
 view. It follows each lane change.
@@ -141,7 +145,8 @@ view. It follows each lane change.
 ## Sound
 
 The engine uses real V8 recordings (on-throttle and off-throttle loops), pitched by rpm and
-crossfaded by throttle, over a 5-speed auto box with audible shifts. The tire squeal, screech,
+crossfaded by throttle, over an 8-speed automatic with audible shifts. It plays at 37% of its original level
+(`ENGINE_LEVEL` in `audio.js`: 63% quieter, measured at the speakers). The tire squeal, screech,
 horn, token clink and crash (sheet metal, plus glass on big hits, over a low thump) are recordings
 too. Sources and licenses are in `public/drive/sfx/CREDITS.txt`. The V8 is CC BY-SA 4.0
 (DerMeehdrescher / Meehdrescher Studios) and **needs a credit in the game's credits**; the rest is CC0.
@@ -288,11 +293,12 @@ into `drive/art/foliage/`; photo-scanned tree models run 0.3–17 M triangles, f
 | `hero.glb`, `car.glb` | Blender exports (meshopt + WebP). The player car is the user-supplied "Crimson Demon X" model (`drive/ref/car/`, dimensioned to the production Challenger SRT Demon, no badges); `drive/tools/blender_car.py` turns it nose-forward, puts the origin on the rear axle, decimates 78k to 36.5k tris and keeps the `*_STEER` / `*_SPIN` wheel pivots; the runtime rolls the wheels and holds the steer pivots straight (lane changes slide the whole car) |
 | `vendor/` | three.js r186 (MIT), imports rewritten to relative paths so no import map is needed |
 
-**Game hook:** in `standalone/csd.js`, START RUN calls `startWithDrive()`. That
-dynamic-imports `./drive/drive.js`, runs the drive, then `startRun()` and adds the bonus.
-"Run it back" skips the drive. If it's offline, opened from disk, or `?nodrive` is set, the run starts
-directly, so the single-file build stays drive-free. The drive's code is prefetched while the title
-screen is up.
+**Game hook:** in `standalone/csd.js`, TAP TO START shows the drive's how-to-play (`ovDriveHow`, a plain
+black screen). START DRIVE calls `startWithDrive()`, which dynamic-imports `./drive/drive.js` and runs the drive.
+When it ends, `showStoreHow()` shows the store's how-to-play (`ovHow`, also plain black), and START RUN calls
+`startStoreRun()`: `startRun()`, then the drive bonus. "Run it back" skips the drive and both how-to-plays. If it's
+offline, opened from disk, or `?nodrive` is set, TAP TO START goes straight to the store's how-to-play, so the
+single-file build stays drive-free. The drive's code is prefetched while the title screen is up.
 
 **QA:** `/drive/index.html` is a standalone harness. Add `?qa` to either page to drive the loop from a
 timer, since hidden tabs pause `requestAnimationFrame`.
