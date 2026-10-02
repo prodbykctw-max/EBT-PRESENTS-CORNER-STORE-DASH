@@ -121,15 +121,20 @@ export class RunnerCar {
   step(dt, { targetD, brake, gas = 0, top = 30, cruise, stopAt, steer, lanes }) {
     const hw = this.route.hw(this.s), lim = hw - PLAYER.halfW - 0.05;
     if (steer === undefined) {
-      // line mode (the QA autopilot): the lateral position is a stiff critically-damped spring on targetD
+      // lateral path - the player's stiff lane steering (drive.js sets targetD to a lane centre) and the QA autopilot
+      // (sets targetD to any line): the lateral position is a stiff critically-damped spring on targetD
       this.targetD = Math.max(-lim, Math.min(lim, targetD));
       const w = 16; // spring stiffness (rad/s): ~0.2 s to settle, no overshoot
       const acc = w * w * (this.targetD - this.d) - 2 * w * this.dv;
       // a car can't glide sideways standing still: side speed grows with road speed
       const side = Math.min(18, 3 + Math.abs(this.v) * 0.6);
       this.dv += acc * dt; this.dv = Math.max(-side, Math.min(side, this.dv));
-      this.yaw = Math.atan2(this.dv, Math.max(Math.abs(this.v), 4)) * 0.9;
+      // Stiff lane steering: the whole car slides across as one rigid body and its nose never leaves the road's
+      // heading. (This line used to angle the nose into the move - the front-end steer the lane model replaces.)
+      this.yaw = 0;
     } else {
+      // NOT CALLED any more: nothing passes `steer` since the player moved to stiff lane steering above. Kept so the
+      // old nose-steering can come back by passing `steer` from drive.js's car.step call.
       // the player: GTA Chinatown Wars-style handling (its documented behaviour; Rockstar never published the
       // numbers). ◀ ▶ turn the nose: no turning standing still, the sharpest turns at city speeds, wider as you go
       // faster. The car's path lags its nose a little (it slides into a turn, then grips). Hands off the arrows,

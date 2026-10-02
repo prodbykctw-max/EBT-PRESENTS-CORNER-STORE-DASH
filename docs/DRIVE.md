@@ -1,7 +1,8 @@
 # Drive level: "Get to the Store"
 
-A 70-second, top-down, player-steered drive (GTA 1 style) through real downtown Atlanta
-that ends at the EBT Corner Store and hands straight off to the store level. It lives in
+A 70-second drive through real downtown Atlanta, seen from behind the car (rear third-person), where
+◀ ▶ move the whole car one lane at a time. It ends at the EBT Corner Store and hands straight off to the
+store level. It lives in
 the same game rather than as a separate app.
 
 ## Route (approved)
@@ -44,8 +45,8 @@ Map: `drive/route_v1.png`. To regenerate it, run `node drive/tools/route.mjs` an
 
 ## Game design: "Temple Run with cars"
 
-The car **auto-drives** the route and speeds up from about 40 to 72 mph. You don't steer the road; you
-**dodge**. Everything runs in route space (s = metres along the route, d = metres across it), so lanes,
+You drive it: GAS and BRAKE set your speed, and ◀ ▶ move the whole car one lane to get around what's in
+your way (see Controls). Everything runs in route space (s = metres along the route, d = metres across it), so lanes,
 obstacles and collisions line up exactly with what's painted on the road.
 
 - **Road:** one continuous two-lane road is drawn along the whole route (unbroken double-yellow,
@@ -117,14 +118,21 @@ obstacles and collisions line up exactly with what's painted on the road.
 
 ## Controls (mobile-first: the game is played on phones)
 
-You drive it, GTA Chinatown Wars style: steer bottom left, pedals bottom right, all held buttons. ◀ ▶ turn the
-car's nose and it goes where it points. Let go and the **lane guide** straightens you up into the nearest of the four
-lanes (your parking lane, your lane, the oncoming lane, the far parking lane); the outermost lanes are the edge of the
-road. The camera is near-overhead at its original distance, pulling up with speed.
+You drive it: lane buttons bottom left, pedals bottom right, all held buttons. **Stiff lane steering:** each press
+of ◀ or ▶ moves the whole car exactly one lane, and holding does nothing more. The car never turns: its nose stays on
+the road's heading, the front wheels stay straight and the body doesn't lean; it slides across as one block. There
+are up to four lanes, right to left: your parking lane, your lane, the oncoming lane, the far parking lane. Parking
+lanes only exist where the street is wide enough, so ◀ ▶ skip one that isn't there, and if the one you're in runs
+out the car moves onto the road beside it. The car stays centred in its lane as the street widens and narrows.
+The camera sits behind the car (rear third-person chase view): about 8 m behind and 3 m up at a standstill, easing back
+and up with speed, aimed ahead of the car so the car sits in the lower part of the screen with the street ahead in
+view. It follows each lane change.
+
+(Code: `drive.js` laneAt / laneShift / followLane and the camera rig; `runner.js` Car.step's lateral path.)
 
 | Phone | Keyboard | Action |
 | --- | --- | --- |
-| **◀ / ▶** | ← / → or A / D | Turn the nose while held (tighter at low speed); a haptic tick per lane crossed |
+| **◀ / ▶** | ← / → or A / D | Move the whole car one lane per press (holding does nothing more); a haptic tick per lane crossed |
 | **GAS** | ↑ / W | Accelerate (to 67 mph; corners cap it). Off the gas the car coasts down |
 | **BRAKE** | ↓ / S | Progressive brake; keep holding for half a second at a standstill to **reverse** (to 11 mph) |
 | **HORN** | Space / H | Anyone on foot in your path up ahead hops clear, dogs bolt, the crowd flinches |
@@ -146,7 +154,7 @@ too. Sources and licenses are in `public/drive/sfx/CREDITS.txt`. The V8 is CC BY
 - A saturated custom tone map (Khronos Neutral shoulder, +40 % saturation, a touch of contrast) instead of AgX.
 - A comic building palette: warm brick, pastel stucco, coloured offices, teal glass.
 
-The camera's near plane is 4 m for depth precision.
+The camera's near plane is 2 m (it was 4 m for the overhead camera; the chase camera keeps 2.5 m of air under itself, and the road at the bottom of the screen then never comes nearer than 2.6 m, measured along the whole route).
 
 ## Budgets (hard limits)
 
@@ -169,7 +177,7 @@ to the store level's startup cost.
 The facade art comes from the intro video's designs, repainted as straight-on elevation textures
 (Higgsfield `gpt_image_2`, with intro frames as reference). They are stored in `drive/art/facades/`
 as 2048 px JPGs. Each shop is a real box: CC0 brick sides (Poly Haven, `fetch_pbr.mjs`), a roof with a
-parapet cap and rooftop units (the overhead camera mostly sees roofs), and a modeled awning and sign
+parapet cap and rooftop units (the original overhead camera mostly saw roofs), and a modeled awning and sign
 board UV-projected from the same facade image, so paint and depth line up.
 **To fix before shipping:** the EBT facade shows real chip brands in the window. Paint them out.
 
@@ -264,7 +272,7 @@ into `drive/art/foliage/`; photo-scanned tree models run 0.3–17 M triangles, f
 | --- | --- |
 | `drive.js` | `startDrive({ mount, onDone })`: loader, scene, loop, HUD, parking, arrival, QA hooks (`window.__drive`) |
 | `city.js` | the height function, the OSM buildings (procedural facades, roofs, rooftop units), and orchestration |
-| `roads.js` | street and route surfaces (markings in the shader), junction and corner pads, curbs, crosswalks, and the freeway (deck, barriers, soffit, pier bents, overpass cutaway) |
+| `roads.js` | street and route surfaces (markings in the shader), junction and corner pads, curbs, crosswalks, and the freeway (deck, barriers, soffit, pier bents, overpass cutaway, which still matters from behind: the Connector's deck underside is only ~2.1 m above the route near s=1056 m, so the chase camera passes through the slab and the hole keeps the deck from walling off the view; drive.js starts the cut 1.45 m above the car, just above its roof, instead of the shader's 2.2 m, because at the bottom of the deck's dip the underside is only 1.8 m above the car, and widens the circle from 11 m to reach 3 m past the camera when it trails further back at speed, capped at 25 m) |
 | `landscape.js` | terrain mesh, parks/lawns/lots, grass tufts, contact shadows, streetscape (trees, lamps, signal masts, benches, bins, hydrants, shelters) |
 | `levels.js`, `surface.js` | the height stack, `standOn`, `deckTop`, and triangle height queries |
 | `sky.js` | sky dome and generated environment lighting |
@@ -277,7 +285,7 @@ into `drive/art/foliage/`; photo-scanned tree models run 0.3–17 M triangles, f
 | `audio.js`, `sfx/` | recorded engine and effects mix |
 | `props.glb` | traffic, bus, panhandler, cyclist, cones, barricade, sign (vertex colour; white = per-instance tint) |
 | `weather.js` | live Atlanta weather → sky, sun, shadows, haze, wet roads |
-| `hero.glb`, `car.glb` | Blender exports (meshopt + WebP). The player car is the user-supplied "Crimson Demon X" model (`drive/ref/car/`, dimensioned to the production Challenger SRT Demon, no badges); `drive/tools/blender_car.py` turns it nose-forward, puts the origin on the rear axle, decimates 78k to 36.5k tris and keeps the `*_STEER` / `*_SPIN` wheel pivots the runtime rolls and steers |
+| `hero.glb`, `car.glb` | Blender exports (meshopt + WebP). The player car is the user-supplied "Crimson Demon X" model (`drive/ref/car/`, dimensioned to the production Challenger SRT Demon, no badges); `drive/tools/blender_car.py` turns it nose-forward, puts the origin on the rear axle, decimates 78k to 36.5k tris and keeps the `*_STEER` / `*_SPIN` wheel pivots; the runtime rolls the wheels and holds the steer pivots straight (lane changes slide the whole car) |
 | `vendor/` | three.js r186 (MIT), imports rewritten to relative paths so no import map is needed |
 
 **Game hook:** in `standalone/csd.js`, START RUN calls `startWithDrive()`. That

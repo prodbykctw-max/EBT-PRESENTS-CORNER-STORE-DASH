@@ -83,7 +83,13 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   renderer.toneMapping = THREE.CustomToneMapping; renderer.toneMappingExposure = 1.0;
   root.prepend(renderer.domElement);
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(42, 1, 4, 3000);   // near 4 m: the camera never gets closer, and the ink pass needs the depth precision
+  // near 2 m: as close as the chase camera ever gets to the ground (measured along the whole route: the road at the
+  // bottom of the screen stays >= 2.62 m away with the camera's 2.5 m ground clearance below). The overhead camera
+  // used 4 m, but a chase camera ~3 m off the road had the road at the bottom of the screen nearer than 4 m on 81% of
+  // the route (phone upright), and it wasn't drawn: the sky dome showed through as a flat grey slab. 2 m keeps the
+  // ink pass's depth precision at half the old value, not an eighth; the tightest layer gap (3 cm, levels.js) stays
+  // clean out to ~1 km.
+  const camera = new THREE.PerspectiveCamera(42, 1, 2, 3000);
   const comic = new Look(renderer, scene, camera, { mobile: MOBILE });   // GTA Chinatown Wars ink + comic shading
 
   // shared tiling textures come from the hero glTF materials, so they download once
@@ -175,8 +181,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   scene.add(spotGroup);
 
   // ---------- input: you drive it (GTA Chinatown Wars layout) ----------
-  // Phone: ◀ ▶ steer (bottom left), GAS, BRAKE (hold at a stop to reverse) and HORN (bottom right), all held
-  // buttons. Keys: ↑/W gas, ↓/S brake / reverse, ←/→ or A/D steer, Space/H horn.
+  // Phone: ◀ ▶ change lanes (bottom left), GAS, BRAKE (hold at a stop to reverse) and HORN (bottom right), all held
+  // buttons. Keys: ↑/W gas, ↓/S brake / reverse, ←/→ or A/D one lane per press, Space/H horn.
   const keys = new Set();
   let hornT = 0;
   const honk = () => { if (hornT <= 0) { audio.horn(); hornT = 0.6; } };
@@ -201,9 +207,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const ku = (e) => { const k = KEYMAP[e.code]; if (k) keys.delete(k); };
   addEventListener('keydown', kd); addEventListener('keyup', ku);
   // the four lanes (your parking lane, your lane, the oncoming lane, the far parking lane, where the street has them):
-  // the drive guide the car settles into when you let go of the steering, and the edges of the road you drive on
+  // used for the haptic tick each time you cross into a lane, and as the edges of the road you can drive on
   const laneCentres = (s) => [route.parkD(s, -1), route.lane(s, 0), route.lane(s, 1), route.parkD(s, 1)].filter((v) => v !== null);
-  const BOT = new URLSearchParams(location.search).has('bot');   // the QA autopilot steers by line (car.targetD)
+  // ?bot: the QA autopilot (autopilot.js) steers by writing car.targetD itself, 20 times a second, along any line
+  // it likes. The player's lane steering below must stand aside for it, or followLane() would overwrite the bot's
+  // line every frame and it could never dodge anything.
+  const BOT = new URLSearchParams(location.search).has('bot');
   let laneWas = null;
   const steerFeel = () => {                                       // a haptic tick each time you cross into a new lane
     const cs = laneCentres(car.s), i = cs.reduce((b, c, k) => Math.abs(c - car.d) < Math.abs(cs[b] - car.d) ? k : b, 0);
@@ -256,6 +265,29 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // ---------- state ----------
   let t = TIME_LIMIT, drove = 0, hits = 0, tokens = 0, nearMisses = 0, state = 'countdown', countdown = 3, shake = 0, endT = 0;
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3();
+  // ---------- stiff lane steering ----------
+  // The car sits in one of four lanes, right to left: 0 the right parking lane, 1 your lane, 2 the oncoming lane,
+  // 3 the left parking lane (d grows to the left, so that is also smallest d to largest). ◀ ▶ move it one lane.
+  // The lane is remembered by WHICH lane it is, not by a distance in metres, because both of these change along
+  // the route: lanes widen and narrow with the street (route.travel), and parking lanes only exist where the
+  // street has room for one (route.parkD is null otherwise). followLane() re-reads the lane's centre every frame,
+  // so the car stays centred in its lane through every width change, and if a parking lane runs out under you
+  // the car moves to the travel lane beside it instead of grinding the kerb where the lane used to be.
+  const laneAt = (s, k) => k === 0 ? route.parkD(s, -1) : k === 1 ? route.lane(s, 0) : k === 2 ? route.lane(s, 1) : route.parkD(s, 1);
+  const laneLatch = { left: false, right: false };
+  let laneK = 1;                                                    // start in your own lane
+  /** one lane across: dir +1 = left, -1 = right. Skips a parking lane that doesn't exist here. */
+  function laneShift(dir) {
+    let k = laneK + dir;
+    while (k >= 0 && k <= 3 && laneAt(car.s, k) === null) k += dir;
+    if (k < 0 || k > 3) return;                                     // already in the outermost lane on that side
+    laneK = k;
+  }
+  /** aim at the centre of the chosen lane as it is HERE, every frame */
+  function followLane() {
+    if (laneAt(car.s, laneK) === null) laneK = laneK === 0 ? 1 : 2; // that parking lane ended: step onto the road
+    car.targetD = laneAt(car.s, laneK);
+  }
   let camA = route.at(0).a, arrivalFrom = null;
   const result = { arrived: false, parked: false, timeLeft: 0, cleanPark: false, hits: 0, tokens: 0, nearMisses: 0, bonus: 0 };
 
@@ -333,6 +365,15 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       if (countdown <= 0) { state = 'driving'; flash('GO!', 700); hud.hint.textContent = ''; haptic(HAP.go); }
     }
     const braking = keys.has('down');
+    // Lane-latched steering: a press moves the whole car exactly one lane and
+    // holding does nothing further. The car never turns: runner.js pins yaw to
+    // zero on the lateral path, and the front wheels and body lean are held still
+    // below, so the car slides across parallel to the road.
+    if (state === 'driving' && !BOT) {
+      if (keys.has('left')) { if (!laneLatch.left) { laneLatch.left = true; laneShift(1); } } else laneLatch.left = false;
+      if (keys.has('right')) { if (!laneLatch.right) { laneLatch.right = true; laneShift(-1); } } else laneLatch.right = false;
+      followLane();
+    }
     if (state === 'driving') steerFeel();
     const approaching = car.s > spot.s - 95;
     if (state === 'driving' || state === 'parked' || state === 'late' || state === 'busted') {
@@ -342,7 +383,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         car.step(FIXED, {
           targetD: car.targetD, brake: braking || state !== 'driving', gas: state === 'driving' && keys.has('gas') ? 1 : 0,
           stopAt: approaching ? spot.s : undefined, lanes: laneCentres(car.s),
-          steer: BOT ? undefined : state === 'driving' ? (keys.has('left') ? 1 : 0) - (keys.has('right') ? 1 : 0) : 0,
+          // steer omitted on purpose: that selects runner.js's lateral path,
+          // which springs d toward targetD and never touches yaw.
         });
       }
     }
@@ -393,14 +435,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const st = standOn(onRoad, p.x, p.y, p.a, 1.47, 0.82);
     carRig.position.copy(toV3(p.x, p.y, st.z));
     carRig.rotation.set(st.pitch, p.a - Math.PI / 2, st.roll, 'YXZ');
-    carModel.rotation.z = THREE.MathUtils.clamp(-car.dv * 0.012, -0.07, 0.07);   // body roll into the dodge
+    carModel.rotation.z = 0;   // stiff: no lean into a lane change, the car moves as one block
     carModel.visible = car.invuln <= 0 || Math.floor(car.invuln * 12) % 2 === 0; // blink while recovering
     const lit = keys.has('down') || car.accel < -4;
     for (const m of tailLamps) { m.emissive.copy(lit ? BRAKE_GLOW : m.userData.base.color); m.emissiveIntensity = lit ? 4 : m.userData.base.k; }
     wheelRoll = (wheelRoll + car.v * dt / TYRE_R) % (Math.PI * 2);
     for (const w of wheelSpin) w.o.quaternion.copy(w.q0).multiply(dq.setFromAxisAngle(X, wheelRoll));
-    const steer = THREE.MathUtils.clamp(Math.atan2(car.dv, Math.max(car.v, 4)) * 1.6, -0.5, 0.5);   // fronts lead the dodge
-    for (const w of wheelSteer) w.o.quaternion.copy(w.q0).multiply(dq.setFromAxisAngle(Y, steer));
+    // front wheels stay straight: a lane change is a sideways slide of the whole car, not a steer
+    for (const w of wheelSteer) w.o.quaternion.copy(w.q0);
     world.render(car, drove);
     signals.update(dt); WIND.value += dt;   // traffic lights; the tree canopies sway
     if (state !== 'driving') { world.updateFrustum(); trams.render(); }   // (world.update keeps the frustum current while driving)
@@ -409,19 +451,39 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     fx.update(dt, camera, renderer);
     beacon.material.opacity = 0.12 + 0.08 * Math.sin(now / 250);
     spotGroup.visible = state === 'driving' || state === 'countdown';
-    // overpass cutaway follows the car (a soft hole in anything above it)
+    // overpass cutaway follows the car (a soft hole in anything above it). Still needed from behind: the Connector's
+    // deck underside is only ~2.1 m above the route around s=1056 m, so the chase camera passes through the slab, and
+    // without the hole the deck walls off the view ahead (checked in the running game, same frame with and without).
+    // The shader cuts freeway concrete more than 2.2 m above uCutPos (roads.js:92); that was set for the overhead
+    // camera. At the bottom of the deck's dip (s~1051-1059) the underside is only 1.81 m above the car (measured by
+    // ray-cast in the game), so it stayed solid and hid the car completely from the chase camera. Placing uCutPos
+    // 0.75 m below the car starts the cut at 1.45 m: just above the roof. Compared frame for frame: the car is clear
+    // at 1056 m, and at 1050 / 1063 m it changes 0.4% / 1% of the screen (the low end of a ramp slab near the car).
+    // Radius: 11 m (the original) reaches the camera when parked (8 m back), but at speed the camera trails 12-14 m
+    // back, inside the slab and outside the circle, and the screen filled with concrete (car hidden on 10 of 41
+    // frames at 46 mph). So the circle grows to reach 3 m past the camera. Tried against a circle centred between
+    // camera and car: both kept the car in view on every frame, but that one's soft edge dithered across the deck
+    // overhead; this one's edge falls behind the camera. Capped at 25 m so a camera that isn't placed yet (first
+    // frame) or is mid-swing can't wipe the whole freeway for a frame.
+    const camGap = Math.hypot(camera.position.x - carRig.position.x, camera.position.z - carRig.position.z);
     CUT.uCutPos.value.copy(carRig.position);
+    CUT.uCutPos.value.y -= 0.75;
+    CUT.uCutR.value = Math.min(25, Math.max(11, camGap + 3));
 
-    // camera: high and behind along the road (runner framing), rising and reaching further with speed
-    // GTA Chinatown Wars framing: steep, nearly overhead, at the original distance (the 30 % zoom-in was undone),
-    // pulling up with speed and leading the car so you see what's coming
-    // distance: far enough to show the whole street across (portrait) and enough of it ahead (landscape), at the
-    // original distance in landscape; steep and overhead, pulling up with speed
-    const v = Math.max(0, car.v), vf = THREE.MathUtils.degToRad(camera.fov) / 2, hf = Math.atan(Math.tan(vf) * camera.aspect);
-    const dist = Math.max((12 + v * 0.18) / Math.tan(hf), (7 + v * 0.16) / Math.tan(vf), 17.5 + v * 0.42);
-    // aim ahead of the car so it sits in the lower part of the frame and the road in front (obstacles!) is in view;
-    // more lead in landscape, where the screen is short
-    const h = dist * 0.947, back = dist * 0.322, ahead = (camera.aspect > 1 ? 8 : 5) + v * 0.4;
+    // camera: rear third-person chase view, low and close behind the car, anchored on the car's own position so it
+    // follows every lane change.
+    // Sized to the CAR, not the street. The overhead camera sized its distance to fit the whole street across the
+    // screen, which is right when looking down; behind the car, that same distance put the camera ~37 m back and the
+    // car shrank to a speck (measured in the running game: 34.7 m behind at 19 mph, ~35 px wide on a phone with the
+    // 70 deg portrait lens). Instead: 8 m behind and 3 m up at a standstill, easing back and up with speed so you see
+    // further ahead when you're going fast. 8 m keeps the rear bumper well past the camera's 4 m near plane (line 86),
+    // so the car is never sliced.
+    const v = Math.max(0, car.v);
+    const back = 8 + v * 0.12, h = 3 + v * 0.03;
+    // aim at a point ahead of the car and a little above the road, so the car sits in the lower part of the frame, the
+    // street ahead (obstacles!) fills the middle and the horizon sits high; more lead in landscape, where the screen
+    // is short
+    const ahead = (camera.aspect > 1 ? 18 : 14) + v * 0.5;
     camA += Math.atan2(Math.sin(route.at(car.s + 6).a - camA), Math.cos(route.at(car.s + 6).a - camA)) * Math.min(1, dt * 3);
     const look = route.at(car.s + ahead, car.d * 0.35);
     let targetPos, targetLook;
@@ -432,8 +494,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       targetPos = high.clone().lerp(street, e);
       targetLook = toV3(p.x, p.y, p.z).lerp(toV3(-3, 0, ground(-3, 0) + 4.2), e);
     } else {
-      targetPos = toV3(p.x - Math.cos(camA) * back, p.y - Math.sin(camA) * back, p.z + h);
-      targetLook = toV3(look.x, look.y, look.z);
+      // h is measured from the car, but on a steep street the ground behind the car is higher than the car: on Luckie
+      // St (s~48 m) a camera 3 m above the car ended up 0.7 m off the hillside behind it. Keep at least 2.5 m of air
+      // under the camera itself.
+      const cx = p.x - Math.cos(camA) * back, cy = p.y - Math.sin(camA) * back;
+      targetPos = toV3(cx, cy, Math.max(p.z + h, ground(cx, cy) + 2.5));
+      targetLook = toV3(look.x, look.y, look.z + 1.2);
     }
     if (!camPos.lengthSq()) { camPos.copy(targetPos); camLook.copy(targetLook); }
     if (state === 'parked' || state === 'late') { camPos.copy(targetPos); camLook.copy(targetLook); }
@@ -524,5 +590,5 @@ const HUD_HTML = `
   <button class="dp brake" data-k="down" aria-label="Brake, hold to reverse"><b>BRAKE</b><small>HOLD = REV</small></button>
   <button class="dp gas" data-k="gas" aria-label="Gas"><b>GAS</b></button>
 </div>
-<div class="drive-tip">GAS to go · ◀ ▶ to steer · HORN clears the way</div>
+<div class="drive-tip">GAS to go · ◀ ▶ change lanes · HORN clears the way</div>
 <div class="drive-osm">© OpenStreetMap contributors</div>`;
