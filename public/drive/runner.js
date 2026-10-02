@@ -122,13 +122,15 @@ export class RunnerCar {
     const hw = this.route.hw(this.s), lim = hw - PLAYER.halfW - 0.05;
     if (steer === undefined) {
       // lateral path - the player's stiff lane steering (drive.js sets targetD to a lane centre) and the QA autopilot
-      // (sets targetD to any line): the lateral position is a stiff critically-damped spring on targetD
+      // (sets targetD to any line): the lateral position is a stiff critically-damped spring on targetD.
+      // A tap has to feel instant: at w = 28 rad/s the car is half way into the next lane in ~60 ms and fully in it
+      // in ~0.2 s, with no overshoot, at ANY road speed. (Side speed used to be capped at 3 m/s + 0.6 x road speed,
+      // "a car can't glide sideways standing still", which made one lane take 0.7 s at 10 mph and over a second from
+      // a stop, sliding at a flat speed with a hard start and stop: delayed and jerky.)
       this.targetD = Math.max(-lim, Math.min(lim, targetD));
-      const w = 16; // spring stiffness (rad/s): ~0.2 s to settle, no overshoot
+      const w = 28;
       const acc = w * w * (this.targetD - this.d) - 2 * w * this.dv;
-      // a car can't glide sideways standing still: side speed grows with road speed
-      const side = Math.min(18, 3 + Math.abs(this.v) * 0.6);
-      this.dv += acc * dt; this.dv = Math.max(-side, Math.min(side, this.dv));
+      this.dv += acc * dt;
       // Stiff lane steering: the whole car slides across as one rigid body and its nose never leaves the road's
       // heading. (This line used to angle the nose into the move - the front-end steer the lane model replaces.)
       this.yaw = 0;

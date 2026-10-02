@@ -47,6 +47,9 @@
   .ov{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
     background:rgba(10,10,14,.9); z-index:20; text-align:center; padding:20px; gap:14px; }
   .ov.on{ display:flex; }
+  /* the two how-to-play screens (the drive's, then the store's once you get there) sit on a plain black page:
+     nothing of the game shows through behind them */
+  #ovDriveHow, #ovHow{ background:#000; }
   .card{ background:linear-gradient(160deg,var(--pink),var(--magenta));
     border:4px solid var(--navy); box-shadow:0 6px 0 var(--navy), 0 0 0 3px var(--gold);
     padding:22px 18px 18px; max-width:340px; width:92%; }
@@ -113,6 +116,16 @@
     </div>
     <button class="btn pulse" id="btnTitle">TAP TO START</button>
     <div class="credits">Engine sound: DerMeehdrescher / Meehdrescher Studios (CC BY-SA 4.0)<br>Sound effects: BigSoundBank &amp; OpenGameArt (CC0) · Map data © OpenStreetMap contributors</div>
+  </div>
+
+  <div class="ov" id="ovDriveHow">
+    <div class="rules">
+      DRIVE TO THE <b>CORNER STORE</b><br>
+      PARK IN THE <b>SPOT</b> OUT FRONT<br>
+      DON'T HIT THE <b>POLICE</b>
+    </div>
+    <div class="hint">◀ ▶ = ONE LANE PER TAP<br>GAS TO GO · BRAKE TO STOP (HOLD = REVERSE)<br>HORN CLEARS THE WAY<br>ARROWS / WASD · SPACE = HORN · P = PAUSE<br>BEAT THE CLOCK + GRAB EBT TOKENS = BONUS</div>
+    <button class="btn" id="btnDrive">START DRIVE</button>
   </div>
 
   <div class="ov" id="ovHow">
@@ -742,7 +755,7 @@ function useContinue(){
   hide("ovEnd"); S.mode="play"; last=0;
 }
 function goMenu(){
-  hide("ovEnd"); hide("ovPause"); hide("ovHow");
+  hide("ovEnd"); hide("ovPause"); hide("ovHow"); hide("ovDriveHow");
   S.mode="title"; show("ovTitle");
 }
 function togglePause(){
@@ -788,7 +801,7 @@ function endScreen(won){
 }
 /* ---------- the drive: 70 s rear-view drive to the store, before the first run ----------
    Lives in /drive/ and loads on demand, so this single-file game gets no bigger. If it can't load
-   (opened from disk, offline, or an old copy with no /drive/ next to it) the run just starts. */
+   (opened from disk, offline, or an old copy with no /drive/ next to it) you go straight to the store's how-to-play. */
 var DRIVE_URL="./drive/drive.js";
 function driveAvailable(){ return /^https?:$/.test(location.protocol) && !/[?&]nodrive\b/.test(location.search); }
 // Cover the store the instant START is tapped: the drive's code (three.js + modules) takes a moment to
@@ -804,22 +817,30 @@ function driveCover(){
   return lift;
 }
 function startWithDrive(){
-  if(!driveAvailable()){ startRun(); return; }
+  if(!driveAvailable()){ showStoreHow(null); return; }
   if(S.mode==="drive") return;                         // a second tap while it loads
-  hide("ovTitle"); hide("ovHow"); S.mode="drive";
+  hide("ovTitle"); hide("ovDriveHow"); hide("ovHow"); S.mode="drive";
   var lift=driveCover();
   import(DRIVE_URL).then(function(m){
     return m.startDrive({ mount: document.body, muted: !!S.muted, onDone: function(r){
       if(r && r.busted){ S.mode=""; startWithDrive(); return; }   // hit a cop: jail, then back to the start of the drive
-      startRun();
-      if(r && r.bonus){ addScore(r.bonus); S.driveBonus=r.bonus;
-        bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus+(r.tokens? "  ·  "+r.tokens+" EBT":""), 2.2); }
+      showStoreHow(r);                                  // you're at the store: its how-to-play first, then the run
     }});
   }).catch(function(e){
-    console.warn("drive unavailable, starting the run:", e);
+    console.warn("drive unavailable, going to the store:", e);
     var d=document.querySelector(".drive-root"); if(d&&d.parentNode) d.parentNode.removeChild(d);   // never leave a half-built drive over the store
-    lift(); startRun();
+    lift(); showStoreHow(null);
   });
+}
+// Once you get to the store (the drive is over, or there is no drive): the store's how-to-play, on its own plain
+// screen. START RUN starts the run, then banks the drive's bonus on top of the fresh score.
+var arrival=null;
+function showStoreHow(r){ arrival=r||null; S.mode="how"; hide("ovTitle"); hide("ovDriveHow"); show("ovHow"); }
+function startStoreRun(){
+  var r=arrival; arrival=null;
+  startRun();
+  if(r && r.bonus){ addScore(r.bonus); S.driveBonus=r.bonus;
+    bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus+(r.tokens? "  ·  "+r.tokens+" EBT":""), 2.2); }
 }
 // warm the drive's code while the title screen is up, so START feels instant
 function prefetchDrive(){ if(driveAvailable()) setTimeout(function(){ import(DRIVE_URL).catch(function(){}); }, 1200); }
@@ -837,7 +858,7 @@ function pickBullySpawn(){
   return {x:SPAWN_B.x,y:SPAWN_B.y};
 }
 function startRun(){
-  hide("ovEnd"); hide("ovTitle"); hide("ovHow");
+  hide("ovEnd"); hide("ovTitle"); hide("ovHow"); hide("ovDriveHow");
   S.mode="play"; S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
   // one item live on the board at a time, in a fresh random order each run —
   // you can't memorize a route, and the bully's position matters more.
@@ -1379,8 +1400,11 @@ function init(){
   fit();
   window.addEventListener("resize",fit);
   setTimeout(fit,300); setTimeout(fit,1000);
-  el("btnTitle").addEventListener("click",function(){ hide("ovTitle"); show("ovHow"); });
-  el("btnStart").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
+  // TAP TO START -> the drive's how-to-play -> START DRIVE -> the drive -> at the store, the store's how-to-play
+  // -> START RUN -> the run. With no drive (opened from disk, ?nodrive) it goes straight to the store's.
+  el("btnTitle").addEventListener("click",function(){ hide("ovTitle"); if(driveAvailable()) show("ovDriveHow"); else showStoreHow(null); });
+  el("btnDrive").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
+  el("btnStart").addEventListener("click",function(){ sfx.start(); startStoreRun(); });
   prefetchDrive();
   el("btnAgain").addEventListener("click",startRun);
   el("btnContinue").addEventListener("click",useContinue);

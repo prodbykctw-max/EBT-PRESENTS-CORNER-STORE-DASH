@@ -585,7 +585,7 @@ function useContinue(){
   hide("ovEnd"); S.mode="play"; last=0;
 }
 function goMenu(){
-  hide("ovEnd"); hide("ovPause"); hide("ovHow");
+  hide("ovEnd"); hide("ovPause"); hide("ovHow"); hide("ovDriveHow");
   S.mode="title"; show("ovTitle");
 }
 function togglePause(){
@@ -631,7 +631,7 @@ function endScreen(won){
 }
 /* ---------- the drive: 70 s rear-view drive to the store, before the first run ----------
    Lives in /drive/ and loads on demand, so this single-file game gets no bigger. If it can't load
-   (opened from disk, offline, or an old copy with no /drive/ next to it) the run just starts. */
+   (opened from disk, offline, or an old copy with no /drive/ next to it) you go straight to the store's how-to-play. */
 var DRIVE_URL="./drive/drive.js";
 function driveAvailable(){ return /^https?:$/.test(location.protocol) && !/[?&]nodrive\b/.test(location.search); }
 // Cover the store the instant START is tapped: the drive's code (three.js + modules) takes a moment to
@@ -647,22 +647,30 @@ function driveCover(){
   return lift;
 }
 function startWithDrive(){
-  if(!driveAvailable()){ startRun(); return; }
+  if(!driveAvailable()){ showStoreHow(null); return; }
   if(S.mode==="drive") return;                         // a second tap while it loads
-  hide("ovTitle"); hide("ovHow"); S.mode="drive";
+  hide("ovTitle"); hide("ovDriveHow"); hide("ovHow"); S.mode="drive";
   var lift=driveCover();
   import(DRIVE_URL).then(function(m){
     return m.startDrive({ mount: document.body, muted: !!S.muted, onDone: function(r){
       if(r && r.busted){ S.mode=""; startWithDrive(); return; }   // hit a cop: jail, then back to the start of the drive
-      startRun();
-      if(r && r.bonus){ addScore(r.bonus); S.driveBonus=r.bonus;
-        bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus+(r.tokens? "  ·  "+r.tokens+" EBT":""), 2.2); }
+      showStoreHow(r);                                  // you're at the store: its how-to-play first, then the run
     }});
   }).catch(function(e){
-    console.warn("drive unavailable, starting the run:", e);
+    console.warn("drive unavailable, going to the store:", e);
     var d=document.querySelector(".drive-root"); if(d&&d.parentNode) d.parentNode.removeChild(d);   // never leave a half-built drive over the store
-    lift(); startRun();
+    lift(); showStoreHow(null);
   });
+}
+// Once you get to the store (the drive is over, or there is no drive): the store's how-to-play, on its own plain
+// screen. START RUN starts the run, then banks the drive's bonus on top of the fresh score.
+var arrival=null;
+function showStoreHow(r){ arrival=r||null; S.mode="how"; hide("ovTitle"); hide("ovDriveHow"); show("ovHow"); }
+function startStoreRun(){
+  var r=arrival; arrival=null;
+  startRun();
+  if(r && r.bonus){ addScore(r.bonus); S.driveBonus=r.bonus;
+    bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus+(r.tokens? "  ·  "+r.tokens+" EBT":""), 2.2); }
 }
 // warm the drive's code while the title screen is up, so START feels instant
 function prefetchDrive(){ if(driveAvailable()) setTimeout(function(){ import(DRIVE_URL).catch(function(){}); }, 1200); }
@@ -680,7 +688,7 @@ function pickBullySpawn(){
   return {x:SPAWN_B.x,y:SPAWN_B.y};
 }
 function startRun(){
-  hide("ovEnd"); hide("ovTitle"); hide("ovHow");
+  hide("ovEnd"); hide("ovTitle"); hide("ovHow"); hide("ovDriveHow");
   S.mode="play"; S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
   // one item live on the board at a time, in a fresh random order each run —
   // you can't memorize a route, and the bully's position matters more.
@@ -1222,8 +1230,11 @@ function init(){
   fit();
   window.addEventListener("resize",fit);
   setTimeout(fit,300); setTimeout(fit,1000);
-  el("btnTitle").addEventListener("click",function(){ hide("ovTitle"); show("ovHow"); });
-  el("btnStart").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
+  // TAP TO START -> the drive's how-to-play -> START DRIVE -> the drive -> at the store, the store's how-to-play
+  // -> START RUN -> the run. With no drive (opened from disk, ?nodrive) it goes straight to the store's.
+  el("btnTitle").addEventListener("click",function(){ hide("ovTitle"); if(driveAvailable()) show("ovDriveHow"); else showStoreHow(null); });
+  el("btnDrive").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
+  el("btnStart").addEventListener("click",function(){ sfx.start(); startStoreRun(); });
   prefetchDrive();
   el("btnAgain").addEventListener("click",startRun);
   el("btnContinue").addEventListener("click",useContinue);
