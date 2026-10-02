@@ -202,6 +202,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     audio.unlock();
     const k = KEYMAP[e.code]; if (!k) return; e.preventDefault();
     if (k === 'horn') honk();
+    if ((k === 'left' || k === 'right') && !e.repeat) tapLane(k);   // a held key's auto-repeat is not another press
     keys.add(k);
   };
   const ku = (e) => { const k = KEYMAP[e.code]; if (k) keys.delete(k); };
@@ -220,13 +221,20 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     laneWas = i;
     if (car.scrape > 0) { haptic(HAP.edge, 400); car.scrape = 0; }
   };
+  // ◀ ▶ move the car the instant they're pressed, from the press itself, not whenever the next frame looks at the
+  // held keys: a quick tap (finger down and up between two frames, easy on a phone drawing the city at 30 fps) used
+  // to be missed entirely. One lane per press; holding does nothing more.
+  const tapLane = (k) => {
+    if (state !== 'driving' || BOT || paused) return;
+    laneShift(k === 'left' ? 1 : -1); followLane();
+  };
   for (const b of root.querySelectorAll('[data-k]')) {
     // held buttons. Touch drives them from raw touch events (what iOS always delivers, even with the page's
     // long-press guard on), each button tracking its own finger(s), so GAS + steer + HORN work together; a mouse
     // or pen uses pointer events with capture.
     const k = b.dataset.k, fingers = new Set();
     const press = () => {
-      if (!keys.has(k)) { audio.unlock(); if (k === 'horn') honk(); haptic(HAP.tap); }
+      if (!keys.has(k)) { audio.unlock(); if (k === 'horn') honk(); if (k === 'left' || k === 'right') tapLane(k); haptic(HAP.tap); }
       keys.add(k); b.classList.add('on');
     };
     const release = () => { keys.delete(k); b.classList.remove('on'); };
@@ -274,8 +282,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // so the car stays centred in its lane through every width change, and if a parking lane runs out under you
   // the car moves to the travel lane beside it instead of grinding the kerb where the lane used to be.
   const laneAt = (s, k) => k === 0 ? route.parkD(s, -1) : k === 1 ? route.lane(s, 0) : k === 2 ? route.lane(s, 1) : route.parkD(s, 1);
-  const laneLatch = { left: false, right: false };
-  let laneK = 1;                                                    // start in your own lane
+  let laneK = 1;                                                  // start in your own lane
   /** one lane across: dir +1 = left, -1 = right. Skips a parking lane that doesn't exist here. */
   function laneShift(dir) {
     let k = laneK + dir;
@@ -353,6 +360,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // ---------- loop ----------
   let last = performance.now(), raf = 0, acc = 0;
   const FIXED = 1 / 120;
+  // The physics runs in fixed 1/120 s steps, but frames don't land on step boundaries (a phone's frame times wobble,
+  // and many screens aren't 60 or 120 Hz), so drawing the car exactly where the last step left it showed it up to
+  // a step behind on some frames and not others: a hitch, most visible in a quick lane change. The car (and the
+  // camera following it) is drawn between the last two steps instead, acc / FIXED of the way.
+  let prevS = car.s, prevD = car.d;
   function frame() {
     raf = nextFrame(frame);
     if (root.clientWidth + 'x' + root.clientHeight !== sized) resize();
@@ -365,21 +377,18 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       if (countdown <= 0) { state = 'driving'; flash('GO!', 700); hud.hint.textContent = ''; haptic(HAP.go); }
     }
     const braking = keys.has('down');
-    // Lane-latched steering: a press moves the whole car exactly one lane and
-    // holding does nothing further. The car never turns: runner.js pins yaw to
-    // zero on the lateral path, and the front wheels and body lean are held still
-    // below, so the car slides across parallel to the road.
-    if (state === 'driving' && !BOT) {
-      if (keys.has('left')) { if (!laneLatch.left) { laneLatch.left = true; laneShift(1); } } else laneLatch.left = false;
-      if (keys.has('right')) { if (!laneLatch.right) { laneLatch.right = true; laneShift(-1); } } else laneLatch.right = false;
-      followLane();
-    }
+    // Stiff lane steering: each press of ◀ ▶ moves the whole car exactly one lane (tapLane, the moment it's
+    // pressed); holding does nothing further. The car never turns: runner.js pins yaw to zero on the lateral path,
+    // and the front wheels and body lean are held still below, so the car slides across parallel to the road.
+    // Here: keep aiming at the chosen lane's centre as the street widens and narrows.
+    if (state === 'driving' && !BOT) followLane();
     if (state === 'driving') steerFeel();
     const approaching = car.s > spot.s - 95;
     if (state === 'driving' || state === 'parked' || state === 'late' || state === 'busted') {
       acc += dt;
       while (acc >= FIXED) {
         acc -= FIXED;
+        prevS = car.s; prevD = car.d;   // where the car was one physics step ago, to draw it between steps
         car.step(FIXED, {
           targetD: car.targetD, brake: braking || state !== 'driving', gas: state === 'driving' && keys.has('gas') ? 1 : 0,
           stopAt: approaching ? spot.s : undefined, lanes: laneCentres(car.s),
@@ -429,7 +438,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     }
 
     // car transform
-    const p = car.pose;
+    if (Math.abs(car.s - prevS) > 2 || Math.abs(car.d - prevD) > 2) { prevS = car.s; prevD = car.d; }   // put there by a test hook (?demo), not driven: no in-between
+    const along = Math.min(1, acc / FIXED), drawS = prevS + (car.s - prevS) * along, drawD = prevD + (car.d - prevD) * along;
+    const p = route.at(drawS, drawD); p.a += car.yaw || 0;   // = car.pose, drawn between physics steps (see FIXED)
     // all four wheels on the road: height, pitch and roll from the ground under the axles and both sides
     const onRoad = (x, y) => surfAt(x, y, ground(x, y) + 1.2) ?? ground(x, y) + LEVEL.ROUTE;
     const st = standOn(onRoad, p.x, p.y, p.a, 1.47, 0.82);
@@ -485,7 +496,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // is short
     const ahead = (camera.aspect > 1 ? 18 : 14) + v * 0.5;
     camA += Math.atan2(Math.sin(route.at(car.s + 6).a - camA), Math.cos(route.at(car.s + 6).a - camA)) * Math.min(1, dt * 3);
-    const look = route.at(car.s + ahead, car.d * 0.35);
+    const look = route.at(drawS + ahead, drawD * 0.35);
     let targetPos, targetLook;
     if (state === 'parked' || state === 'late') {
       // arrival: swing down to the street-level view of the storefronts (the intro's framing)
@@ -516,7 +527,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // the pedal the engine hears: light throttle to hold speed, more to pull away (never floored for long), none
     // coasting or on the brakes
     const pedal = state === 'driving' && keys.has('gas') && !braking ? Math.max(0.2, Math.min(1, 0.3 + car.accel / 9)) : 0;
-    audio.update(car.v, pedal, Math.min(1, Math.abs(car.dv) / 14 + (braking && car.v > 6 ? 0.6 : 0)), dt);
+    // tyre squeal from a lane change: counted as the side speed the car used to be limited to (3 m/s + 0.6 x road
+    // speed), so the much quicker lane change squeals the tyres no more than before, and not at all from a stop
+    const sideSlip = Math.min(Math.abs(car.dv), 3 + Math.abs(car.v) * 0.6);
+    audio.update(car.v, pedal, Math.min(1, sideSlip / 14 + (braking && car.v > 6 ? 0.6 : 0)), dt);
     hud.time.textContent = t.toFixed(1);
     hud.time.classList.toggle('low', t < 10);
     hud.speed.textContent = Math.round(v * 2.237) + ' mph';
