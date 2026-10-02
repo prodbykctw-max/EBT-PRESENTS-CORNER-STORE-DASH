@@ -16,6 +16,9 @@ const FILES = {
 // 8-speed automatic (modern Challenger-class ratios), final drive and tyre: 65 mph in 8th ≈ 1600 rpm, like the real car
 const RATIOS = [0, 4.71, 3.14, 2.10, 1.67, 1.29, 1.0, 0.84, 0.67], FINAL = 3.09, TYRE = 2 * Math.PI * 0.37;
 const IDLE = 800, REDLINE = 6200;
+// engine loudness: 63% quieter than it was (0.75), at the owner's request. Measured at the speakers, after the master
+// compressor, the engine comes out at 37-39% of its old level at idle, pulling away, cruising, flat out and coasting.
+const ENGINE_LEVEL = 0.75 * 0.37;
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export class DriveAudio {
@@ -50,7 +53,7 @@ export class DriveAudio {
     });
     const sq = ctx.createBufferSource(); sq.buffer = this.buf.squeal; sq.loop = true;
     this.squeal = gain(ctx, 0, this.bus.fx); sq.connect(this.squeal); sq.start();
-    this.bus.engine.gain.setTargetAtTime(0.75, ctx.currentTime, 0.4);
+    this.bus.engine.gain.setTargetAtTime(ENGINE_LEVEL, ctx.currentTime, 0.4);
   }
   buildBed() {
     const ctx = this.ctx, b = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), d = b.getChannelData(0);
