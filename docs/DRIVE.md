@@ -291,7 +291,7 @@ into `drive/art/foliage/`; photo-scanned tree models run 0.3–17 M triangles, f
 | `props.glb` | traffic, bus, panhandler, cyclist, cones, barricade, sign (vertex colour; white = per-instance tint) |
 | `weather.js` | live Atlanta weather → sky, sun, shadows, haze, wet roads |
 | `hero.glb`, `car.glb` | Blender exports (meshopt + WebP). The player car is the user-supplied "Crimson Demon X" model (`drive/ref/car/`, dimensioned to the production Challenger SRT Demon, no badges); `drive/tools/blender_car.py` turns it nose-forward, puts the origin on the rear axle, decimates 78k to 36.5k tris and keeps the `*_STEER` / `*_SPIN` wheel pivots; the runtime rolls the wheels and holds the steer pivots straight (lane changes slide the whole car) |
-| `vendor/` | three.js r186 (MIT), imports rewritten to relative paths so no import map is needed |
+| `vendor/` | three.js r186.1 (MIT), imports rewritten to relative paths so no import map is needed; meshopt decoder 1.3.0 (MIT); GSAP 3.15.0 (GreenSock standard no-charge license) for the HUD's motion |
 
 **Game hook:** in `standalone/csd.js`, TAP TO START shows the drive's how-to-play (`ovDriveHow`, a plain
 black screen). START DRIVE calls `startWithDrive()`, which dynamic-imports `./drive/drive.js` and runs the drive.
