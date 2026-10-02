@@ -454,7 +454,13 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // overpass cutaway follows the car (a soft hole in anything above it). Still needed from behind: the Connector's
     // deck underside is only ~2.1 m above the route around s=1056 m, so the chase camera passes through the slab, and
     // without the hole the deck walls off the view ahead (checked in the running game, same frame with and without).
+    // The shader cuts freeway concrete more than 2.2 m above uCutPos (roads.js:92); that was set for the overhead
+    // camera. At the bottom of the deck's dip (s~1051-1059) the underside is only 1.81 m above the car (measured by
+    // ray-cast in the game), so it stayed solid and hid the car completely from the chase camera. Placing uCutPos
+    // 0.75 m below the car starts the cut at 1.45 m: just above the roof. Compared frame for frame: the car is clear
+    // at 1056 m, and at 1050 / 1063 m it changes 0.4% / 1% of the screen (the low end of a ramp slab near the car).
     CUT.uCutPos.value.copy(carRig.position);
+    CUT.uCutPos.value.y -= 0.75;
 
     // camera: rear third-person chase view, low and close behind the car, anchored on the car's own position so it
     // follows every lane change.
