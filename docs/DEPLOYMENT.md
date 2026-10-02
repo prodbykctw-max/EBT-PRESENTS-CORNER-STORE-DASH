@@ -31,6 +31,20 @@ curl https://<your-worker>.workers.dev/api/health      # -> {"ok":true,"db":true
 curl https://<your-worker>.workers.dev/api/scores      # -> {"scores":[]}
 ```
 
+## Automatic deploys from GitHub (no computer needed)
+
+`.github/workflows/ci.yml` deploys every push to `main` once `npm run qa` passes. It needs one repository secret
+(GitHub → Settings → Secrets and variables → Actions → New repository secret):
+
+- `CLOUDFLARE_API_TOKEN` (required): Cloudflare → My Profile → API Tokens → Create Token → **Edit Cloudflare Workers**
+  template. That template is enough for this Worker: deploying a Worker with a D1 binding only needs Workers edit
+  access, not D1 access.
+- `CLOUDFLARE_ACCOUNT_ID` (optional): only needed if the token can see more than one Cloudflare account.
+
+Without the token the deploy job fails with "it's necessary to set a CLOUDFLARE_API_TOKEN environment variable", and
+the live site only changes when someone runs `npm run deploy` from a computer that has run `wrangler login`. After
+adding the secret, re-run the failed deploy job of the latest `main` run (Actions → the run → Re-run failed jobs).
+
 ## Local development
 
 ```bash
