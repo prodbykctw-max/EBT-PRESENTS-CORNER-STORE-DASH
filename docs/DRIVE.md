@@ -154,7 +154,7 @@ too. Sources and licenses are in `public/drive/sfx/CREDITS.txt`. The V8 is CC BY
 - A saturated custom tone map (Khronos Neutral shoulder, +40 % saturation, a touch of contrast) instead of AgX.
 - A comic building palette: warm brick, pastel stucco, coloured offices, teal glass.
 
-The camera's near plane is 4 m for depth precision.
+The camera's near plane is 2 m (it was 4 m for the overhead camera; the chase camera keeps 2.5 m of air under itself, and the road at the bottom of the screen then never comes nearer than 2.6 m, measured along the whole route).
 
 ## Budgets (hard limits)
 
@@ -272,7 +272,7 @@ into `drive/art/foliage/`; photo-scanned tree models run 0.3–17 M triangles, f
 | --- | --- |
 | `drive.js` | `startDrive({ mount, onDone })`: loader, scene, loop, HUD, parking, arrival, QA hooks (`window.__drive`) |
 | `city.js` | the height function, the OSM buildings (procedural facades, roofs, rooftop units), and orchestration |
-| `roads.js` | street and route surfaces (markings in the shader), junction and corner pads, curbs, crosswalks, and the freeway (deck, barriers, soffit, pier bents, overpass cutaway; the cutaway is inactive since the camera moved behind the car, because drive.js parks it) |
+| `roads.js` | street and route surfaces (markings in the shader), junction and corner pads, curbs, crosswalks, and the freeway (deck, barriers, soffit, pier bents, overpass cutaway, which still matters from behind: the Connector's deck underside is only ~2.1 m above the route near s=1056 m, so the chase camera passes through the slab and the hole keeps the deck from walling off the view) |
 | `landscape.js` | terrain mesh, parks/lawns/lots, grass tufts, contact shadows, streetscape (trees, lamps, signal masts, benches, bins, hydrants, shelters) |
 | `levels.js`, `surface.js` | the height stack, `standOn`, `deckTop`, and triangle height queries |
 | `sky.js` | sky dome and generated environment lighting |

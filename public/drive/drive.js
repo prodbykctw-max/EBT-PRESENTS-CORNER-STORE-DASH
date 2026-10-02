@@ -83,7 +83,13 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   renderer.toneMapping = THREE.CustomToneMapping; renderer.toneMappingExposure = 1.0;
   root.prepend(renderer.domElement);
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(42, 1, 4, 3000);   // near 4 m: the camera never gets closer, and the ink pass needs the depth precision
+  // near 2 m: as close as the chase camera ever gets to the ground (measured along the whole route: the road at the
+  // bottom of the screen stays >= 2.62 m away with the camera's 2.5 m ground clearance below). The overhead camera
+  // used 4 m, but a chase camera ~3 m off the road had the road at the bottom of the screen nearer than 4 m on 81% of
+  // the route (phone upright), and it wasn't drawn: the sky dome showed through as a flat grey slab. 2 m keeps the
+  // ink pass's depth precision at half the old value, not an eighth; the tightest layer gap (3 cm, levels.js) stays
+  // clean out to ~1 km.
+  const camera = new THREE.PerspectiveCamera(42, 1, 2, 3000);
   const comic = new Look(renderer, scene, camera, { mobile: MOBILE });   // GTA Chinatown Wars ink + comic shading
 
   // shared tiling textures come from the hero glTF materials, so they download once
@@ -445,11 +451,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     fx.update(dt, camera, renderer);
     beacon.material.opacity = 0.12 + 0.08 * Math.sin(now / 250);
     spotGroup.visible = state === 'driving' || state === 'countdown';
-    // The overpass cutaway (roads.js) was built for the overhead camera: it cut a round hole in the freeway deck above
-    // the car so the I-75/85 Connector couldn't hide it. From behind, the camera is under the deck with the car and can
-    // always see it, so the hole would only be a gap in the bridge's ceiling right over your head (route 1010-1078 m).
-    // Parked far above the world, it cuts nothing.
-    CUT.uCutPos.value.set(0, 1e9, 0);
+    // overpass cutaway follows the car (a soft hole in anything above it). Still needed from behind: the Connector's
+    // deck underside is only ~2.1 m above the route around s=1056 m, so the chase camera passes through the slab, and
+    // without the hole the deck walls off the view ahead (checked in the running game, same frame with and without).
+    CUT.uCutPos.value.copy(carRig.position);
 
     // camera: rear third-person chase view, low and close behind the car, anchored on the car's own position so it
     // follows every lane change.
@@ -475,7 +480,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       targetPos = high.clone().lerp(street, e);
       targetLook = toV3(p.x, p.y, p.z).lerp(toV3(-3, 0, ground(-3, 0) + 4.2), e);
     } else {
-      targetPos = toV3(p.x - Math.cos(camA) * back, p.y - Math.sin(camA) * back, p.z + h);
+      // h is measured from the car, but on a steep street the ground behind the car is higher than the car: on Luckie
+      // St (s~48 m) a camera 3 m above the car ended up 0.7 m off the hillside behind it. Keep at least 2.5 m of air
+      // under the camera itself.
+      const cx = p.x - Math.cos(camA) * back, cy = p.y - Math.sin(camA) * back;
+      targetPos = toV3(cx, cy, Math.max(p.z + h, ground(cx, cy) + 2.5));
       targetLook = toV3(look.x, look.y, look.z + 1.2);
     }
     if (!camPos.lengthSq()) { camPos.copy(targetPos); camLook.copy(targetLook); }
