@@ -1,1 +1,2 @@
-three.js r186.1 (MIT) — vendored from cdn.jsdelivr.net/npm/three@0.186.1; imports rewritten to relative paths. meshopt_decoder (MIT).
+three.js r186.1 (MIT) — vendored from cdn.jsdelivr.net/npm/three@0.186.1; imports rewritten to relative paths. meshopt_decoder (MIT) — meshoptimizer 1.3.0, meshopt_decoder.mjs from the npm package.
+gsap.min.js — GSAP 3.15.0 (GreenSock "Standard no-charge license", https://gsap.com/standard-license), dist/gsap.min.js from the npm package. The store page inlines this same file at build time (standalone/build.mjs); the drive uses the page's copy, or loads this file when it runs on its own (/drive/index.html).

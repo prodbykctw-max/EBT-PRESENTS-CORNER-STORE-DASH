@@ -53,14 +53,23 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const audio = new DriveAudio({ muted });
   audio.unlock(); // still inside the START tap's user activation on most browsers
   const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
-  const [W, hero, carGltf, props, trees, weather] = await Promise.all([
+  // motion (GSAP): the store page already carries it; on its own (/drive/index.html) the drive loads the same
+  // vendored copy. Phones set to reduce motion, or no GSAP at all, keep the plain CSS behaviour.
+  const gsapReady = window.gsap ? Promise.resolve(window.gsap) : new Promise((ok) => {
+    const s = document.createElement('script'); s.src = new URL('vendor/gsap.min.js', BASE).href;
+    s.onload = () => ok(window.gsap || null); s.onerror = () => ok(null); document.head.appendChild(s);
+  });
+  const [W, hero, carGltf, props, trees, weather, gsapLib] = await Promise.all([
     fetch(new URL('world.json', BASE)).then((r) => r.json()),
     loader.loadAsync(new URL('hero.glb', BASE).href),
     loader.loadAsync(new URL('car.glb', BASE).href),
     loader.loadAsync(new URL('props.glb', BASE).href),
     loader.loadAsync(new URL('trees.glb', BASE).href),
     fetchWeather(),
+    gsapReady,
   ]);
+  const G = gsapLib && !matchMedia('(prefers-reduced-motion: reduce)').matches ? gsapLib : null;
+  if (G) root.classList.add('gs');   // drive.css: GSAP, not CSS transitions, moves the messages and pop-ups
   progress(0.7, 'Building the city');
 
   // ---------- renderer / scene ----------
@@ -192,7 +201,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (p && !(state === 'driving' || state === 'countdown')) return;              // nothing to pause at the finish
     paused = p; keys.clear();                                                     // no stuck gas / steering on resume
     for (const b of root.querySelectorAll('[data-k].on')) b.classList.remove('on');
-    root.querySelector('.drive-paused').hidden = !p;
+    const panel = root.querySelector('.drive-paused');
+    panel.hidden = !p;
+    if (p && G) {   // the pause panel fades up and its buttons pop in; resuming is instant (no waiting to drive)
+      G.fromTo(panel, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: 'power1.out' });
+      G.fromTo(panel.children, { y: 14, opacity: 0, scale: 0.94 }, { y: 0, opacity: 1, scale: 1, duration: 0.35, stagger: 0.06, ease: 'back.out(1.8)', clearProps: 'transform,opacity' });
+    }
     root.classList.toggle('is-paused', p);
     try { p ? audio.ctx?.suspend() : audio.ctx?.resume(); } catch {}
     last = performance.now();                                                     // resume without a time jump
@@ -250,9 +264,25 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // ---------- HUD ----------
   const $ = (s) => root.querySelector(s);
   const hud = { light: $('.drive-light'), lightDist: $('.drive-light b'), time: $('.drive-time'), speed: $('.drive-speed'), dist: $('.drive-dist'), tokens: $('.drive-tokens'), msg: $('.drive-msg'), hint: $('.drive-hint'), pop: $('.drive-pop') };
-  const flash = (text, ms = 1200) => { hud.msg.textContent = text; hud.msg.classList.add('on'); clearTimeout(flash.t); flash.t = setTimeout(() => hud.msg.classList.remove('on'), ms); };
-  const pop = (text) => { const el = document.createElement('b'); el.textContent = text; hud.pop.appendChild(el); setTimeout(() => el.remove(), 900); };
-  hud.hint.textContent = `${weather.label} in the ATL`;
+  // the big centre message (3-2-1-GO!, CLEAN PARK!, −1s, TOO LATE, BUSTED) punches in big and settles, then fades
+  const msgIn = () => { if (G) { G.killTweensOf(hud.msg); G.fromTo(hud.msg, { opacity: 0, scale: 1.7 }, { opacity: 1, scale: 1, duration: 0.34, ease: 'back.out(2.4)' }); } else hud.msg.classList.add('on'); };
+  const msgOut = () => { if (G) G.to(hud.msg, { opacity: 0, scale: 1.08, duration: 0.22, ease: 'power1.in' }); else hud.msg.classList.remove('on'); };
+  const flash = (text, ms = 1200) => { hud.msg.textContent = text; msgIn(); clearTimeout(flash.t); flash.t = setTimeout(msgOut, ms); };
+  // +25 / NEAR MISS +50: pops out, then floats up and fades (0.9 s, as before)
+  const pop = (text) => {
+    const el = document.createElement('b'); el.textContent = text; hud.pop.appendChild(el);
+    if (G) G.timeline({ onComplete: () => el.remove() })
+      .fromTo(el, { opacity: 0, y: 8, scale: 0.6 }, { opacity: 1, y: 0, scale: 1.15, duration: 0.16, ease: 'back.out(3)' })
+      .to(el, { y: -44, scale: 1, opacity: 0, duration: 0.74, ease: 'power2.out' });
+    else setTimeout(() => el.remove(), 900);
+  };
+  // a HUD box gives a springy bump (the EBT count when you grab a token, the clock in the last ten seconds)
+  const bump = (el, s = 1.18) => { if (G && el) G.fromTo(el, { scale: s }, { scale: 1, duration: 0.5, ease: 'elastic.out(1,0.5)', overwrite: 'auto' }); };
+  const tokBox = hud.tokens.closest('.drive-box'), timeBox = hud.time.closest('.drive-box');
+  let lowSec = null;
+  // the hint line under the car fades up whenever it changes
+  const setHint = (txt) => { if (hud.hint.textContent === txt) return; hud.hint.textContent = txt; if (G && txt) G.fromTo(hud.hint, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.3, ease: 'power2.out' }); };
+  setHint(`${weather.label} in the ATL`);
 
   const coarse = MOBILE;
   let sized = '';
@@ -339,7 +369,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   function bust(e) {
     state = 'busted'; endT = 0;
     Object.assign(result, { hits, tokens, nearMisses, busted: true, bonus: 0 });
-    hud.msg.classList.add('busted'); flash('BUSTED', 600000); hud.hint.textContent = '';
+    hud.msg.classList.add('busted'); flash('BUSTED', 600000); setHint('');
     if (e.cross) e.cross.v = 0; else Object.assign(e, { v: 0, v0: 0, cruise: 0 });   // the cruiser you hit stops
     lightsOn(poseOf(e));
     const backup = world.add('police', { s: Math.max(-15, car.s - 60), d: car.d, v: 18, cruise: 18, dir: 1, color: 0xffffff, backup: true });
@@ -348,12 +378,16 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   }
   function showBusted() {
     if (root.querySelector('.drive-busted')) return;
-    hud.msg.classList.remove('on');
+    msgOut();
     const card = document.createElement('div'); card.className = 'drive-busted';
     card.innerHTML = '<h2>BUSTED</h2><p>You hit a police car. You’re going to jail.</p><button type="button">Drive again</button>';
     card.querySelector('button').addEventListener('click', () => { haptic(HAP.tap); finish(); }, { once: true });
     tapHaptic(card.querySelector('button'));
     root.appendChild(card);
+    if (G) G.timeline()   // the jail card: dims in, BUSTED slams down, then the line and the button rise
+      .from(card, { opacity: 0, duration: 0.3, ease: 'power1.out' })
+      .from(card.querySelector('h2'), { scale: 2.4, opacity: 0, duration: 0.5, ease: 'back.out(2.5)' }, 0.05)
+      .from(card.querySelectorAll('p, button'), { y: 18, opacity: 0, duration: 0.35, stagger: 0.1, ease: 'power2.out' }, 0.3);
     if (QA && window.__botReport) setTimeout(() => { if (root.isConnected) finish(); }, 2500);   // the autopilot doesn't wait for a tap
   }
 
@@ -373,8 +407,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     hornT -= dt;
     if (state === 'countdown') {
       countdown -= dt;
-      hud.msg.textContent = countdown > 0 ? String(Math.ceil(countdown)) : 'GO!'; hud.msg.classList.add('on');
-      if (countdown <= 0) { state = 'driving'; flash('GO!', 700); hud.hint.textContent = ''; haptic(HAP.go); }
+      const cd = countdown > 0 ? String(Math.ceil(countdown)) : 'GO!';
+      if (cd !== hud.msg.textContent) { hud.msg.textContent = cd; msgIn(); }   // each number punches in as it changes
+      if (countdown <= 0) { state = 'driving'; flash('GO!', 700); setHint(''); haptic(HAP.go); }
     }
     const braking = keys.has('down');
     // Stiff lane steering: each press of ◀ ▶ moves the whole car exactly one lane (tapLane, the moment it's
@@ -413,8 +448,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         if (h.busted) { bust(h.e); break; }
       }
       if (ev.nearMiss) { nearMisses += ev.nearMiss; pop('NEAR MISS +50'); audio.whoosh(); haptic(HAP.nearMiss); }
-      if (ev.tokens) { tokens += ev.tokens; pop('+' + ev.tokens * 25); audio.token(); haptic(HAP.token, 60); }
-      if (approaching) hud.hint.textContent = Math.abs(car.d - spot.d) < 0.8 ? 'Nice — hold the curb' : 'Pull right to the curb ▸';
+      if (ev.tokens) { tokens += ev.tokens; pop('+' + ev.tokens * 25); audio.token(); haptic(HAP.token, 60); bump(tokBox); }
+      if (approaching) setHint(Math.abs(car.d - spot.d) < 0.8 ? 'Nice — hold the curb' : 'Pull right to the curb ▸');
       if (state === 'driving' && approaching && car.v < 0.3 && Math.abs(car.s - spot.s) < 2) park();
       if (state === 'driving' && t <= 0) { t = 0; state = 'late'; Object.assign(result, { hits, tokens, nearMisses }); flash('TOO LATE — walk it in', 2600); endT = 0; }
     } else if (state === 'busted') {   // the street carries on around you while the police pull up
@@ -433,7 +468,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       world.update(0, car, drove, 0);
     }
     if (state === 'parked' || state === 'late') {
-      endT += dt; hud.hint.textContent = '';
+      endT += dt; setHint('');
       if (endT > 4.2) { finish(); return; } // 2.4 s camera swing + a beat on the storefronts
     }
 
@@ -533,6 +568,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     audio.update(car.v, pedal, Math.min(1, sideSlip / 14 + (braking && car.v > 6 ? 0.6 : 0)), dt);
     hud.time.textContent = t.toFixed(1);
     hud.time.classList.toggle('low', t < 10);
+    if (t < 10 && state === 'driving') { const sec = Math.ceil(t); if (sec !== lowSec) { lowSec = sec; bump(timeBox, 1.14); } }   // last ten seconds: the clock pulses each second
     hud.speed.textContent = Math.round(v * 2.237) + ' mph';
     hud.dist.textContent = Math.max(0, Math.round(spot.s - car.s)) + ' m';
     // the next traffic light, readable on a phone (the real lamps are small from up here)
@@ -551,7 +587,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   }
 
   progress(1, 'Ready');
-  root.querySelector('.drive-loading').remove();
+  const loadingScreen = root.querySelector('.drive-loading');
+  if (G) {   // the loading screen fades away; the HUD drops in from the top and the pedals rise from the bottom
+    G.to(loadingScreen, { opacity: 0, duration: 0.35, ease: 'power1.out', onComplete: () => loadingScreen.remove() });
+    G.from(root.querySelectorAll('.drive-hud > *'), { y: -24, opacity: 0, duration: 0.45, stagger: 0.07, delay: 0.15, ease: 'back.out(1.7)', clearProps: 'transform,opacity' });
+    G.from(root.querySelectorAll('.drive-pad'), { y: 40, opacity: 0, duration: 0.5, stagger: 0.08, delay: 0.2, ease: 'back.out(1.5)', clearProps: 'transform,opacity' });
+  } else loadingScreen.remove();
   const skip = () => { haptic(HAP.tap); paused = false; Object.assign(result, { hits, tokens, nearMisses }); finish(); };
   root.querySelector('[data-skip]').addEventListener('click', skip);
   root.querySelector('[data-pause]').addEventListener('click', () => { haptic(HAP.tap); setPaused(true); });
@@ -565,6 +606,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // test hooks (drive QA + screenshots)
   Object.assign(api, { car, world, route, spot, keys, result, audio, fx, city, comic, 
     three: { scene, camera, carRig, THREE, renderer },
+    ui: { flash, pop, bump, setHint, showBusted, gsap: G },   // the HUD's motion, for tests
     snapshot: (q = 0.85) => { comic.render(); return renderer.domElement.toDataURL('image/jpeg', q); } });
   // live getters (Object.assign would have frozen their values at assignment time)
   Object.defineProperties(api, { state: { get: () => state }, time: { get: () => t } });
