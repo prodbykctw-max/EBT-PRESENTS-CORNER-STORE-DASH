@@ -93,3 +93,7 @@
 .hapl { position: absolute; inset: 0; border-radius: inherit; z-index: 2; -webkit-tap-highlight-color: transparent; }
 .hapl input { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; margin: 0; }
 .drive-skip, .drive-paused button, .drive-busted button { position: relative; }
+/* GSAP moves these when it's loaded (drive.js adds .gs to the root): no CSS transition or keyframes fighting it.
+   Without GSAP (or with reduced motion) the rules above animate them exactly as before. */
+.drive-root.gs .drive-msg { transition: none; }
+.drive-root.gs .drive-pop b, .drive-root.gs .drive-busted { animation: none; }
