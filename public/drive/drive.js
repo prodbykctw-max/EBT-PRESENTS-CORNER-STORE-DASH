@@ -459,8 +459,16 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // ray-cast in the game), so it stayed solid and hid the car completely from the chase camera. Placing uCutPos
     // 0.75 m below the car starts the cut at 1.45 m: just above the roof. Compared frame for frame: the car is clear
     // at 1056 m, and at 1050 / 1063 m it changes 0.4% / 1% of the screen (the low end of a ramp slab near the car).
+    // Radius: 11 m (the original) reaches the camera when parked (8 m back), but at speed the camera trails 12-14 m
+    // back, inside the slab and outside the circle, and the screen filled with concrete (car hidden on 10 of 41
+    // frames at 46 mph). So the circle grows to reach 3 m past the camera. Tried against a circle centred between
+    // camera and car: both kept the car in view on every frame, but that one's soft edge dithered across the deck
+    // overhead; this one's edge falls behind the camera. Capped at 25 m so a camera that isn't placed yet (first
+    // frame) or is mid-swing can't wipe the whole freeway for a frame.
+    const camGap = Math.hypot(camera.position.x - carRig.position.x, camera.position.z - carRig.position.z);
     CUT.uCutPos.value.copy(carRig.position);
     CUT.uCutPos.value.y -= 0.75;
+    CUT.uCutR.value = Math.min(25, Math.max(11, camGap + 3));
 
     // camera: rear third-person chase view, low and close behind the car, anchored on the car's own position so it
     // follows every lane change.
