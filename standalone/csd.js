@@ -119,6 +119,44 @@ var board=null, bctx=null, view=null, vctx=null;
 var walk=null, field=null, nav=null;   // Uint8Array masks
 var scale=1;
 
+/* ---------- motion (GSAP) ------------------------------------------------
+   Screens, buttons, pop-ups and numbers move with GSAP (inlined into this page at build time; the drive uses the
+   same copy) instead of switching on and off. Motion only: art, colours and layout are untouched. Phones set to
+   reduce motion get the old instant changes, and so does any copy of the page without GSAP. */
+var GS=(typeof gsap!=="undefined")?gsap:null;
+var MOTION=!!GS && !(typeof matchMedia==="function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+// the score as drawn: counts up to S.score (draw() and the list HUD read it)
+var SHOWN={v:0};
+function shownScore(){ return MOTION? Math.round(SHOWN.v) : S.score; }
+// the active item pops into place when it appears; the PAY spots pop in when the list is done
+var REVEAL={k:1,idx:-1}, PAYIN={k:1,on:false};
+// overlays: fade in while their contents rise in one after another; fade out without catching taps on the way
+function overlayIn(o){
+  if(!MOTION) return;
+  GS.killTweensOf(o); GS.killTweensOf(o.children);
+  GS.set(o,{pointerEvents:"auto"});
+  // the plain-black how-to-play screens (data-solid) cover the game at once, so nothing of it ever shows through;
+  // only their words and button move
+  if(o.hasAttribute("data-solid")) GS.set(o,{opacity:1});
+  else GS.fromTo(o,{opacity:0},{opacity:1,duration:0.28,ease:"power2.out"});
+  GS.fromTo(o.children,{y:18,opacity:0,scale:0.96},{y:0,opacity:1,scale:1,duration:0.45,ease:"back.out(1.6)",stagger:0.06,clearProps:"transform,opacity"});
+}
+function overlayOut(o){
+  GS.killTweensOf(o); GS.killTweensOf(o.children);
+  o._leaving=true; GS.set(o,{pointerEvents:"none"});
+  GS.to(o,{opacity:0,duration:0.2,ease:"power1.in",onComplete:function(){ o._leaving=false; o.classList.remove("on"); GS.set(o,{clearProps:"opacity,pointerEvents"}); }});
+}
+// buttons give under the finger and spring back (the dip matches the old CSS press: 3px for big buttons, 1px small)
+function springButtons(){
+  if(!MOTION) return;
+  Array.prototype.forEach.call(document.querySelectorAll("button"),function(b){
+    var dip=b.classList.contains("btn")?3:1;
+    b.addEventListener("pointerdown",function(){ GS.to(b,{scale:0.93,y:dip,duration:0.08,ease:"power2.out",overwrite:"auto"}); });
+    var up=function(){ GS.to(b,{scale:1,y:0,duration:0.55,ease:"elastic.out(1,0.45)",overwrite:"auto"}); };
+    b.addEventListener("pointerup",up); b.addEventListener("pointerleave",up); b.addEventListener("pointercancel",up);
+  });
+}
+
 /* ---------- mask build ----------
    Collision geometry is measured, not guessed: a per-pixel floor
    classifier (bright + not blue-dominant, so it correctly rejects
@@ -546,8 +584,13 @@ function updateBully(dt){
 }
 
 /* ---------- flow ---------- */
-function addScore(n){ S.score+=n; }
-function bubble(x,y,text,ttl){ bubbles.push({x:x,y:y,text:text,ttl:ttl||1.2,max:ttl||1.2}); }
+function addScore(n){ S.score+=n; if(MOTION) GS.to(SHOWN,{v:S.score,duration:0.6,ease:"power2.out",overwrite:true}); }
+function bubble(x,y,text,ttl){
+  var b={x:x,y:y,text:text,ttl:ttl||1.2,max:ttl||1.2,sc:1,rise:-1};
+  bubbles.push(b);
+  // pops out from small with a bounce, and drifts up fast then settles (drawn with the same 14px rise as before)
+  if(MOTION){ b.sc=0.35; b.rise=0; GS.to(b,{sc:1,duration:0.38,ease:"back.out(2.6)"}); GS.to(b,{rise:1,duration:b.max,ease:"power2.out"}); }
+}
 function currentItem(){
   return (S.order && S.activeIdx<S.order.length) ? ITEMS[S.order[S.activeIdx]] : null;
 }
@@ -623,11 +666,16 @@ function endScreen(won){
     ? "ITEMS 800 · CHECKOUT 500 · SPEED BONUS +"+(S.timeBonus||0)
     : (canCont? "1 CONTINUE LEFT — ITEMS KEPT" : "ITEMS: "+S.nGot+" / "+ITEMS.length);
   el("finalScore").textContent=String(S.score).padStart(6,"0");
+  if(MOTION){
+    var fs={v:0}; el("finalScore").textContent="000000";
+    GS.to(fs,{v:S.score,duration:0.9,delay:0.25,ease:"power2.out",onUpdate:function(){ el("finalScore").textContent=String(Math.round(fs.v)).padStart(6,"0"); }});
+  }
   el("lbList").innerHTML=""; el("lbNote").textContent="";
   el("btnContinue").style.display = canCont? "" : "none";
   el("submitRow").style.display = canCont? "none" : "";
   el("btnAgain").style.display = canCont? "none" : "";
   show("ovEnd");
+  if(MOTION) GS.fromTo(el("endTitle"),{scale:1.7},{scale:1,duration:0.55,ease:"back.out(2.4)",overwrite:"auto"});
 }
 /* ---------- the drive: 70 s rear-view drive to the store, before the first run ----------
    Lives in /drive/ and loads on demand, so this single-file game gets no bigger. If it can't load
@@ -690,6 +738,7 @@ function pickBullySpawn(){
 function startRun(){
   hide("ovEnd"); hide("ovTitle"); hide("ovHow"); hide("ovDriveHow");
   S.mode="play"; S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
+  if(GS) GS.killTweensOf(SHOWN); SHOWN.v=0; REVEAL.idx=-1; PAYIN.on=false;   // motion state starts fresh with the run
   // one item live on the board at a time, in a fresh random order each run —
   // you can't memorize a route, and the bully's position matters more.
   S.order=ITEMS.map(function(_,i){return i;});
@@ -967,7 +1016,7 @@ function draw(){
   // score
   g.font="bold 30px ui-monospace,Menlo,monospace";
   g.fillStyle=PAL.gold;
-  g.fillText(String(S.score).padStart(4,"0"), 118, 42);
+  g.fillText(String(shownScore()).padStart(4,"0"), 118, 42);
   // EBT list, in this run's pickup order, with checkmarks
   drawList(g);
   if(S.mode==="play"||S.mode==="end"){
@@ -980,6 +1029,9 @@ function draw(){
       var reg=ITEM_ATLAS[it2.icon];
       var bob=Math.sin(t*2.2)*3, s=strobe(t);
       var cx=S.curPos.x, baseY=S.curPos.y+bob, midY=baseY-reg.h/2;
+      // a newly live item pops into place (growing from its spot on the floor), then bobs and strobes as before
+      if(S.activeIdx!==REVEAL.idx){ REVEAL.idx=S.activeIdx; if(MOTION){ REVEAL.k=0; GS.killTweensOf(REVEAL); GS.to(REVEAL,{k:1,duration:0.5,ease:"back.out(2.2)"}); } else REVEAL.k=1; }
+      var rk=REVEAL.k; if(rk!==1){ g.save(); g.translate(cx,S.curPos.y); g.scale(rk,rk); g.translate(-cx,-S.curPos.y); }
       g.fillStyle="rgba(10,10,14,0.30)";
       g.beginPath(); g.ellipse(cx,S.curPos.y+reg.h*0.42,reg.w*0.42,reg.w*0.16,0,0,6.2832); g.fill();
       var glowR=Math.max(reg.w,reg.h)*(0.8+0.5*s);
@@ -1007,25 +1059,28 @@ function draw(){
       var tw=g.measureText(it2.id).width;
       g.strokeText(it2.id,cx-tw/2,baseY-reg.h-14);
       g.fillText(it2.id,cx-tw/2,baseY-reg.h-14);
+      if(rk!==1) g.restore();
     }
     // checkout pads
     if(S.nGot===ITEMS.length){
+      // the moment the list is done the PAY spots pop in at their registers, then blink as before
+      if(!PAYIN.on){ PAYIN.on=true; if(MOTION){ PAYIN.k=0; GS.killTweensOf(PAYIN); GS.to(PAYIN,{k:1,duration:0.55,ease:"back.out(2)"}); } else PAYIN.k=1; }
+      var pk=PAYIN.k;
       for(var p3=0;p3<PADS.length;p3++){
-        var pd=PADS[p3], on=Math.floor(S.t*3)%2===0;
+        var pd=PADS[p3], on=Math.floor(S.t*3)%2===0, pcx=(pd[0]+pd[2])/2, pcy=(pd[1]+pd[3])/2;
+        if(pk!==1){ g.save(); g.translate(pcx,pcy); g.scale(pk,pk); g.translate(-pcx,-pcy); g.globalAlpha=Math.max(0,Math.min(1,pk)); }
         g.fillStyle=on?"rgba(58,219,118,0.5)":"rgba(58,219,118,0.28)";
         g.fillRect(pd[0],pd[1],pd[2]-pd[0],pd[3]-pd[1]);
         g.strokeStyle="#3ADB76"; g.lineWidth=3;
         g.strokeRect(pd[0],pd[1],pd[2]-pd[0],pd[3]-pd[1]);
-      }
-      // one label per register rather than a single arrow pointing across the
-      // floor — with three live pads, "which one" should not need an arrow
-      g.font="bold 20px ui-monospace,monospace";
-      g.lineWidth=4;
-      for(var p4=0;p4<PADS.length;p4++){
-        var pq=PADS[p4], lw=g.measureText("PAY").width;
-        var lx=(pq[0]+pq[2])/2-lw/2, ly=(pq[1]+pq[3])/2+7;
+        // one label per register rather than a single arrow pointing across the
+        // floor — with three live pads, "which one" should not need an arrow
+        g.font="bold 20px ui-monospace,monospace";
+        g.lineWidth=4;
+        var lw=g.measureText("PAY").width, lx=pcx-lw/2, ly=pcy+7;
         g.strokeStyle=PAL.navy; g.strokeText("PAY",lx,ly);
         g.fillStyle="#3ADB76"; g.fillText("PAY",lx,ly);
+        if(pk!==1) g.restore();
       }
     }
     // actors: draw upper first for overlap.
@@ -1038,9 +1093,11 @@ function draw(){
       g.globalAlpha=al;
       g.font="bold 22px ui-monospace,monospace";
       var w2=g.measureText(bb.text).width+16;
-      var bx=bb.x-w2/2, by=bb.y-((1-bb.ttl/bb.max)*14);
+      var bx=bb.x-w2/2, by=bb.y-((bb.rise>=0? bb.rise : 1-bb.ttl/bb.max)*14);
+      var bsc=bb.sc; if(bsc!==1){ g.save(); g.translate(bb.x,by-8); g.scale(bsc,bsc); g.translate(-bb.x,-(by-8)); }
       g.fillStyle="#FFFFFF"; g.fillRect(bx,by-24,w2,32);
       g.fillStyle=PAL.navy; g.fillText(bb.text,bx+8,by);
+      if(bsc!==1) g.restore();
       g.globalAlpha=1;
     }
   }
@@ -1099,6 +1156,7 @@ function renderBoard(rows,mine,note){
   });
   el("lbList").innerHTML=html||"<li><span>NO SCORES YET</span><span>------</span></li>";
   el("lbNote").textContent=note||"";
+  if(MOTION) GS.from(el("lbList").children,{x:-16,opacity:0,duration:0.3,stagger:0.05,ease:"power2.out",clearProps:"transform,opacity"});
 }
 function submitScore(){
   var entry={initials:initials.join(""),score:S.score,level_reached:1};
@@ -1119,8 +1177,16 @@ function submitScore(){
 
 /* ---------- boot / loop ---------- */
 function el(id){ return document.getElementById(id); }
-function show(id){ el(id).classList.add("on"); }
-function hide(id){ el(id).classList.remove("on"); }
+function show(id){
+  var o=el(id);
+  if(o.classList.contains("on")&&!o._leaving) return;   // already up (a fade-out in progress is turned back around)
+  o._leaving=false; o.classList.add("on"); overlayIn(o);
+}
+function hide(id){
+  var o=el(id);
+  if(!o.classList.contains("on")||o._leaving) return;
+  if(MOTION) overlayOut(o); else o.classList.remove("on");
+}
 /* Follow camera. The board used to be shrunk to fit the whole store on screen, which made everyone tiny on a
    phone. Now it's shown bigger (about 1.8x on a phone, never below fit-to-screen) and scrolls to keep the player
    centred, clamped at the store's walls. The canvas stays full resolution and is only moved/scaled by CSS, so the
@@ -1163,12 +1229,13 @@ function drawListHud(){
     listHud.setAttribute("aria-hidden","true"); document.body.appendChild(listHud);
   }
   var zoomed=scale>fitScale*1.05 && S.mode!=="boot";
+  if(zoomed && listHud.style.display!=="block" && MOTION) GS.fromTo(listHud,{opacity:0,x:-14},{opacity:1,x:0,duration:0.35,ease:"power2.out"});   // slides in as the camera zooms in
   listHud.style.display=zoomed?"block":"none";
   if(!zoomed) return;
   var g=listHud.getContext("2d"); g.imageSmoothingEnabled=false;
   g.fillStyle="#020204"; g.fillRect(0,0,104,280);
   g.font="bold 24px ui-monospace,Menlo,monospace"; g.fillStyle=PAL.gold; g.textAlign="center";
-  g.fillText(String(S.score).padStart(4,"0"), 52, 26); g.textAlign="left";                     // the score
+  g.fillText(String(shownScore()).padStart(4,"0"), 52, 26); g.textAlign="left";                // the score (counting up)
   g.drawImage(view, 0,132,104,246, 0,34,104,246);   // the list panel, straight off the rendered board
 }
 var last=0;
@@ -1207,7 +1274,8 @@ function init(){
   function tryStart(){
     if(!boardReady||!playerReady||!bullyReady||!itemsReady) return;
     S.mode="title"; show("ovTitle");
-    el("loading").style.display="none";
+    if(MOTION) GS.to(el("loading"),{opacity:0,duration:0.35,ease:"power1.out",onComplete:function(){ el("loading").style.display="none"; }});
+    else el("loading").style.display="none";
   }
   img.onload=function(){
     board=document.createElement("canvas"); board.width=IW; board.height=IH;
@@ -1235,6 +1303,7 @@ function init(){
   el("btnTitle").addEventListener("click",function(){ hide("ovTitle"); if(driveAvailable()) show("ovDriveHow"); else showStoreHow(null); });
   el("btnDrive").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
   el("btnStart").addEventListener("click",function(){ sfx.start(); startStoreRun(); });
+  springButtons();
   prefetchDrive();
   el("btnAgain").addEventListener("click",startRun);
   el("btnContinue").addEventListener("click",useContinue);

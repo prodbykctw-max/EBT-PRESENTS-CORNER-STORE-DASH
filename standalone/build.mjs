@@ -19,6 +19,8 @@ const b64 = readFileSync(here('board.b64'), 'utf8').trim();
 const playerB64 = readFileSync(here('player.b64'), 'utf8').trim();
 const bullyB64 = readFileSync(here('bully.b64'), 'utf8').trim();
 const itemsB64 = readFileSync(here('items.b64'), 'utf8').trim();
+// GSAP (motion): one vendored copy, shared with the drive (public/drive/vendor/gsap.min.js)
+const gsapSrc = readFileSync(here('../public/drive/vendor/gsap.min.js'), 'utf8');
 
 // shell2.html carries literal \u escapes for a few glyphs; unescape after substitution.
 const out = shell
@@ -36,7 +38,9 @@ const out = shell
   .replaceAll('\\u23F8', '⏸')
   .replaceAll('\\u00b7', '·')
   .replaceAll('\\u00a9', '©')
-  .replaceAll('\\u2014', '—');
+  .replaceAll('\\u2014', '—')
+  // last and verbatim: the glyph unescaping above is for shell2.html / csd.js, never library code
+  .replace('%%GSAP%%', () => gsapSrc);
 
 writeFileSync(here('index.html'), out);
 copyFileSync(here('index.html'), here('../public/standalone.html'));
