@@ -48,5 +48,13 @@ copyFileSync(here('index.html'), here('../public/standalone.html'));
 // drive/ folder is the Blender/OSM toolchain), so this copy loads it from there.
 const DRIVE = 'var DRIVE_URL="./drive/drive.js";';
 if (!out.includes(DRIVE)) throw new Error('DRIVE_URL not found in the assembled game');
-writeFileSync(here('../index.html'), out.replace(DRIVE, 'var DRIVE_URL="./public/drive/drive.js";'));
-console.log(`standalone/index.html assembled (${out.length} chars) -> also copied to public/standalone.html and ./index.html`);
+let pagesCopy = out.replace(DRIVE, 'var DRIVE_URL="./public/drive/drive.js";');
+// ...and so do the tab icons (public/favicon.ico, public/icons/)
+for (const [from, to] of [['href="favicon.ico"', 'href="public/favicon.ico"'], ['href="icons/', 'href="public/icons/']]) {
+  if (!pagesCopy.includes(from)) throw new Error(`${from} not found in the assembled game`);
+  pagesCopy = pagesCopy.replaceAll(from, to);
+}
+writeFileSync(here('../index.html'), pagesCopy);
+// the files AI assistants read: edit them in public/ (the main link serves them); the GitHub Pages copy gets the same
+for (const f of ['llms.txt', 'llms-full.txt']) copyFileSync(here(`../public/${f}`), here(`../${f}`));
+console.log(`standalone/index.html assembled (${out.length} chars) -> also copied to public/standalone.html and ./index.html (+ llms.txt, llms-full.txt)`);

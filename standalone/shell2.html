@@ -53,14 +53,14 @@
   .card{ background:linear-gradient(160deg,var(--pink),var(--magenta));
     border:4px solid var(--navy); box-shadow:0 6px 0 var(--navy), 0 0 0 3px var(--gold);
     padding:22px 18px 18px; max-width:340px; width:92%; }
-  .eyebrow{ font-size:9px; letter-spacing:.22em; color:var(--cream); opacity:.9; margin-bottom:10px; }
+  .eyebrow{ font-size:12px; letter-spacing:.22em; color:var(--cream); opacity:.9; margin-bottom:10px; }
   .title{ font-size:34px; line-height:.95; font-weight:900; color:var(--gold); text-shadow:3px 3px 0 var(--navy); }
   .title small{ display:block; font-size:19px; color:#fff; text-shadow:2px 2px 0 var(--navy); margin-top:4px; }
   .rules{ font-size:12px; line-height:1.9; font-weight:700; letter-spacing:.04em; }
   .rules b{ color:var(--gold); }
-  .hint{ font-size:9px; letter-spacing:.14em; opacity:.75; line-height:1.8; }
+  .hint{ font-size:12px; letter-spacing:.02em; opacity:.75; line-height:1.8; }
   .credits{ position:absolute; bottom:max(10px, env(safe-area-inset-bottom)); left:12px; right:12px; text-align:center;
-    font-size:9px; line-height:1.6; letter-spacing:.04em; opacity:.55; }
+    font-size:12px; line-height:1.5; letter-spacing:0; opacity:.55; }
   .btn{ font:inherit; font-weight:900; letter-spacing:.1em; font-size:14px; cursor:pointer;
     background:var(--gold); color:var(--ink); border:3px solid var(--navy);
     box-shadow:0 4px 0 var(--navy); padding:12px 22px; }
@@ -70,7 +70,7 @@
   @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.45} }
   @media (prefers-reduced-motion:reduce){ .pulse{ animation:none; } }
   #endTitle{ font-size:28px; font-weight:900; text-shadow:3px 3px 0 var(--navy); }
-  #endSub{ font-size:10px; letter-spacing:.12em; opacity:.9; }
+  #endSub{ font-size:12px; letter-spacing:.02em; opacity:.9; }
   .scoreBig{ font-size:22px; color:var(--gold); font-weight:900; letter-spacing:.08em; }
   #submitRow{ display:flex; flex-direction:column; gap:10px; align-items:center; }
   .initRow{ display:flex; gap:10px; }
@@ -78,27 +78,38 @@
   .slot .lt{ font-size:24px; font-weight:900; color:var(--cream); background:var(--navy);
     border:3px solid var(--pink); width:44px; padding:8px 0; }
   .slot button{ font:inherit; font-weight:900; background:none; border:2px solid var(--gold);
-    color:var(--gold); width:44px; padding:4px 0; cursor:pointer; font-size:12px; }
+    color:var(--gold); width:44px; min-height:44px; padding:4px 0; cursor:pointer; font-size:12px; }
   #lbList{ list-style:none; width:min(300px,86vw); font-size:12px; font-weight:800; letter-spacing:.06em; }
   #lbList li{ display:flex; justify-content:space-between; padding:4px 8px; border-bottom:1px solid rgba(255,243,224,.15); }
   #lbList li.me{ color:var(--gold); background:rgba(245,197,24,.1); }
-  #lbNote{ font-size:8.5px; letter-spacing:.1em; opacity:.7; }
+  #lbNote{ font-size:12px; letter-spacing:.02em; opacity:.7; }
 </style>
-<!-- ai-seo:v1 -->
-<meta name="description" content="Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand: grab everything on the EBT list, dodge the bully, and make it to checkout. Standalone, plays on phone or desktop, no download." />
-<meta name="keywords" content="Corner Store Dash, EBT game, Everything But Trapped, EBT Presents, browser game, bully chase game, free arcade game, RARE Agency, PRODBYKCTW" />
+<!-- ai-seo:v2  search, sharing and AI assistants. Everything here names the main link (the Cloudflare Worker,
+     where the global leaderboard lives); the GitHub Pages copy is built from this same file, so it points search
+     engines at the main link too. The same facts are in public/llms.txt + llms-full.txt: keep them in step. -->
+<meta name="description" content="Free browser game from EBT (Everything But Trapped): drive to the corner store, dodge the police, park, then grab the EBT list before the bully catches you." />
+<meta name="keywords" content="Corner Store Dash, EBT game, Everything But Trapped, EBT Presents, browser game, driving game, Auburn Ave, Atlanta, bully chase game, free arcade game, RARE Agency, PRODBYKCTW" />
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large" />
-<link rel="canonical" href="https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/" />
-<link rel="alternate" type="text/plain" href="https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/llms.txt" title="llms.txt" />
+<link rel="canonical" href="https://ebt-corner-store-dash.prodbykctw.workers.dev/" />
+<link rel="alternate" type="text/plain" href="https://ebt-corner-store-dash.prodbykctw.workers.dev/llms.txt" title="llms.txt" />
+<link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
+<link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Corner Store Dash" />
-<meta property="og:url" content="https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/" />
+<meta property="og:url" content="https://ebt-corner-store-dash.prodbykctw.workers.dev/" />
 <meta property="og:title" content="Corner Store Dash — the EBT browser game" />
-<meta property="og:description" content="Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand: grab everything on the EBT list, dodge the bully, and make it to checkout. Standalone, plays on phone or desktop, no download." />
-<meta name="twitter:card" content="summary" />
+<meta property="og:description" content="Free browser game from EBT (Everything But Trapped): drive to the corner store, dodge the police, park, then grab the EBT list before the bully catches you." />
+<meta property="og:image" content="https://ebt-corner-store-dash.prodbykctw.workers.dev/share.jpg" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Corner Store Dash title screen: EBT PRESENTS CORNER STORE DASH over the corner store" />
+<meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Corner Store Dash — the EBT browser game" />
-<meta name="twitter:description" content="Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand: grab everything on the EBT list, dodge the bully, and make it to checkout. Standalone, plays on phone or desktop, no download." />
-<script type="application/ld+json">[{"@context": "https://schema.org", "@type": "VideoGame", "name": "Corner Store Dash", "url": "https://prodbykctw-max.github.io/EBT-PRESENTS-CORNER-STORE-DASH/", "description": "Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand: grab everything on the EBT list, dodge the bully, and make it to checkout. Standalone, plays on phone or desktop, no download.", "genre": "Arcade / chase", "gamePlatform": "Web browser", "applicationCategory": "Game", "operatingSystem": "Any", "playMode": "SinglePlayer", "isAccessibleForFree": true, "author": {"@type": "Organization", "name": "PRODBYKCTW LLC", "url": "https://www.instagram.com/prodbykctw/", "founder": {"@type": "Person", "name": "Melvin D. Brown III"}}, "about": {"@type": "MusicGroup", "name": "EBT (Everything But Trapped)"}, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}}, {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What is Corner Store Dash?", "acceptedAnswer": {"@type": "Answer", "text": "A free browser arcade game from the EBT (Everything But Trapped) brand: collect everything on the EBT list, dodge the bully, make it to checkout."}}, {"@type": "Question", "name": "What is EBT?", "acceptedAnswer": {"@type": "Answer", "text": "EBT — Everything But Trapped — is an Atlanta brand run by Kema; Corner Store Dash is its standalone game."}}, {"@type": "Question", "name": "Who built it?", "acceptedAnswer": {"@type": "Answer", "text": "RARƎ AGENCY / PRODBYKCTW (Melvin D. Brown III, @prodbyKCTW) with partner Kema."}}, {"@type": "Question", "name": "Is it free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes — no download, no sign-up, plays on phone or desktop."}}]}]</script>
+<meta name="twitter:description" content="Free browser game from EBT (Everything But Trapped): drive to the corner store, dodge the police, park, then grab the EBT list before the bully catches you." />
+<meta name="twitter:image" content="https://ebt-corner-store-dash.prodbykctw.workers.dev/share.jpg" />
+<meta name="twitter:image:alt" content="Corner Store Dash title screen: EBT PRESENTS CORNER STORE DASH over the corner store" />
+<script type="application/ld+json">[{"@context": "https://schema.org", "@type": "VideoGame", "name": "Corner Store Dash", "url": "https://ebt-corner-store-dash.prodbykctw.workers.dev/", "image": "https://ebt-corner-store-dash.prodbykctw.workers.dev/share.jpg", "description": "Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand. First you drive down Auburn Ave to the corner store against a 70-second clock: change lanes one tap at a time, don’t hit the police, grab EBT tokens and park in the spot out front for a bonus. Then you go inside: grab everything on the EBT list without getting caught by the bully and pay at a register. Plays on phone or desktop, no download, with a global leaderboard.", "genre": ["Arcade", "Driving", "Chase"], "gamePlatform": "Web browser", "applicationCategory": "Game", "operatingSystem": "Any", "playMode": "SinglePlayer", "inLanguage": "en", "isAccessibleForFree": true, "author": {"@type": "Organization", "name": "PRODBYKCTW LLC", "url": "https://www.instagram.com/prodbykctw/", "founder": {"@type": "Person", "name": "Melvin D. Brown III"}}, "about": {"@type": "MusicGroup", "name": "EBT (Everything But Trapped)"}, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}}, {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What is Corner Store Dash?", "acceptedAnswer": {"@type": "Answer", "text": "A free browser game from the EBT (Everything But Trapped) brand: drive down Auburn Ave to the corner store without hitting the police and park out front, then grab everything on the EBT list before the bully catches you and pay at a register."}}, {"@type": "Question", "name": "How do you play?", "acceptedAnswer": {"@type": "Answer", "text": "The drive: ◀ ▶ change lanes one per tap, GAS to go, BRAKE to stop (hold to reverse), HORN clears the way; on a keyboard, arrows or WASD, SPACE for the horn, P to pause. Hit a police car and you’re busted. Beat the 70-second clock, grab EBT tokens and park clean for a bonus that carries into the store. In the store, drag anywhere on the screen to move (arrows or WASD on a keyboard), grab all 7 items on the EBT list, dodge the bully and pay at any register. You get one continue per run, and a faster run scores more."}}, {"@type": "Question", "name": "Is there a leaderboard?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. After a run, enter three initials and save your score to the global leaderboard."}}, {"@type": "Question", "name": "What is EBT?", "acceptedAnswer": {"@type": "Answer", "text": "EBT — Everything But Trapped — is an Atlanta brand run by Kema; Corner Store Dash is its standalone game."}}, {"@type": "Question", "name": "Who built it?", "acceptedAnswer": {"@type": "Answer", "text": "RARƎ AGENCY / PRODBYKCTW (Melvin D. Brown III, @prodbyKCTW) with partner Kema."}}, {"@type": "Question", "name": "Is it free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes — no download, no sign-up, plays on phone or desktop."}}]}]</script>
 </head>
 <body>
   <div id="loading">LOADING\u2026</div>
@@ -145,9 +156,9 @@
     <button class="btn" id="btnContinue">CONTINUE \u25B6</button>
     <div id="submitRow">
       <div class="initRow">
-        <div class="slot"><button id="up0">\u25B2</button><div class="lt" id="init0">E</div><button id="dn0">\u25BC</button></div>
-        <div class="slot"><button id="up1">\u25B2</button><div class="lt" id="init1">B</div><button id="dn1">\u25BC</button></div>
-        <div class="slot"><button id="up2">\u25B2</button><div class="lt" id="init2">T</div><button id="dn2">\u25BC</button></div>
+        <div class="slot"><button id="up0" aria-label="Initial 1: next letter">\u25B2</button><div class="lt" id="init0" aria-live="polite">E</div><button id="dn0" aria-label="Initial 1: previous letter">\u25BC</button></div>
+        <div class="slot"><button id="up1" aria-label="Initial 2: next letter">\u25B2</button><div class="lt" id="init1" aria-live="polite">B</div><button id="dn1" aria-label="Initial 2: previous letter">\u25BC</button></div>
+        <div class="slot"><button id="up2" aria-label="Initial 3: next letter">\u25B2</button><div class="lt" id="init2" aria-live="polite">T</div><button id="dn2" aria-label="Initial 3: previous letter">\u25BC</button></div>
       </div>
       <button class="btn alt" id="btnSubmit">SAVE SCORE</button>
     </div>
@@ -166,9 +177,9 @@
 <script>%%GSAP%%</script>
 <script>
 var BOARD_SRC="data:image/webp;base64,%%B64%%";
-var PLAYER_SRC="data:image/png;base64,%%PLAYER%%";
-var BULLY_SRC="data:image/png;base64,%%BULLY%%";
-var ITEMS_SRC="data:image/png;base64,%%ITEMS%%";
+var PLAYER_SRC="data:image/webp;base64,%%PLAYER%%";
+var BULLY_SRC="data:image/webp;base64,%%BULLY%%";
+var ITEMS_SRC="data:image/webp;base64,%%ITEMS%%";
 %%GAME%%
 </script>
 </body>
