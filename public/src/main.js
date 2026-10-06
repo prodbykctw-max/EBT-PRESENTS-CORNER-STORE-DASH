@@ -31,16 +31,30 @@ function paint(snap) {
   els.lives.textContent = '🛒'.repeat(Math.max(0, snap.lives)) || '—';
   els.time.textContent = `${snap.timeLeft}s`;
   els.progress.textContent = `${snap.collected}/${snap.total}`;
-  els.list.innerHTML = snap.items
-    .map((i) => `<li class="${i.collected ? 'done' : ''}"><span>${i.emoji}</span>${i.label}</li>`)
-    .join('');
+  els.list.replaceChildren(...snap.items.map((i) => {
+    const li = el('li', i.collected ? 'done' : '');
+    li.append(el('span', undefined, i.emoji), String(i.label));
+    return li;
+  }));
+}
+
+/** Element builder: text always goes in via textContent, never as HTML. */
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className !== undefined) node.className = className;
+  if (text !== undefined) node.textContent = String(text);
+  return node;
 }
 
 function renderBoard({ source, rows }) {
   els.boardNote.textContent = source === 'remote' ? 'Live D1 leaderboard' : 'Offline — showing local scores';
-  els.board.innerHTML = rows.length
-    ? rows.map((r, i) => `<li><b>${i + 1}</b><span>${r.name}</span><em>${Number(r.score).toLocaleString()}</em></li>`).join('')
-    : '<li class="empty">No runs logged yet.</li>';
+  els.board.replaceChildren(...(rows.length
+    ? rows.map((r, i) => {
+      const li = document.createElement('li');
+      li.append(el('b', undefined, i + 1), el('span', undefined, r.name), el('em', undefined, Number(r.score).toLocaleString()));
+      return li;
+    })
+    : [el('li', 'empty', 'No runs logged yet.')]));
 }
 
 async function finishRun() {

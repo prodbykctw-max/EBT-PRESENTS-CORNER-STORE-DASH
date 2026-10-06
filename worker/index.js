@@ -7,22 +7,17 @@
  *   GET  /api/health            -> { ok: true, db: boolean }
  */
 
+import { validate } from './score-rules.js';
+
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'cache-control': 'no-store',
 };
 
-const CORS = {
-  'access-control-allow-origin': '*',
-  'access-control-allow-methods': 'GET,POST,OPTIONS',
-  'access-control-allow-headers': 'content-type',
-  'access-control-max-age': '86400',
-};
-
+// No CORS headers: the game is served by this same Worker, so /api/* is
+// same-origin and browsers on other sites cannot read it or preflight a POST.
 const json = (body, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { ...JSON_HEADERS, ...CORS } });
-
-const MAX_SCORE = 100_000; // ceiling well above a perfect run; blocks obvious tampering
+  new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 
 function cleanName(value) {
   return String(value ?? '')
@@ -30,16 +25,6 @@ function cleanName(value) {
     .trim()
     .slice(0, 16)
     .toUpperCase() || 'SHOPPER';
-}
-
-function validate(payload) {
-  const score = Number(payload?.score);
-  const items = Number(payload?.items ?? 0);
-  const timeLeft = Number(payload?.time_left ?? 0);
-  if (!Number.isFinite(score) || score < 0 || score > MAX_SCORE) return 'score out of range';
-  if (!Number.isInteger(items) || items < 0 || items > 32) return 'items out of range';
-  if (!Number.isFinite(timeLeft) || timeLeft < 0 || timeLeft > 3600) return 'time_left out of range';
-  return null;
 }
 
 async function listScores(env, limit) {
@@ -88,11 +73,7 @@ export default {
     if (!url.pathname.startsWith('/api/')) {
       return env.ASSETS.fetch(request);
     }
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: CORS });
-    }
-
-    if (!env.DB) return json({ error: 'D1 binding DB is not configured' }, 503);
+    if (!env.DB) return json({ error: 'unavailable' }, 503);
 
     try {
       if (url.pathname === '/api/health') {
@@ -106,6 +87,14 @@ export default {
       }
 
       if (url.pathname === '/api/scores' && request.method === 'POST') {
+        // same-origin only: a browser on another site always sends its Origin
+        const origin = request.headers.get('origin');
+        if (origin && origin !== url.origin) return json({ error: 'forbidden' }, 403);
+        if (env.SCORE_LIMIT) {
+          const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
+          const { success } = await env.SCORE_LIMIT.limit({ key: ip });
+          if (!success) return json({ error: 'too many requests' }, 429);
+        }
         const payload = await request.json().catch(() => null);
         if (!payload) return json({ error: 'invalid json' }, 400);
         const problem = validate(payload);
@@ -115,7 +104,7 @@ export default {
 
       return json({ error: 'not found' }, 404);
     } catch (err) {
-      return json({ error: 'server error', detail: String(err?.message ?? err) }, 500);
+      return json({ error: 'server error' }, 500);
     }
   },
 };

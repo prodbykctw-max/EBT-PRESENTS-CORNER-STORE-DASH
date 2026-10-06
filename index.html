@@ -1343,12 +1343,19 @@ function cycleInit(slot,delta){
   initials[slot]=LETTERS[i]; el("init"+slot).textContent=initials[slot];
 }
 function renderBoard(rows,mine,note){
-  var html="";
+  // built with textContent (never innerHTML): rows can come from the network
+  var list=el("lbList");
+  function row(a,b,me){
+    var li=document.createElement("li"), s1=document.createElement("span"), s2=document.createElement("span");
+    if(me) li.className="me";
+    s1.textContent=a; s2.textContent=b; li.appendChild(s1); li.appendChild(s2); return li;
+  }
+  list.textContent="";
   rows.slice(0,10).forEach(function(r,i){
-    var hl=(mine&&r.initials===mine.initials&&r.score===mine.score)?' class="me"':'';
-    html+="<li"+hl+"><span>"+(i+1)+". "+r.initials+"</span><span>"+String(r.score).padStart(6,"0")+"</span></li>";
+    var me=!!(mine&&r.initials===mine.initials&&r.score===mine.score);
+    list.appendChild(row((i+1)+". "+String(r.initials),String(r.score).padStart(6,"0"),me));
   });
-  el("lbList").innerHTML=html||"<li><span>NO SCORES YET</span><span>------</span></li>";
+  if(!list.children.length) list.appendChild(row("NO SCORES YET","------",false));
   el("lbNote").textContent=note||"";
   if(MOTION) GS.from(el("lbList").children,{x:-16,opacity:0,duration:0.3,stagger:0.05,ease:"power2.out",clearProps:"transform,opacity"});
 }
