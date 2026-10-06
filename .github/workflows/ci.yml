@@ -14,7 +14,7 @@ jobs:
         with:
           node-version: '20'
       - name: Install
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Map + gameplay QA
         run: npm run qa
       - name: Upload QA screenshot
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       - name: Deploy Worker
         run: npx wrangler deploy
         env:

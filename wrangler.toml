@@ -16,5 +16,15 @@ binding = "DB"
 database_name = "ebt-leaderboard"
 database_id = "3a2c03b7-8a55-4cce-8b66-b9486219a8f2"
 
+# Per-IP rate limit on POST /api/scores (5 per 60 s). The Worker skips the
+# check if this binding is missing.
+[[ratelimits]]
+name = "SCORE_LIMIT"
+namespace_id = "3002"
+
+  [ratelimits.simple]
+  limit = 5
+  period = 60
+
 [observability]
 enabled = true
