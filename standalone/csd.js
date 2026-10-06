@@ -663,7 +663,8 @@ function endScreen(won){
   el("endTitle").textContent = won? "YOU MADE IT OUT!" : (canCont? "CAUGHT!" : "THE BULLY GOT YOU!");
   el("endTitle").style.color = won? PAL.gold : PAL.coral;
   el("endSub").textContent = won
-    ? "ITEMS 800 · CHECKOUT 500 · SPEED BONUS +"+(S.timeBonus||0)
+    // non-breaking spaces inside each part: on a narrow phone the line breaks after a "·", never inside "SPEED BONUS +900"
+    ? "ITEMS\u00a0800\u00a0· CHECKOUT\u00a0500\u00a0· SPEED\u00a0BONUS\u00a0+"+(S.timeBonus||0)
     : (canCont? "1 CONTINUE LEFT — ITEMS KEPT" : "ITEMS: "+S.nGot+" / "+ITEMS.length);
   el("finalScore").textContent=String(S.score).padStart(6,"0");
   if(MOTION){
@@ -1317,7 +1318,8 @@ function init(){
     var t=ev.target&&ev.target.closest&&ev.target.closest("button");
     if(t) haptic(HAP.tap);
   },{passive:true,capture:true});
-  el("btnMute").addEventListener("click",function(){ S.muted=!S.muted; el("btnMute").textContent=S.muted?"\uD83D\uDD07":"\uD83D\uDD0A"; });
+  el("btnMute").addEventListener("click",function(){ S.muted=!S.muted; el("btnMute").textContent=S.muted?"\uD83D\uDD07":"\uD83D\uDD0A";
+    el("btnMute").setAttribute("aria-label",S.muted?"Unmute sound":"Mute sound"); });
   [0,1,2].forEach(function(s){
     el("up"+s).addEventListener("click",function(){cycleInit(s,1);});
     el("dn"+s).addEventListener("click",function(){cycleInit(s,-1);});

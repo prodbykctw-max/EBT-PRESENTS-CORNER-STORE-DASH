@@ -1,10 +1,30 @@
 # EBT Presents: Corner Store Dash
 
-A browser chase game. Grab every item on the EBT list — one item per aisle — without
-getting caught by the bully, then clear the checkout lane. Runs post to a live
-Cloudflare D1 leaderboard.
+### ▶ [Play it free: ebt-corner-store-dash.prodbykctw.workers.dev](https://ebt-corner-store-dash.prodbykctw.workers.dev/)
 
-- **No build step.** Plain ES modules, Canvas 2D, zero runtime dependencies.
+Phone or desktop, no download, no sign-up.
+
+A free browser game from EBT (Everything But Trapped). First you drive down Auburn Ave to the corner
+store against a 70-second clock: change lanes one tap at a time, don't hit the police, grab EBT tokens
+and park in the spot out front. Then you go inside: grab everything on the EBT list without getting
+caught by the bully and pay at a register. Scores go on a global leaderboard.
+
+## How to play
+
+| | Touch | Keyboard |
+| --- | --- | --- |
+| **The drive** | ◀ ▶ change lanes, one per tap · GAS to go · BRAKE to stop (hold = reverse) · HORN clears the way | Arrows / WASD · SPACE = horn · P = pause |
+| **The store** | Drag anywhere on the screen to move | Arrows / WASD · P = pause |
+
+Hit a police car and you're busted. Beat the clock, grab tokens and park clean for a bonus that
+carries into the store. In the store you get one continue per run (you keep your items), and a faster
+run scores more. Save your initials at the end to post your score.
+
+## For developers
+
+- **No bundler.** Plain ES modules and canvas. The libraries it uses (three.js for the drive, GSAP for
+  motion) are vendored in `public/drive/vendor/`, and the single-file store game is assembled by
+  `npm run build:standalone`.
 - **One deploy.** A single Cloudflare Worker serves the game *and* the leaderboard API,
   so there is no cross-origin hop between the two.
 - **Degrades cleanly.** If the API is down the game still plays and scores fall back to
@@ -38,7 +58,9 @@ npm run db:local     # apply schema.sql to the local D1
 npm run dev:worker   # wrangler dev — serves public/ and /api/*
 ```
 
-## Controls
+## Controls (v1 modular build)
+
+The live game's controls are under [How to play](#how-to-play); these are the v1 build's in `public/src/`.
 
 | Input | Action |
 | --- | --- |
