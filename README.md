@@ -29,9 +29,9 @@ up with every item you bag. Paying at a register adds 500 points plus a speed bo
 `max(0, 1500 − 15 × seconds)`. If you get caught, you have one continue per run and you keep your
 items.
 
-**Scores.** At the end you can save your initials to the score list. In the live game, that list
-only lasts for the current browser session. It does not go to the global leaderboard (see
-[Leaderboard](#leaderboard)).
+**Scores.** At the end you can save your initials to the global leaderboard, and the top 10 show
+with your rank. If the leaderboard can't be reached, your score is kept on that device for the
+session instead (see [Leaderboard](#leaderboard)).
 
 ## For developers
 
@@ -148,27 +148,29 @@ docs/                game design doc, drive notes, deployment runbook (may lag t
 | Route | Method | Notes |
 | --- | --- | --- |
 | `/api/scores?limit=10` | GET | Top N (1–100), score DESC, oldest first on ties |
-| `/api/scores` | POST | `{ name, score, items, time_left, won }`: returns `{ ok, rank, name }` (201) |
+| `/api/scores` | POST | Live game: `{ v: 2, name, score, items, run_seconds, won, drive: { bonus, time_left, tokens, near_misses } }`. v1 build: `{ name, score, items, time_left, won }`. Returns `{ ok, rank, name }` (201) |
 | `/api/health` | GET | `{ ok: true, db: true }` when the D1 binding works |
 
 The Worker checks every submission before saving it:
 
-- **Same origin only:** a POST from another site gets a 403.
+- **Same origin, plus the GitHub Pages copy:** a POST from any other site gets a 403. The Pages copy
+  (`https://prodbykctw-max.github.io`) gets CORS headers so its players share the same board.
 - **Rate limit:** 5 POSTs per 60 seconds per IP, using the `SCORE_LIMIT` binding.
-- **Score check:** `worker/score-rules.js` rejects scores outside the v1 scoring rules (8 items,
-  150 s clock, 3 lives).
+- **Score check (`worker/score-rules.js`):**
+  - Live game (`v: 2`, `validateLive`): the score has to add up exactly. That means the items
+    (100 each, 200 for rice & beans), plus checkout (500 + `max(0, 1500 − 15 × run_seconds)`)
+    when won, plus the drive bonus. The drive bonus can't exceed what its own time left, tokens
+    and near misses allow, with the drive's 70 s clock and a cap of 260 tokens.
+  - v1 build: the v1 rules (8 items, 150 s clock, 3 lives).
 
 This is a party leaderboard, not a bank. The check blocks garbage and obvious tampering, not a
 determined cheater.
 
-**What uses it today.** Only the v1 modular build (`public/src/leaderboard.js`) talks to this API.
-If the API is unreachable, v1 falls back to `localStorage`.
-
-The live store game does not post to it. `API_BASE` in `standalone/csd.js` is empty, so saved
-initials stay in an in-memory list for that session. Setting `API_BASE` alone would not connect
-it: the store game sends `{ initials, score, level_reached }` to `/api/score`, while the Worker
-expects `{ name, score, items, time_left, won }` at `/api/scores`. Its scoring also differs from
-the v1 rules that `score-rules.js` checks.
+**What uses it today.** The live game posts to it from `submitScore()` in `standalone/csd.js`.
+After saving, it reads the top 10 back and shows your rank. On the main link the API is the same
+site; on the GitHub Pages copy, `API_BASE` is the Worker's full address. If either request fails,
+the score goes into an on-device list for that session, marked OFFLINE. The v1 modular build
+(`public/src/leaderboard.js`) also posts here, and falls back to `localStorage`.
 
 ## Deployment
 
