@@ -66,11 +66,12 @@
 
 - Live: https://ebt-corner-store-dash.prodbykctw.workers.dev/ (Worker `ebt-corner-store-dash`). `worker/index.js` serves
   `public/standalone.html` at `/`; every other path is `public/` as-is.
-- `.github/workflows/ci.yml`: `npm run qa` runs on every PR and push to `main`; the `deploy` job (`npx wrangler deploy`)
-  runs only on a push to `main`, and only works when the repo has the Actions secret `CLOUDFLARE_API_TOKEN`
-  (`CLOUDFLARE_ACCOUNT_ID` is optional: wrangler picks the account itself when the token can see only one). Without
-  the token the job fails in 2 s ("necessary to set a CLOUDFLARE_API_TOKEN"), as it did on every `main` push up to
-  `35ffbe4`, and the site only changes when someone runs `npm run deploy` on a computer logged in with `wrangler login`.
-- Anything not on `main` is not live. Before saying something is live, check the deploy job of the latest `main` run and
+- Deploys: Cloudflare Workers Builds is connected to this repo (dashboard: the Worker → Settings → Builds; production
+  branch `main`, no build command, deploy command `npx wrangler deploy`, preview builds OFF because previews would share
+  the live D1 leaderboard). Every push to `main` deploys itself; the Worker's Deployments tab shows each build.
+  `.github/workflows/ci.yml` only tests (`npm run qa`, `npm run test:worker`). Its old `deploy` job needed a
+  `CLOUDFLARE_API_TOKEN` secret that was never set and failed on every push; it was removed when Builds was connected.
+  `npm run deploy` from a computer with `wrangler login` still works for a manual deploy.
+- Anything not on `main` is not live. Before saying something is live, check the latest build in the Worker's Builds/Deployments and
   compare a changed file on the live site with the branch (`curl -s <live>/drive/drive.js | sha1sum`). Builds made on
   the owner's Windows machine carry CRLF line endings in some files; strip `\r` before comparing.

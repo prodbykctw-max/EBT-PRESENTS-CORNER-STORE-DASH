@@ -181,9 +181,11 @@ the score goes into an on-device list for that session, marked OFFLINE. The v1 m
   - The Worker runs first for `/` only and serves `public/standalone.html` there.
 - `npm run deploy` runs `wrangler deploy` from a machine logged in with `wrangler login`.
   `npm run db:remote` applies `schema.sql` to the remote D1.
-- `.github/workflows/ci.yml` runs `npm run qa` on every pull request and every push to `main`. On a
-  push to `main` it then runs `npx wrangler deploy`. That step only works when the repo has the
-  Actions secret `CLOUDFLARE_API_TOKEN`; `CLOUDFLARE_ACCOUNT_ID` is optional.
+- **Deploys:** every push to `main` deploys itself. Cloudflare Workers Builds is connected to this
+  repo (production branch `main`, no build command, deploy command `npx wrangler deploy`), so no API
+  token lives in GitHub. Preview builds for other branches are off.
+- **CI:** `.github/workflows/ci.yml` runs `npm run qa` and `npm run test:worker` on every pull
+  request and every push to `main`. It doesn't deploy.
 - Full runbook: `docs/DEPLOYMENT.md`.
 
 ## Targets
