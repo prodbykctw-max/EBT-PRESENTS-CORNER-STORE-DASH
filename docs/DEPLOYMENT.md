@@ -41,7 +41,9 @@ Cloudflare Workers Builds is connected to this repo: Cloudflare dashboard → Wo
 - Deploy command: `npx wrangler deploy`
 - Preview builds: off (a preview would use the live `DB` binding and could write to the real leaderboard)
 
-Every push to `main` deploys itself, and no API token is stored in GitHub. GitHub Actions (`.github/workflows/ci.yml`)
+Every push to `main` deploys itself, and no API token is stored in GitHub. Each build shows up as a Cloudflare check
+run on the commit in GitHub and in the Worker's Deployments → View build history. If pushes stop building, check
+that the Cloudflare Workers and Pages GitHub app (github.com/settings/installations) still has access to this repo. GitHub Actions (`.github/workflows/ci.yml`)
 only runs the tests. To deploy by hand, run `npm run deploy` from a computer that has run `wrangler login`.
 
 ## Local development
