@@ -5,7 +5,10 @@
    ============================================================ */
 "use strict";
 
-var API_BASE = ""; // ← set to deployed Worker URL for the global leaderboard. Empty = local session scores.
+// The global leaderboard lives on the Worker that serves the game (worker/index.js, /api/scores).
+// On the main link it's the same site (""); the GitHub Pages copy calls the Worker by its full address.
+var LIVE_URL = "https://ebt-corner-store-dash.prodbykctw.workers.dev";
+var API_BASE = /\.github\.io$/.test(location.hostname) ? LIVE_URL : "";
 
 var IW=853, IH=1844;          // board image dimensions
 var MC=4, MW=Math.ceil(IW/MC), MH=Math.ceil(IH/MC);   // mask cells (4px)
@@ -649,7 +652,8 @@ function winCheck(){
     var p=PADS[i];
     if(player.x>p[0]-6&&player.x<p[2]+6&&player.y>p[1]-6&&player.y<p[3]+6){
       S.mode="end";
-      var timeBonus=Math.max(0,1500-Math.floor(S.runT)*15);
+      S.runSecs=Math.floor(S.runT); S.won=true;
+      var timeBonus=Math.max(0,1500-S.runSecs*15);
       addScore(500+timeBonus);
       S.timeBonus=timeBonus;
       sfx.win(); haptic(HAP.win);
@@ -718,6 +722,7 @@ function showStoreHow(r){ arrival=r||null; S.mode="how"; hide("ovTitle"); hide("
 function startStoreRun(){
   var r=arrival; arrival=null;
   startRun();
+  S.drive=r||null;   // the leaderboard sends the drive's numbers so the server can check the bonus
   if(r && r.bonus){ addScore(r.bonus); S.driveBonus=r.bonus;
     bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus+(r.tokens? "  ·  "+r.tokens+" EBT":""), 2.2); }
 }
@@ -738,7 +743,7 @@ function pickBullySpawn(){
 }
 function startRun(){
   hide("ovEnd"); hide("ovTitle"); hide("ovHow"); hide("ovDriveHow");
-  S.mode="play"; S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
+  S.mode="play"; S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.runSecs=0; S.won=false; S.drive=null; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
   if(GS) GS.killTweensOf(SHOWN); SHOWN.v=0; REVEAL.idx=-1; PAYIN.on=false;   // motion state starts fresh with the run
   // one item live on the board at a time, in a fresh random order each run —
   // you can't memorize a route, and the bully's position matters more.
@@ -1167,20 +1172,26 @@ function renderBoard(rows,mine,note){
   if(MOTION) GS.from(el("lbList").children,{x:-16,opacity:0,duration:0.3,stagger:0.05,ease:"power2.out",clearProps:"transform,opacity"});
 }
 function submitScore(){
-  var entry={initials:initials.join(""),score:S.score,level_reached:1};
+  var entry={initials:initials.join(""),score:S.score};
+  var d=S.drive||{};
+  var body={v:2,name:entry.initials,score:S.score,items:S.nGot,run_seconds:S.runSecs||0,won:!!S.won,
+    drive:{bonus:d.bonus||0,time_left:Math.round((d.timeLeft||0)*100)/100,tokens:d.tokens||0,near_misses:d.nearMisses||0}};
   el("submitRow").style.display="none";
-  if(!API_BASE){
+  el("lbNote").textContent="SAVING\u2026";
+  function offline(){
     localLB.push(entry); localLB.sort(function(a,b){return b.score-a.score;});
-    renderBoard(localLB,entry,"LOCAL SESSION SCORES \u2014 set API_BASE for the global board");
-    return;
+    renderBoard(localLB,entry,"OFFLINE \u2014 SAVED ON THIS DEVICE ONLY");
   }
-  fetch(API_BASE+"/api/score",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(entry)})
-    .then(function(r){return r.json();})
-    .then(function(d){ renderBoard(d.top||[],entry,d.rank?"YOU RANKED #"+d.rank:""); })
-    .catch(function(){
-      localLB.push(entry); localLB.sort(function(a,b){return b.score-a.score;});
-      renderBoard(localLB,entry,"OFFLINE \u2014 LOCAL SCORES");
-    });
+  fetch(API_BASE+"/api/scores",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+    .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw j; return j; }); })
+    .then(function(res){
+      return fetch(API_BASE+"/api/scores?limit=10").then(function(r){return r.json();}).then(function(top){
+        var rows=(top.scores||[]).map(function(x){return {initials:String(x.name),score:Number(x.score)};});
+        var inTop=rows.some(function(x){return x.initials===entry.initials&&x.score===entry.score;});
+        renderBoard(rows,entry,"YOU RANKED #"+res.rank+(inTop?"":" \u2014 TOP 10 SHOWN"));
+      });
+    })
+    .catch(offline);
 }
 
 /* ---------- boot / loop ---------- */

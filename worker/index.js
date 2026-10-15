@@ -7,17 +7,31 @@
  *   GET  /api/health            -> { ok: true, db: boolean }
  */
 
-import { validate } from './score-rules.js';
+import { validate, validateLive } from './score-rules.js';
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'cache-control': 'no-store',
 };
 
-// No CORS headers: the game is served by this same Worker, so /api/* is
-// same-origin and browsers on other sites cannot read it or preflight a POST.
+// The game is served by this same Worker, so /api/* is same-origin. The one other site allowed in is the
+// GitHub Pages copy of the game (PAGES_ORIGIN): it gets CORS headers so its players land on the same board.
+// Any other site's browser can't read the API or preflight a POST.
+const PAGES_ORIGIN = 'https://prodbykctw-max.github.io';
+const CORS_HEADERS = {
+  'access-control-allow-origin': PAGES_ORIGIN,
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+  'access-control-allow-headers': 'content-type',
+  'access-control-max-age': '86400',
+  vary: 'origin',
+};
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+const withCors = (res) => {
+  const out = new Response(res.body, res);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) out.headers.set(k, v);
+  return out;
+};
 
 function cleanName(value) {
   return String(value ?? '')
@@ -44,7 +58,8 @@ async function addScore(env, payload, request) {
     name,
     score,
     items: Math.floor(Number(payload.items ?? 0)),
-    time_left: Math.floor(Number(payload.time_left ?? 0)),
+    // v1: seconds left on the store clock. Live game (v: 2): seconds spent in the store.
+    time_left: Math.floor(Number(payload.v === 2 ? payload.run_seconds ?? 0 : payload.time_left ?? 0)),
     won: payload.won ? 1 : 0,
     country: request.headers.get('cf-ipcountry') ?? null,
   };
@@ -73,6 +88,16 @@ export default {
     if (!url.pathname.startsWith('/api/')) {
       return env.ASSETS.fetch(request);
     }
+    if (request.headers.get('origin') === PAGES_ORIGIN) {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return withCors(await api(request, env, url));
+    }
+    if (request.method === 'OPTIONS') return json({ error: 'forbidden' }, 403);
+    return api(request, env, url);
+  },
+};
+
+async function api(request, env, url) {
     if (!env.DB) return json({ error: 'unavailable' }, 503);
 
     try {
@@ -89,7 +114,7 @@ export default {
       if (url.pathname === '/api/scores' && request.method === 'POST') {
         // same-origin only: a browser on another site always sends its Origin
         const origin = request.headers.get('origin');
-        if (origin && origin !== url.origin) return json({ error: 'forbidden' }, 403);
+        if (origin && origin !== url.origin && origin !== PAGES_ORIGIN) return json({ error: 'forbidden' }, 403);
         if (env.SCORE_LIMIT) {
           const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
           const { success } = await env.SCORE_LIMIT.limit({ key: ip });
@@ -97,7 +122,8 @@ export default {
         }
         const payload = await request.json().catch(() => null);
         if (!payload) return json({ error: 'invalid json' }, 400);
-        const problem = validate(payload);
+        // v: 2 is the live game (drive + store); anything else is the v1 modular build's rules
+        const problem = payload.v === 2 ? validateLive(payload) : validate(payload);
         if (problem) return json({ error: problem }, 400);
         return json(await addScore(env, payload, request), 201);
       }
@@ -106,5 +132,4 @@ export default {
     } catch (err) {
       return json({ error: 'server error' }, 500);
     }
-  },
-};
+}
