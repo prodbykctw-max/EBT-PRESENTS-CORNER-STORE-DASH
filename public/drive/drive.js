@@ -425,7 +425,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         acc -= FIXED;
         prevS = car.s; prevD = car.d;   // where the car was one physics step ago, to draw it between steps
         car.step(FIXED, {
-          targetD: car.targetD, brake: braking || state !== 'driving', gas: state === 'driving' && keys.has('gas') ? 1 : 0,
+          // once the run is over (parked / late / busted) the brake holds the car where it stopped: without `hold`,
+          // a held brake at a standstill is reverse, and the car used to back out of the spot during the arrival shot
+          targetD: car.targetD, brake: braking || state !== 'driving', hold: state !== 'driving', gas: state === 'driving' && keys.has('gas') ? 1 : 0,
           stopAt: approaching ? spot.s : undefined, lanes: laneCentres(car.s),
           // steer omitted on purpose: that selects runner.js's lateral path,
           // which springs d toward targetD and never touches yaw.
