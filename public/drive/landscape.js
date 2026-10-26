@@ -226,8 +226,20 @@ export function buildContactShadows(W, ground, skip) {
 
 // ------------------------------------------------------------------ trees
 export const WIND = { value: 0 };   // seconds; drive.js advances it, the canopies sway with it
+// Trees closer to the camera than this (metres) aren't drawn, so they never fill the screen. 0 = off. A clean cut, not a
+// dithered fade: with the ink outlines a dither turned into black speckle all over the screen (tried in the game).
+// drive.js turns it on only for the chase on foot, whose camera rides high behind you along tree-lined sidewalks and
+// otherwise passes right through the canopies (checked in the running game: a screen full of leaves at the start).
+export const NEAR_CUT = { value: 0 };
+const nearCut = (sh) => {
+  sh.uniforms.uNearCut = NEAR_CUT;
+  sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uNearCut;')
+    .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+      if (uNearCut > 0.0 && length(vViewPosition) < uNearCut) discard;`);
+};
 function treeMaterials(tex) {
   const bark = new THREE.MeshStandardMaterial({ map: tex.bark, normalMap: tex.barkNor, roughness: 0.95, metalness: 0 });
+  bark.onBeforeCompile = nearCut; bark.customProgramCacheKey = () => 'tree_bark';
   const leaves = new THREE.MeshStandardMaterial({ map: tex.leaves, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.8, metalness: 0 });
   leaves.onBeforeCompile = (sh) => {
     sh.uniforms.uWind = WIND;
@@ -243,6 +255,7 @@ function treeMaterials(tex) {
         transformed.z += cos(uWind * 1.1 + wph * 1.3) * 0.07 * wh;`);
     // late-September Atlanta: still summer green (the scans lean a little autumn)
     sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb *= vec3(0.84, 1.0, 0.74);');
+    nearCut(sh);
   };
   leaves.customProgramCacheKey = () => 'tree_leaves';
   return { bark, leaves };

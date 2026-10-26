@@ -5,18 +5,20 @@ Play / canonical URL: https://ebt-corner-store-dash.prodbykctw.workers.dev/
 
 ## TL;DR
 
-Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand. It comes in two parts: a 70-second drive down Auburn Ave to the corner store, then a run through the store to grab everything on the EBT list before the bully catches you. Plays on phone or desktop, no download, no sign-up. Scores go on a global leaderboard.
+Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand. It comes in two parts: the bully chases you to your car and you race him on a 70-second drive down Auburn Ave to the corner store, then a run through the store to grab everything on the EBT list before he catches you. Plays on phone or desktop, no download, no sign-up. Scores go on a global leaderboard.
 
 Developer: PRODBYKCTW LLC (Melvin D. Brown III, @prodbyKCTW) / RARƎ AGENCY. Genre: arcade / driving / chase. Platform: web browser (phone and desktop). Price: free.
 
 ## What it is
 
-A standalone game presented by EBT (Everything But Trapped), the Atlanta brand run by Kema. You drive to the EBT corner store on Auburn Ave in Atlanta, park out front, and go inside, where you race to collect every item on the EBT list, dodge the bully and pay at a register.
+A standalone game presented by EBT (Everything But Trapped), the Atlanta brand run by Kema. The bully chases you up the block to your car, you race him to the EBT corner store on Auburn Ave in Atlanta, park out front, and go inside, where you collect every item on the EBT list, dodge him and pay at a register.
 
 ## How to play
 
-### 1. The drive (70 seconds)
+### 1. The chase and the drive (70 seconds)
 
+- On foot: the bully is right behind you. Hold GAS to run up the block to your car (its hazards are flashing) and use ◀ ▶ to dodge people on the sidewalk; run into someone and you stumble, and if he catches you he shoves you.
+- Then race him to the store: the bar at the top shows your head, his head and the store. Your lead when you park is your head start in the store; if he catches up on the way, he follows you straight in.
 - Get to the corner store before the clock runs out and park in the spot out front.
 - Don't hit the police: hit a police car and you're BUSTED (drive again).
 - Grab EBT tokens on the way.
@@ -28,7 +30,7 @@ A standalone game presented by EBT (Everything But Trapped), the Atlanta brand r
 ### 2. The store
 
 - Grab all 7 items on the EBT list: apple, chips, chicken, lemonade, bread, milk, rice & beans.
-- Don't get caught by the bully. You get one continue per run, and you keep the items you already have.
+- Don't get caught by the bully. He cuts you off, hunts for you when he loses sight of you, and lunges when he's close: a red ring under him is the wind-up, so sidestep. You get one continue per run, and you keep the items you already have.
 - With the list complete, pay at any register (the PAY spots in front of the counters) to win.
 - Touch controls: drag anywhere on the screen to move. Keyboard: arrows or WASD, P = pause.
 - Scoring: 100 per item (200 for rice & beans), 500 for checking out, a speed bonus of up to 1,500 (a faster run scores more), plus the drive bonus.
@@ -41,7 +43,7 @@ The drive is a 3D level built with three.js on OpenStreetMap map data of Auburn 
 ## Frequently asked questions
 
 Q: What is Corner Store Dash?
-A: A free browser game from the EBT (Everything But Trapped) brand: drive down Auburn Ave to the corner store without hitting the police and park out front, then grab everything on the EBT list before the bully catches you and pay at a register.
+A: A free browser game from the EBT (Everything But Trapped) brand: outrun the bully to your car, race him down Auburn Ave to the corner store without hitting the police and park out front, then grab everything on the EBT list before he catches you and pay at a register.
 
 Q: Where can I play it?
 A: At https://ebt-corner-store-dash.prodbykctw.workers.dev/ in any phone or desktop browser.

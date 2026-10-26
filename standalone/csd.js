@@ -63,6 +63,19 @@ var PSPEED=260, B_IDLE=63, B_BASE=143, B_PER_ITEM=5.6, B_CAP=177;
 // don't change steady-state difficulty (by AGGRO_RAMP seconds in, speed is
 // identical to before) - they only soften the two "surprise" transitions.
 var AGGRO_RAMP=2.2, CONTINUE_GRACE=1.2;
+/* He hunts like a person, not a homing missile (updateBully):
+   - cut-offs: in sight, he heads for where you'll be B_PREDICT s from now along your line, not where you were
+   - out of sight he goes to where he last saw you and looks around ("?"); after B_SEARCH s he follows his nose to you
+   - spotting you again: "!" and a burst (B_BURST x speed for B_SPOT_BURST s)
+   - the lunge: close (LUNGE_R px) and in the open he stops and winds up for LUNGE_WIND s (a red ring flares under
+     him: your cue), then dashes LUNGE_T s at LUNGE_V px/s at where you were. Faster than you, but short: sidestep or
+     turn a corner during the wind-up and it misses ("CLOSE CALL!"); then he's winded (half speed for 0.45 s) and
+     can't lunge again for LUNGE_CD s. */
+var B_PREDICT=0.5, B_SEARCH=1.4, B_BURST=1.22, B_SPOT_BURST=0.8;
+var LUNGE_R=165, LUNGE_WIND=0.38, LUNGE_T=0.42, LUNGE_V=330, LUNGE_CD=4.2;
+/* The race to the store (the drive's chase): with a lead he comes in through the door that many seconds into the run;
+   on your tail, right behind you. DOOR is the welcome mat, between the cart corrals. */
+var DOOR={x:415,y:1590}, BULLY_IN_MIN=2, BULLY_IN_MAX=30, BULLY_IN_TAIL=1.4;
 var CATCH_R=30, PICK_R=36;
 var BULLY_LINES=["HEY! YOU!","GIMME THAT!","GET BACK HERE!","THOSE ARE MINE!"];
 
@@ -523,30 +536,78 @@ function updateBully(dt){
       S.aggroT-=dt;
     } else speed = huntSpeed;
   } else speed = B_IDLE;
-  var tx,ty;
+  var tx,ty, pd0=Math.hypot(player.x-b.x,player.y-b.y);
+  if(b.burst>0){ b.burst-=dt; speed*=B_BURST; }
+  if(b.stagger>0){ b.stagger-=dt; speed*=0.5; }                 // catching his breath after a lunge
+  if(b.lungeCD>0) b.lungeCD-=dt;
+  // ---- the lunge: wind up (he stops and tenses, a red ring flares under him), then a short dash at where you were
+  if(b.lunge){
+    var L=b.lunge; L.t-=dt;
+    if(L.phase==="wind"){
+      b.vx=0; b.vy=0;
+      if(L.t<=0){
+        var lx=player.x+player.vx*0.12-b.x, ly=player.y+player.vy*0.12-b.y, lm=Math.hypot(lx,ly)||1;
+        L.phase="dash"; L.t=LUNGE_T; L.dx=lx/lm; L.dy=ly/lm; L.closest=pd0;
+        sfx.lunge(); shakeView(5);
+      }
+    } else {
+      b.vx=L.dx*LUNGE_V; b.vy=L.dy*LUNGE_V; moveEntity(b,dt);
+      L.closest=Math.min(L.closest, Math.hypot(player.x-b.x,player.y-b.y));
+      if(L.t<=0){
+        b.lunge=null; b.lungeCD=LUNGE_CD; b.stagger=0.45;
+        if(L.closest<70 && S.mode==="play"){ bubble(player.x,player.y-96,"CLOSE CALL!",1.1); haptic(HAP.near); shakeView(3); }
+      }
+    }
+    if(Math.hypot(player.x-b.x,player.y-b.y)<CATCH_R) caught();
+    return;
+  }
   if(!S.active){
-    if(!b.wander || b.repath<=0){
-      b.repath=1.8+Math.random();
-      var ang=Math.random()*6.2832, r=60+Math.random()*90;
-      var hm=b.home||SPAWN_B, p=snapToField(Math.round(hm.x+Math.cos(ang)*r), Math.round(hm.y+Math.sin(ang)*r));
-      b.wander=p;
+    // before he's after you: he patrols the store, aisle to aisle, at an amble (not shuffling about one spot)
+    if(!b.wander || b.repath<=0 || (b.path && b.pi>=b.path.length)){
+      b.repath=6+Math.random()*3;
+      var wp=null;
+      for(var tries=0;tries<30&&!wp;tries++){ var wx=40+Math.random()*(IW-80), wy=120+Math.random()*1320; if(boxFree(wx,wy)&&Math.hypot(wx-b.x,wy-b.y)>280) wp={x:wx,y:wy}; }
+      b.wander=wp||snapToField(b.x,b.y); b.path=findPath(b.x,b.y,b.wander.x,b.wander.y); b.pi=1;
     }
-    tx=b.wander.x; ty=b.wander.y;
-    if(Math.abs(tx-b.x)<6&&Math.abs(ty-b.y)<6){ b.vx=0;b.vy=0; return; }
-  } else if(!(b.noLos>0) && los(b.x,b.y,player.x,player.y)){
-    tx=player.x; ty=player.y; b.path=null;
+    if(b.path&&b.pi<b.path.length){ var cw=b.path[b.pi]; tx=(cw%GW)*GC+GC/2; ty=((cw/GW)|0)*GC+GC/2; if(Math.abs(tx-b.x)<12&&Math.abs(ty-b.y)<12) b.pi++; }
+    else { b.vx=0; b.vy=0; return; }
+    speed=B_IDLE*1.15;
   } else {
-    if(b.repath<=0||!b.path||b.pi>=b.path.length){
-      b.repath=0.4;
-      b.path=findPath(b.x,b.y,player.x,player.y); b.pi=1;
+    var see=!(b.noLos>0) && los(b.x,b.y,player.x,player.y);
+    if(see){
+      // he spots you again after losing you: a "!" and a burst of speed
+      if((b.lostT||0)>1.5){ bubble(b.x,b.y-92,"!",0.7); b.burst=B_SPOT_BURST; sfx.spot(); haptic(HAP.alert,400); }
+      b.lostT=0; b.lastX=player.x; b.lastY=player.y; b.lastVX=player.vx; b.lastVY=player.vy; b.asked=false;
+      // he cuts you off: aim where you'll be half a second from now along your line (if he can see that spot),
+      // not where you are; close in, it's straight at you
+      var ax=player.x+player.vx*B_PREDICT, ay=player.y+player.vy*B_PREDICT;
+      if(pd0<110 || !boxFree(ax,ay) || !los(b.x,b.y,ax,ay)){ tx=player.x; ty=player.y; } else { tx=ax; ty=ay; }
+      b.path=null;
+      // close and in the open: wind up a lunge
+      if(S.aggroT<=0 && !(b.lungeCD>0) && pd0<LUNGE_R && pd0>CATCH_R+8 && !(b.stagger>0)){
+        b.lunge={phase:"wind",t:LUNGE_WIND}; b.vx=0; b.vy=0; sfx.windup();
+        return;
+      }
+    } else {
+      b.lostT=(b.lostT||0)+dt;
+      // lost you: first he goes to where he last saw you (a step further along the way you were going) and looks
+      // around; after B_SEARCH he follows his nose straight to you, so hiding buys you a moment, not the round
+      var hunch = b.lostT>B_SEARCH || b.lastX===undefined, gx2=player.x, gy2=player.y;
+      if(!hunch){ gx2=b.lastX+(b.lastVX||0)*0.35; gy2=b.lastY+(b.lastVY||0)*0.35; if(!boxFree(gx2,gy2)){ gx2=b.lastX; gy2=b.lastY; } }
+      if(!hunch && !b.asked && b.lostT>0.5){ b.asked=true; bubble(b.x,b.y-92,"?",0.8); }
+      if(b.repath<=0||!b.path||b.pi>=b.path.length||b.goal!==hunch){
+        b.repath=0.4; b.goal=hunch;
+        b.path=findPath(b.x,b.y,gx2,gy2); b.pi=1;
+      }
+      if(b.path&&b.pi<b.path.length){
+        var c=b.path[b.pi]; tx=(c%GW)*GC+GC/2; ty=((c/GW)|0)*GC+GC/2;
+        if(Math.abs(tx-b.x)<12&&Math.abs(ty-b.y)<12) b.pi++;
+      } else if(!hunch){ b.vx=0; b.vy=0; b.face=(Math.floor(S.t*2)%2)?"L":"R"; tx=b.x; ty=b.y; }   // at the spot: looking around
+      else { tx=player.x; ty=player.y; }
     }
-    if(b.path&&b.pi<b.path.length){
-      var c=b.path[b.pi]; tx=(c%GW)*GC+GC/2; ty=((c/GW)|0)*GC+GC/2;
-      if(Math.abs(tx-b.x)<12&&Math.abs(ty-b.y)<12) b.pi++;
-    } else { tx=player.x; ty=player.y; }
   }
   var ddx=tx-b.x, ddy=ty-b.y, d=Math.sqrt(ddx*ddx+ddy*ddy)||1;
-  b.vx=ddx/d*speed; b.vy=ddy/d*speed;
+  if(d<1){ b.vx=0; b.vy=0; } else { b.vx=ddx/d*speed; b.vy=ddy/d*speed; }
   moveEntity(b,dt);
   // Stuck watchdog: wedged on a corner → skip waypoint + force repath.
   // This checks NET displacement over a rolling ~0.4s window, not the
@@ -613,7 +674,9 @@ function collect(it){
   S.curPos=pickSpawnPos(currentItem());
   bubble(pickedX,pickedY-40,"+"+it.pts+" "+it.id,1.2);
   sfx.pick(); haptic(HAP.pick);
-  if(!S.active){ S.active=true; S.aggroT=AGGRO_RAMP; bubble(bully.x,bully.y-92,"HEY! MY SNACKS!",1.4); sfx.alert(); haptic(HAP.alert); }
+  // (after the race he's outside until his time comes, so a pickup doesn't summon him; without the race, your first
+  // pickup is what sets him off, as before)
+  if(!S.active && !S.bullyOutside){ S.active=true; S.aggroT=AGGRO_RAMP; bubble(bully.x,bully.y-92,"HEY! MY SNACKS!",1.4); sfx.alert(); haptic(HAP.alert); }
   if(S.nGot===ITEMS.length){ bubble(player.x,player.y-96,"CHECKOUT! →",1.6); sfx.register(); haptic(HAP.listDone); }
 }
 function caught(){
@@ -627,6 +690,7 @@ function useContinue(){
   player.x=SPAWN_P.x; player.y=SPAWN_P.y; player.vx=0; player.vy=0;
   var bs=pickBullySpawn(); bully.x=bs.x; bully.y=bs.y; bully.home=bs; bully.vx=0; bully.vy=0;
   bully.path=null; bully.pi=0; bully.stuckT=0; bully.noLos=0; bully.taunt=2.5; bully.repath=0;
+  bully.lunge=null; bully.lungeCD=2; bully.burst=0; bully.stagger=0; bully.lostT=0; bully.lastX=undefined;
   if(S.active) S.aggroT=Math.max(S.aggroT||0, CONTINUE_GRACE);
   hide("ovEnd"); S.mode="play"; last=0;
 }
@@ -725,6 +789,24 @@ function startStoreRun(){
   S.drive=r||null;   // the leaderboard sends the drive's numbers so the server can check the bonus
   if(r && r.bonus){ addScore(r.bonus); S.driveBonus=r.bonus;
     bubble(player.x, player.y-96, (r.cleanPark? "CLEAN PARK +" : "DRIVE BONUS +")+r.bonus+(r.tokens? "  ·  "+r.tokens+" EBT":""), 2.2); }
+  // the race to the store decides when the bully gets here: your lead in seconds, or right behind you if he caught up
+  if(r && r.bully){
+    S.bullyOutside=true;
+    S.bullyIn = r.bully.caughtUp ? BULLY_IN_TAIL : Math.max(BULLY_IN_MIN, Math.min(BULLY_IN_MAX, r.bully.lead||0));
+    S.bullyTail=!!r.bully.caughtUp;
+    bully.x=DOOR.x; bully.y=DOOR.y; bully.vx=0; bully.vy=0;
+  }
+}
+// he walks in through the door: straight onto your trail, no loitering
+function bullyEnters(){
+  S.bullyOutside=false;
+  var dp=boxFree(DOOR.x,DOOR.y)? DOOR : snapToField(DOOR.x,DOOR.y);
+  bully.x=dp.x; bully.y=dp.y; bully.vx=0; bully.vy=0; bully.home=dp; bully.path=null; bully.repath=0; bully.face="U";
+  bully.lostT=0; bully.lastX=player.x; bully.lastY=player.y; bully.lungeCD=1.5;
+  S.active=true; S.aggroT=AGGRO_RAMP; if(S.bullyTail){ S.aggroT=0.6; bully.burst=1.4; }   // on your tail: he comes in hot
+  bubble(bully.x,bully.y-92, S.bullyTail? "YOU CAN’T OUTRUN ME!" : "THERE YOU ARE!",1.5);
+  sfx.door(); sfx.alert(); haptic(HAP.alert); shakeView(6);
+  announce(S.bullyTail? "HE FOLLOWED YOU IN!" : "HE’S IN THE STORE!");
 }
 // warm the drive's code while the title screen is up, so START feels instant
 function prefetchDrive(){ if(driveAvailable()) setTimeout(function(){ import(DRIVE_URL).catch(function(){}); }, 1200); }
@@ -744,6 +826,7 @@ function pickBullySpawn(){
 function startRun(){
   hide("ovEnd"); hide("ovTitle"); hide("ovHow"); hide("ovDriveHow");
   S.mode="play"; S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.runSecs=0; S.won=false; S.drive=null; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
+  S.bullyOutside=false; S.bullyIn=0; S.bullyTail=false;
   if(GS) GS.killTweensOf(SHOWN); SHOWN.v=0; REVEAL.idx=-1; PAYIN.on=false;   // motion state starts fresh with the run
   // one item live on the board at a time, in a fresh random order each run —
   // you can't memorize a route, and the bully's position matters more.
@@ -1090,7 +1173,13 @@ function draw(){
       }
     }
     // actors: draw upper first for overlap.
-    var actors=[player,bully].sort(function(a,b){return a.y-b.y;});
+    // the lunge's wind-up: a red ring flares and tightens under him, your cue to sidestep
+    if(bully && bully.lunge && bully.lunge.phase==="wind" && !S.bullyOutside){
+      var wk=1-Math.max(0,bully.lunge.t)/LUNGE_WIND;
+      g.save(); g.strokeStyle="rgba(230,30,40,"+(0.5+0.5*wk).toFixed(2)+")"; g.lineWidth=4+4*wk;
+      g.beginPath(); g.ellipse(bully.x,bully.y,46-18*wk,17-6*wk,0,0,6.2832); g.stroke(); g.restore();
+    }
+    var actors=(S.bullyOutside? [player] : [player,bully]).sort(function(a,b){return a.y-b.y;});
     for(var a2=0;a2<actors.length;a2++) drawActor(g,actors[a2],actors[a2]===bully);
     // (the joystick is the #stick overlay, drawn by the page: see bindTouch)
     // bubbles
@@ -1129,18 +1218,25 @@ var sfx={
   register:function(){ tone(1200,0,0.06,"square",0.09); tone(1600,0,0.1,"square",0.09,0.08); },
   death:function(){ tone(500,55,0.85,"sawtooth",0.1); },
   win:function(){ [0,4,7,12,16].forEach(function(s,i){ tone(392*Math.pow(2,s/12),0,0.12,"square",0.08,i*0.09); }); },
-  start:function(){ tone(392,0,0.1,"square",0.06); tone(523,0,0.12,"square",0.06,0.12); }
+  start:function(){ tone(392,0,0.1,"square",0.06); tone(523,0,0.12,"square",0.06,0.12); },
+  spot:function(){ tone(660,990,0.08,"square",0.09); tone(990,0,0.1,"square",0.07,0.09); },          // "!" he sees you
+  windup:function(){ tone(110,330,LUNGE_WIND,"sawtooth",0.09); },                                     // he tenses
+  lunge:function(){ tone(260,70,0.3,"sawtooth",0.12); tone(80,40,0.25,"triangle",0.15); },           // the dash
+  beat:function(k){ tone(62,40,0.09,"sine",0.18*k); tone(58,36,0.09,"sine",0.14*k,0.14); },          // heartbeat, near him
+  door:function(){ tone(196,98,0.4,"square",0.08); tone(130,65,0.5,"sawtooth",0.07,0.12); }          // he barges in
 };
 var BASS=[0,0,3,5,0,0,7,5], BASS_HOT=[12,10,8,7,12,10,7,5], ROOT=98;
 function startMusic(){
   if(musicTimer) return;
   musicTimer=setInterval(function(){
     if(S.mode!=="play") return;
-    var hot = bully && player && Math.hypot(player.x-bully.x,player.y-bully.y)<280 && S.active;
+    var hot = bully && player && Math.hypot(player.x-bully.x,player.y-bully.y)<280 && S.active && !S.bullyOutside;
     // he is on you: a low pulse in the hand, throttled so it reads as tension
     // rather than a buzz. Deliberately outside the mute check.
     if(hot && Math.hypot(player.x-bully.x,player.y-bully.y)<190) haptic(HAP.near,620);
     if(S.muted) return;
+    // and a heartbeat that speeds up and gets louder the closer he is
+    if(hot){ var hd=Math.hypot(player.x-bully.x,player.y-bully.y), every=hd<120?3:hd<200?4:6; if(mStep%every===0) sfx.beat(Math.min(1,(300-hd)/200)); }
     var pat=hot?BASS_HOT:BASS, st=pat[mStep%pat.length];
     tone(ROOT*Math.pow(2,st/12),0,hot?0.09:0.12,"triangle",0.05);
     if(mStep%4===0) tone(ROOT*2*Math.pow(2,st/12),0,0.05,"square",0.02);
@@ -1238,8 +1334,73 @@ function placeView(dt){
   var ty=H<=vh ? (vh-H)/2 : Math.min(0, Math.max(vh-H, vh*0.52-fy*scale));
   if(!cam.init||!dt||(S.intro||0)>0){ cam.x=tx; cam.y=ty; cam.init=true; }   // (the intro zoom is exact, no lag)
   else { var k=Math.min(1,dt*8); cam.x+=(tx-cam.x)*k; cam.y+=(ty-cam.y)*k; }
-  view.style.transform="translate("+Math.round(cam.x)+"px,"+Math.round(cam.y)+"px)";
-  drawListHud();
+  var sx=0, sy=0;
+  if(SHAKE.a>0.2 && S.mode==="play"){ sx=(Math.random()-0.5)*2*SHAKE.a; sy=(Math.random()-0.5)*2*SHAKE.a; }
+  SHAKE.a=Math.max(0,SHAKE.a-(dt||0)*22);
+  view.style.transform="translate("+Math.round(cam.x+sx)+"px,"+Math.round(cam.y+sy)+"px)";
+  drawListHud(); drawThreat(dt||0);
+}
+// the screen kicks when he lunges or nearly gets you (px of shake, decays fast)
+var SHAKE={a:0};
+function shakeView(px){ if(MOTION) SHAKE.a=Math.max(SHAKE.a,px); }
+/* Threat on screen: the edges glow red as he closes in on you (only while he's hunting and you're in his sight or
+   within 200 px), and while he's still outside after the race, a pill at the top counts down to when he walks in. */
+var threatEl=null, outsideEl=null, arrowEl=null, announceEl=null, threatK=0;
+// a big line across the screen for a moment (he walked in), whatever the camera is looking at
+function announce(text){
+  if(!announceEl) return;
+  announceEl.textContent=text;
+  if(MOTION){ GS.killTweensOf(announceEl); GS.timeline().fromTo(announceEl,{opacity:0,scale:1.6},{opacity:1,scale:1,duration:0.35,ease:"back.out(2.4)"}).to(announceEl,{opacity:0,duration:0.4,delay:1.2}); }
+  else { announceEl.style.opacity="1"; setTimeout(function(){ announceEl.style.opacity="0"; },1600); }
+}
+function drawThreat(dt){
+  if(!threatEl){
+    threatEl=document.createElement("div"); threatEl.setAttribute("aria-hidden","true");
+    threatEl.style.cssText="position:fixed;inset:0;pointer-events:none;z-index:4;opacity:0;background:radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(200,20,30,.55) 100%)";
+    document.body.appendChild(threatEl);
+    outsideEl=document.createElement("div"); outsideEl.setAttribute("aria-hidden","true");
+    outsideEl.style.cssText="position:fixed;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:5;display:none;align-items:center;gap:8px;padding:5px 12px 5px 5px;border-radius:24px;background:rgba(10,12,18,.82);border:2px solid #d62634;color:#fff;font:900 15px/1 ui-monospace,Menlo,monospace;letter-spacing:.04em;pointer-events:none;white-space:nowrap";
+    // his head is the drive's race-bar icon (next to drive.js, wherever this copy loads the drive from)
+    outsideEl.innerHTML='<i style="width:34px;height:34px;border-radius:50%;background:url('+DRIVE_URL.replace(/drive\.js$/,"heads.png")+') 100% 0/200% 100% no-repeat"></i><span></span>';
+    document.body.appendChild(outsideEl);
+    arrowEl=document.createElement("div"); arrowEl.setAttribute("aria-hidden","true");
+    arrowEl.style.cssText="position:fixed;left:0;top:0;width:48px;height:48px;z-index:5;display:none;pointer-events:none";
+    arrowEl.innerHTML='<b style="position:absolute;inset:0;display:block"><i style="position:absolute;right:-9px;top:15px;width:0;height:0;border-top:9px solid transparent;border-bottom:9px solid transparent;border-left:13px solid #ff3040"></i></b>'
+      +'<i style="position:absolute;inset:5px;border-radius:50%;border:3px solid #ff3040;background:url('+DRIVE_URL.replace(/drive\.js$/,"heads.png")+') 100% 0/200% 100% no-repeat;box-shadow:0 0 10px rgba(255,40,60,.7)"></i>';
+    document.body.appendChild(arrowEl);
+    announceEl=document.createElement("div"); announceEl.setAttribute("aria-hidden","true");
+    announceEl.style.cssText="position:fixed;left:0;right:0;top:30%;z-index:6;text-align:center;pointer-events:none;font:900 34px/1.05 ui-monospace,Menlo,monospace;color:#ff3b47;text-shadow:0 3px 0 #000,0 0 18px rgba(0,0,0,.7);letter-spacing:.04em;opacity:0";
+    document.body.appendChild(announceEl);
+  }
+  var k=0;
+  if(S.mode==="play" && bully && player && S.active && !S.bullyOutside){
+    var d=Math.hypot(player.x-bully.x,player.y-bully.y);
+    k=Math.max(0,Math.min(1,(230-d)/170));
+    if(bully.lunge) k=1;
+  }
+  threatK+=(k-threatK)*Math.min(1,dt*6);
+  threatEl.style.opacity=(threatK*(0.75+0.25*Math.sin(S.t*9))).toFixed(3);
+  // off screen while he's hunting you: a red arrow with his head on the edge of the screen, pointing at him
+  var arrowOn=false;
+  if(S.mode==="play" && bully && S.active && !S.bullyOutside && view){
+    var vw=window.innerWidth||390, vh=window.innerHeight||780, bx=cam.x+bully.x*scale, by=cam.y+(bully.y-48)*scale, m=34;
+    if(bx<-10||bx>vw+10||by<-10||by>vh+10){
+      var cx=vw/2, cy=vh/2, dx=bx-cx, dy=by-cy, kx=dx? (vw/2-m)/Math.abs(dx) : 1e9, ky=dy? (vh/2-m-40)/Math.abs(dy) : 1e9, kk=Math.min(kx,ky);
+      var ax=cx+dx*kk, ay=cy+dy*kk, ang=Math.atan2(dy,dx);
+      arrowEl.style.transform="translate("+Math.round(ax-24)+"px,"+Math.round(ay-24)+"px)";
+      arrowEl.firstElementChild.style.transform="rotate("+ang.toFixed(3)+"rad)";
+      var dd=Math.hypot(player.x-bully.x,player.y-bully.y); arrowEl.style.opacity=(dd<420? 1 : 0.6).toString();
+      arrowOn=true;
+    }
+  }
+  arrowEl.style.display=arrowOn?"block":"none";
+  var out=S.mode==="play" && S.bullyOutside;
+  outsideEl.style.display=out?"flex":"none";
+  if(out){
+    var left=Math.max(0,S.bullyIn-S.runT), txt=left>0? "HE’S COMING  "+Math.ceil(left)+"s" : "HE’S HERE!";
+    var sp=outsideEl.lastElementChild; if(sp.textContent!==txt) sp.textContent=txt;
+    outsideEl.style.borderColor = left<4 ? (Math.floor(S.t*4)%2?"#ff4d4d":"#d62634") : "#d62634";
+  }
 }
 var listHud=null;
 function drawListHud(){
@@ -1268,7 +1429,8 @@ function update(dt){
     var curIt=currentItem();
     if(curIt && S.curPos && Math.hypot(player.x-S.curPos.x,player.y-S.curPos.y)<PICK_R) collect(curIt);
     winCheck();
-    if(!S.freezeBully) updateBully(dt);
+    if(S.bullyOutside){ if(S.runT>=S.bullyIn && S.mode==="play") bullyEnters(); }
+    else if(!S.freezeBully) updateBully(dt);
     for(var b3=bubbles.length-1;b3>=0;b3--){ bubbles[b3].ttl-=dt; if(bubbles[b3].ttl<=0) bubbles.splice(b3,1); }
   } else {
     S.t+=dt;
@@ -1363,5 +1525,6 @@ window.__csd={ get S(){return S;}, get player(){return player;}, get bully(){ret
   step:function(dt,n){ n=n||1; for(var i=0;i<n;i++) update(dt); draw(); },
   tp:function(x,y){ var s=snapToField(x,y); player.x=s.x; player.y=s.y; return [s.x,s.y]; },
   freeze:function(v){ S.freezeBully=!!v; },
-  setInput:function(x,y){ S.testVec=(x===null)?null:{x:x,y:y}; } };
+  setInput:function(x,y){ S.testVec=(x===null)?null:{x:x,y:y}; },
+  arrive:function(r){ arrival=r; } };   // tests: what the drive hands over (so the store side of the race can be tested without driving)
 if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded",init); } else { init(); }
