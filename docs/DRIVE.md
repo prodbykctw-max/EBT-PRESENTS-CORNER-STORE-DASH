@@ -116,6 +116,42 @@ obstacles and collisions line up exactly with what's painted on the road.
   bonus = timeLeft × 50 + tokens × 25 + nearMisses × 50 + 500 (clean park) + 300 (no hits).
 - **Balance:** the QA bot parks clean with about 14 s left.
 
+## The chase (Kema's opening): on foot to your car, then race the bully to the store
+
+The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tuning in `FOOT` / `RACE` at the top):
+
+- **On foot.** You start on the right sidewalk of Luckie St (s = 14 m) with the bully 8 m behind you. Your car is parked
+  at the right curb up the block with its **hazards flashing** and a yellow ▼ over it, in the first stretch of parking
+  lane where it sits level (Luckie St is steep: on its cross-slope a car rolls ~10°, so the spot is picked by measuring
+  the car's roll and pitch with `standOn`). Hold GAS to run (5.6 m/s), BRAKE to back up, ◀ ▶ to switch between the curb
+  side and the building side of the sidewalk. Run into someone from the crowd and you stumble ("WATCH IT!"); the bully
+  shoves through people. He runs 5.3 m/s, so a clean run gets away and a sloppy one gets caught: a catch is a **shove**
+  ("SHOVED!", 0.9 s down), never the end. Near the car you cut over to the driver's door yourself and jump in: "GO! GO!
+  GO!", no 3-2-1, and the car swings straight into the travel lane. The drive's clock only runs once you're driving.
+- **The on-foot camera** sits 10 m behind you, 6 m up and 0.6 m to the street side, looking 7 m ahead. The first
+  version (6 m back, 3 m up, 1.6 m to the street side) had a signal pole beside the camera that hid you completely at
+  the start, and once the bully was close he stood between you and the camera; from up here you, him and the sidewalk
+  ahead stay in frame (checked at s = 14 to 84 m in the running game). Up there it rides through the street trees'
+  canopies, so while you're on foot trees within 8 m of the camera aren't drawn (`NEAR_CUT` in `landscape.js`, a clean
+  cut: a dithered fade turned into black speckle under the ink outlines). The driving camera keeps every tree.
+- **Taunts** ("HEY! YOU!", ...) pop every 2.6 s while he's within 9 m, but not while you're down from a shove, not
+  within a second of a "WATCH IT!", and any still floating are cleared when you get in, so they never pile onto the
+  other messages.
+- **The people** are the store's own character in 3D (`people.js`, `character.glb`: the rigged Tripo model from the
+  commercial's Blender scene, decimated to 16k triangles, exported by `drive/tools/export_character.py`), with its walk
+  and a run built from it at load time (`makeRunClip`). The run plays at the speed you actually cover ground (stride
+  measured off the clip), so the feet don't skate. The bully is the same model recoloured in the shader exactly as the
+  store's sprite sheet is (white tee -> red, denim -> charcoal, red kicks -> black) and drawn taller.
+- **The race.** When you get in he runs for his own ride (1.6 s), then comes after you at 17 m/s, shown only on the bar
+  at the top (`.drive-race`: your head, his head, the STORE flag; `heads.png`). If he gets within 4.5 m he's **on your
+  tail** ("HE CAUGHT UP!") and can't get past you; open a 60 m gap and you **shook him**.
+- **What it decides.** `result.bully = { lead, caughtUp }`: your lead in seconds when you park (capped at 30). In the
+  store (`csd.js`, `startStoreRun` / `bullyEnters`) he walks in through the door that many seconds into the run (at
+  least 2 s; a "HE'S COMING" pill counts it down), or 1.4 s in, with a burst, if he caught up. Skip the drive and the
+  store plays as before (he starts somewhere in the store and your first pickup sets him off).
+- **QA:** `?qa&skipfoot` starts in the car with the old 3-2-1; `?qa&bot` runs to the car on its own, then the autopilot
+  drives. Hooks: `__drive.foot` (`me`, `him`, `homeS`, `doorS`, ...), `__drive.race`.
+
 ## Controls (mobile-first: the game is played on phones)
 
 You drive it: lane buttons bottom left, pedals bottom right, all held buttons. **Stiff lane steering:** each press

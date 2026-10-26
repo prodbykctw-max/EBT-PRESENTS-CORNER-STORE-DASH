@@ -1,6 +1,6 @@
 # Corner Store Dash
 
-> Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand. Drive down Auburn Ave to the corner store without hitting the police and park out front, then grab everything on the EBT list before the bully catches you and pay at a register. Plays on phone or desktop, no download, with a global leaderboard.
+> Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand. Outrun the bully to your car, race him down Auburn Ave to the corner store without hitting the police and park out front, then grab everything on the EBT list before he catches you and pay at a register. Plays on phone or desktop, no download, with a global leaderboard.
 
 - Play: https://ebt-corner-store-dash.prodbykctw.workers.dev/
 - Genre: Arcade / driving / chase

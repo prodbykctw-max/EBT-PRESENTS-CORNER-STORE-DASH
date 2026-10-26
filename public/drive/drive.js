@@ -18,9 +18,11 @@ import { Signals } from './signals.js';
 import { Birds } from './birds.js';
 import { haptic, HAP, tapHaptic } from './haptics.js';
 import { Look } from './look.js';
-import { WIND } from './landscape.js';
+import { WIND, NEAR_CUT } from './landscape.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
+import * as SkeletonUtils from './vendor/SkeletonUtils.js';
+import { makeBullyMaterial, makeRunClip, MODEL_H, PLAYER_H, BULLY_H } from './people.js';
 
 const BASE = new URL('./', import.meta.url);
 const TIME_LIMIT = 70;   // real traffic (an oncoming stream, queues at work zones) costs ~10 s of waiting on a clean run
@@ -29,6 +31,15 @@ const REAR_AXLE = 1.45; // car.glb origin sits on the rear axle; the runner trac
 const SPOT = { x: 0, y: 9.0, heading: Math.PI, len: 7.0, wid: 3.0 };
 // ?qa drives the loop from a timer: hidden tabs/panes pause requestAnimationFrame, which would freeze automated tests.
 const QA = new URLSearchParams(location.search).has('qa');
+// ?qa&skipfoot: start in the car with the old 3-2-1 (tests that are about the drive, not the chase on foot)
+const SKIPFOOT = QA && new URLSearchParams(location.search).has('skipfoot');
+// The chase (Kema's opening). On foot: you run up the block to your car with the bully on your heels; he shoves you
+// if he catches you (it costs time, it doesn't end anything). Then the race: he jumps in his own ride and comes after
+// you, shown only on the bar at the top. Whatever lead you have when you park is how long you get in the store before
+// he walks in; if he's on your tail, he follows you straight in.
+// (he runs a touch slower than you: a clean run up the sidewalk gets away, but every person you run into lets him close)
+const FOOT = { run: 5.6, back: 2.2, bully: 5.3, bullyGo: 0.8, start: 14, carAhead: 30, bullyBehind: 8, stun: 0.9, reach: 0.9, pause: 1.1 };
+const RACE = { pace: 17, accel: 3.4, hop: 1.6, tail: 4.5, shake: 60, maxLead: 30 };   // 17 m/s: a good run beats him by ~6 s; an average one gets caught late
 const nextFrame = QA ? (f) => setTimeout(f, 16) : requestAnimationFrame;
 const cancelFrame = QA ? clearTimeout : cancelAnimationFrame;
 
@@ -59,7 +70,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const s = document.createElement('script'); s.src = new URL('vendor/gsap.min.js', BASE).href;
     s.onload = () => ok(window.gsap || null); s.onerror = () => ok(null); document.head.appendChild(s);
   });
-  const [W, hero, carGltf, props, trees, weather, gsapLib] = await Promise.all([
+  const [W, hero, carGltf, props, trees, weather, gsapLib, charGltf] = await Promise.all([
     fetch(new URL('world.json', BASE)).then((r) => r.json()),
     loader.loadAsync(new URL('hero.glb', BASE).href),
     loader.loadAsync(new URL('car.glb', BASE).href),
@@ -67,6 +78,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     loader.loadAsync(new URL('trees.glb', BASE).href),
     fetchWeather(),
     gsapReady,
+    loader.loadAsync(new URL('character.glb', BASE).href),   // you and the bully on foot (people.js)
   ]);
   const G = gsapLib && !matchMedia('(prefers-reduced-motion: reduce)').matches ? gsapLib : null;
   if (G) root.classList.add('gs');   // drive.css: GSAP, not CSS transitions, moves the messages and pop-ups
@@ -198,7 +210,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // ---------- pause ----------
   let paused = false;
   const setPaused = (p) => {
-    if (p && !(state === 'driving' || state === 'countdown')) return;              // nothing to pause at the finish
+    if (p && !(state === 'driving' || state === 'countdown' || state === 'onfoot')) return;   // nothing to pause at the finish
     paused = p; keys.clear();                                                     // no stuck gas / steering on resume
     for (const b of root.querySelectorAll('[data-k].on')) b.classList.remove('on');
     const panel = root.querySelector('.drive-paused');
@@ -239,6 +251,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // held keys: a quick tap (finger down and up between two frames, easy on a phone drawing the city at 30 fps) used
   // to be missed entirely. One lane per press; holding does nothing more.
   const tapLane = (k) => {
+    if (state === 'onfoot' && !paused) { footLane = k === 'left' ? 0 : 1; haptic(HAP.lane); return; }   // on foot: your line on the sidewalk
     if (state !== 'driving' || BOT || paused) return;
     laneShift(k === 'left' ? 1 : -1); followLane();
   };
@@ -301,7 +314,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
   const api = { camOverride: null }; // test hooks (filled in below)
   // ---------- state ----------
-  let t = TIME_LIMIT, drove = 0, hits = 0, tokens = 0, nearMisses = 0, state = 'countdown', countdown = 3, shake = 0, endT = 0;
+  let t = TIME_LIMIT, drove = 0, hits = 0, tokens = 0, nearMisses = 0, state = SKIPFOOT ? 'countdown' : 'onfoot', countdown = 3, shake = 0, endT = 0;
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3();
   // ---------- stiff lane steering ----------
   // The car sits in one of four lanes, right to left: 0 the right parking lane, 1 your lane, 2 the oncoming lane,
@@ -333,7 +346,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     Object.assign(result, { arrived: true, parked: true, timeLeft: Math.max(0, t), hits, tokens, nearMisses });
     result.cleanPark = Math.abs(car.d - spot.d) < 0.8;
     result.bonus = Math.round(result.timeLeft * 50 + tokens * 25 + nearMisses * 50 + (result.cleanPark ? 500 : 0) + (hits === 0 ? 300 : 0));
+    result.bully = raceResult();
     flash(result.cleanPark ? 'CLEAN PARK! 🅿️' : 'PARKED 🅿️', 2600);
+    // then the race result, while the camera swings down to the store (the hint line is cleared while parked, so it's the big message)
+    if (result.bully) setTimeout(() => { if (root.isConnected) flash(result.bully.caughtUp ? 'HE’S RIGHT BEHIND YOU!' : `${result.bully.lead.toFixed(1)}s AHEAD`, 2200); }, 1300);
     audio.chime(); endT = 0; haptic(HAP.parked);
   }
 
@@ -391,6 +407,167 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (QA && window.__botReport) setTimeout(() => { if (root.isConnected) finish(); }, 2500);   // the autopilot doesn't wait for a tap
   }
 
+  // ---------- the chase on foot: run to your car with the bully behind you ----------
+  // Your car is parked at the right curb a short run up the block, in a stretch of parking lane long enough for it,
+  // hazards flashing so you can pick it out of the parked cars. (No parking lane there: it's pulled over in the lane.)
+  let homeS = null;
+  const firstS = FOOT.start + FOOT.carAhead;
+  // ...and on level enough ground that it sits square (Luckie St is steep: on its cross-slope a car rolls ~10°)
+  const roadTop = (x, y) => surfAt(x, y, ground(x, y) + 1.2) ?? ground(x, y) + LEVEL.ROUTE;
+  const lie = (s, d) => { const q = route.at(s, d), st = standOn(roadTop, q.x, q.y, q.a, 1.47, 0.82); return Math.abs(st.roll) + 0.5 * Math.abs(st.pitch); };
+  let bestLie = Infinity, bestS = null;
+  for (let s = firstS; s < firstS + 70; s += 1) {
+    let ok = true; for (let k = -4; k <= 4 && ok; k++) if (route.parkD(s + k, -1) === null) ok = false;
+    if (!ok) continue;
+    const l = lie(s, route.parkD(s, -1));
+    if (l < 0.035) { homeS = s; break; }
+    if (l < bestLie) { bestLie = l; bestS = s; }
+  }
+  if (homeS === null && bestS !== null && bestLie < 0.09) homeS = bestS;
+  const inParkLane = homeS !== null;
+  if (!inParkLane) homeS = firstS + 10;
+  const homeD = inParkLane ? route.parkD(homeS, -1) : route.lane(homeS, 0);
+  const doorS = homeS + 0.25, doorD = homeD + 1.15;            // the driver's door: the street side of the car
+  // nobody else is parked in your space
+  for (const e of world.ents) if (e.parked && e.d < 0 && Math.abs(e.s - homeS) < 7.5) e.alive = false;
+  world.ents = world.ents.filter((e) => e.alive);
+  if (!SKIPFOOT) { car.s = homeS; car.d = car.targetD = homeD; laneK = inParkLane ? 0 : 1; }
+  // hazard lamps on the four corners of your car (children of the car, so they sit on it wherever it is)
+  const hazardMat = new THREE.SpriteMaterial({ map: glowTex, color: 0xffa21a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+  const hazards = new THREE.Group();
+  for (const [x, z] of [[-0.82, 2.15], [0.82, 2.15], [-0.8, -2.2], [0.8, -2.2]]) { const sp = new THREE.Sprite(hazardMat); sp.position.set(x, 0.78, z); sp.scale.setScalar(0.9); hazards.add(sp); }
+  carRig.add(hazards); hazards.visible = !SKIPFOOT;
+  const youMarker = makeLabel('▼', '#ffd400'); youMarker.material.depthTest = false; youMarker.renderOrder = 5;
+  const markerSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: youMarker.material.map, transparent: true, depthTest: false, toneMapped: false }));
+  markerSprite.scale.set(1.3, 1.3, 1); markerSprite.position.set(0, 2.9, 0); markerSprite.renderOrder = 5; carRig.add(markerSprite); markerSprite.visible = !SKIPFOOT;
+
+  // you and the bully: the store's character in 3D (people.js), with a walk and a run
+  const clips = { walk: charGltf.animations.find((a) => a.name === 'walk') }; clips.run = makeRunClip(clips.walk);
+  // how far one run cycle carries you, measured off the clip (a foot's sweep front to back, twice per cycle), so the
+  // feet don't skate at any speed
+  const strideOf = (h) => {
+    const o = SkeletonUtils.clone(charGltf.scene), mx = new THREE.AnimationMixer(o), act = mx.clipAction(clips.run); act.play();
+    const foot = o.getObjectByName('L_Foot'), hip = o.getObjectByName('Hip'), a = new THREE.Vector3(), b = new THREE.Vector3();
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < 40; i++) { mx.setTime(clips.run.duration * i / 40); o.updateMatrixWorld(true); foot.getWorldPosition(a); hip.getWorldPosition(b); lo = Math.min(lo, a.z - b.z); hi = Math.max(hi, a.z - b.z); }
+    return 2 * (hi - lo) * h / MODEL_H;
+  };
+  function makePerson(bully) {
+    const o = SkeletonUtils.clone(charGltf.scene), h = bully ? BULLY_H : PLAYER_H;
+    o.scale.setScalar(h / MODEL_H);
+    o.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; if (bully) m.material = makeBullyMaterial(m.material); } });
+    const mixer = new THREE.AnimationMixer(o), run = mixer.clipAction(clips.run); run.play();
+    scene.add(o);
+    return { o, mixer, run, stride: strideOf(h), s: 0, d: 0, v: 0, z: 0, stun: 0, pause: 0, phase: 0 };
+  }
+  const me = makePerson(false), him = makePerson(true);
+  const sidewalk = (s) => { const [lo, hi] = crowd.bandAt(-1, s); return -(lo + (hi - lo) * 0.3); };
+  let footLane = 0;                                                // 0 the curb side of the sidewalk, 1 the building side
+  const footLineD = (s) => { const [lo, hi] = crowd.bandAt(-1, s); return -(lo + (hi - lo) * (footLane ? 0.78 : 0.22)); };
+  Object.assign(me, { s: FOOT.start, d: sidewalk(FOOT.start) });
+  Object.assign(him, { s: FOOT.start - FOOT.bullyBehind, d: sidewalk(FOOT.start - FOOT.bullyBehind) });
+  me.o.visible = him.o.visible = !SKIPFOOT;
+  let footT = 0, found = false, race = null, tauntK = 0;
+  const TAUNTS = ['HEY! YOU!', 'GET BACK HERE!', 'THOSE ARE MINE!', 'GIMME THAT!'];
+  const footZ = (s, d) => { const p = route.at(s, d), gz = ground(p.x, p.y); return { p, z: Math.max(surfAt(p.x, p.y, gz + 1.2) ?? -Infinity, gz + LEVEL.TERRAIN) }; };
+  function placePerson(m, dt, yawFwd = true) {
+    const { p, z } = footZ(m.s, m.d); m.z = z;
+    m.o.position.copy(toV3(p.x, p.y, z));
+    const a = route.at(m.s).a + (yawFwd ? 0 : Math.PI);
+    m.o.rotation.set(0, a + Math.PI / 2, 0);
+    // the run plays at the speed you're actually covering ground; standing still holds a mid-stride pose
+    const sp = Math.abs(m.v);
+    m.run.timeScale = sp > 0.2 ? sp / m.stride * clips.run.duration : 0;
+    m.mixer.update(dt);
+  }
+  function getIn() {
+    state = 'driving'; me.o.visible = false; hazards.visible = false; markerSprite.visible = false;
+    // you peel out: the car swings straight into the travel lane (the parking lane ahead is full of parked cars)
+    laneK = 1; followLane(); if (BOT) car.targetD = route.lane(car.s, 0);
+    hud.pop.replaceChildren();   // a taunt still floating up would sit on top of GO! GO! GO!
+    flash('GO! GO! GO!', 900); setHint(''); haptic(HAP.go); audio.chime();
+    // he runs for his own ride (just behind where he's standing), then he's coming
+    race = { s: him.s - 2, v: 0, hop: RACE.hop + Math.max(0, him.pause), tail: false, shookAt: 0 };
+    raceBar.hidden = false;
+  }
+  function updateFoot(dt) {
+    footT += dt;
+    // you: hold GAS to run up the block, BRAKE to back up if you overshoot; you cut over to the driver's door yourself
+    const want = me.stun > 0 ? 0 : (keys.has('gas') || BOT) ? FOOT.run : keys.has('down') ? -FOOT.back : 0;
+    me.stun = Math.max(0, me.stun - dt);
+    me.v += THREE.MathUtils.clamp(want - me.v, -16 * dt, 10 * dt);
+    me.s += me.v * dt;
+    const toCar = doorS - me.s, k = THREE.MathUtils.clamp((9 - Math.abs(toCar)) / 6, 0, 1);
+    // ◀ ▶ pick your line on the sidewalk (◀ the curb side, ▶ the building side) to get round people; near the car you
+    // cut over to its door
+    const dWant = THREE.MathUtils.lerp(footLineD(me.s), doorD, k);
+    me.d += THREE.MathUtils.clamp(dWant - me.d, -4.2 * dt, 4.2 * dt);
+    // run into someone and you stumble (the bully just shoves through them)
+    for (const q of crowd.people) {
+      if (q.g.side !== -1 || Math.abs(q.s - me.s) > 3) continue;
+      const qd = -q.d;
+      if (Math.abs(q.s - me.s) < 0.55 && Math.abs(qd - me.d) < 0.5 && me.stun <= 0 && (q.bumped || 0) < footT) {
+        q.bumped = footT + 2; q.startle = 1; me.v *= 0.2; me.stun = 0.35; shake = 0.35;
+        pop('WATCH IT!'); audio.crash(0.15); haptic(HAP.bump); tauntK = Math.max(tauntK, 1);
+      }
+      if (Math.abs(q.s - him.s) < 0.7 && Math.abs(qd - him.d) < 0.6) q.startle = 1;
+    }
+    if (!found && footT > 2.2 && footT < 2.4) setHint('Hold GAS — run to your car');
+    if (!found && toCar < 14) { found = true; audio.token(); setHint('That’s your ride — get in!'); }
+    // the bully: a beat to clock you, then he runs you down; catching you is a shove, not the end
+    him.pause = Math.max(0, him.pause - dt);
+    const go = footT > FOOT.bullyGo && him.pause <= 0;
+    him.v += THREE.MathUtils.clamp((go ? FOOT.bully : 0) - him.v, -12 * dt, 7 * dt);
+    him.s = Math.min(him.s + him.v * dt, me.s - 0.7);
+    him.d += THREE.MathUtils.clamp(me.d - him.d, -2.8 * dt, 2.8 * dt);
+    if (go && me.s - him.s < FOOT.reach && Math.abs(me.d - him.d) < 1 && me.stun <= 0) {
+      me.stun = FOOT.stun; me.v = 0; him.v = 0; him.pause = FOOT.pause; shake = 0.7;
+      flash('SHOVED!', 800); audio.crash(0.35); haptic(HAP.crash); tauntK = 1.6;   // no taunt on top of SHOVED!
+    }
+    tauntK -= dt;
+    if (go && tauntK <= 0 && me.stun <= 0 && me.s - him.s < 9) { tauntK = 2.6; pop(TAUNTS[(Math.random() * TAUNTS.length) | 0]); }
+    if (Math.abs(me.s - doorS) < 1.4 && Math.abs(me.d - doorD) < 0.6 && me.stun <= 0) getIn();
+    hud.dist.textContent = Math.max(0, Math.round(doorS - me.s)) + ' m';
+  }
+  // after you drive off he's still out there for a moment, running for his ride, until he's behind the camera
+  function updateHimLeft(dt) {
+    if (!him.o.visible) return;
+    him.v += THREE.MathUtils.clamp(FOOT.bully * 0.7 - him.v, -8 * dt, 6 * dt); him.s += him.v * dt;
+    if (car.s - him.s > 25) him.o.visible = false;
+    placePerson(him, dt);
+  }
+  // ---------- the race (the bar at the top) ----------
+  function updateRace(dt) {
+    if (!race) return;
+    if (race.hop > 0) race.hop -= dt;
+    else { race.v = Math.min(RACE.pace, race.v + RACE.accel * dt); race.s += race.v * dt; }
+    const gap = car.s - race.s;
+    if (!race.tail && gap < RACE.tail && state === 'driving') {
+      race.tail = true; flash('HE CAUGHT UP!', 1300); haptic(HAP.crash); audio.air();
+    }
+    if (race.tail) {
+      race.s = Math.min(race.s, car.s - RACE.tail * 0.8);                 // on your bumper: he can't get past you
+      if (car.s - race.s > RACE.shake) { race.tail = false; flash('YOU SHOOK HIM!', 1200); haptic(HAP.nearMiss); }
+    }
+  }
+  function raceResult() {
+    if (!race) return null;
+    const lead = race.tail ? 0 : Math.max(0, (spot.s - race.s) / RACE.pace + Math.max(0, race.hop));
+    return { lead: Math.round(Math.min(RACE.maxLead, lead) * 10) / 10, caughtUp: race.tail };
+  }
+  const raceBar = root.querySelector('.drive-race'), rYou = raceBar.querySelector('.you'), rHim = raceBar.querySelector('.him'), rGap = raceBar.querySelector('.gap');
+  raceBar.hidden = SKIPFOOT;
+  const raceFrom = Math.min(him.s, me.s) - 2;
+  function drawRaceBar() {
+    if (raceBar.hidden) return;
+    const span = spot.s - raceFrom, at = (s) => THREE.MathUtils.clamp((s - raceFrom) / span, 0, 1) * 100 + '%';
+    const youS = state === 'onfoot' ? me.s : car.s, himS = race ? race.s : him.s;
+    rYou.style.left = at(youS); rHim.style.left = at(himS);
+    const gapS = race ? (race.tail ? 0 : (youS - himS) / Math.max(6, race.v || RACE.pace)) : (me.s - him.s) / FOOT.bully;
+    raceBar.classList.toggle('hot', gapS < 2.5);
+    rGap.textContent = race && race.tail ? 'ON YOUR TAIL!' : state === 'onfoot' ? 'RUN!' : `+${gapS.toFixed(1)}s`;
+  }
+
   // ---------- loop ----------
   let last = performance.now(), raf = 0, acc = 0;
   const FIXED = 1 / 120;
@@ -411,6 +588,16 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       if (cd !== hud.msg.textContent) { hud.msg.textContent = cd; msgIn(); }   // each number punches in as it changes
       if (countdown <= 0) { state = 'driving'; flash('GO!', 700); setHint(''); haptic(HAP.go); }
     }
+    if (state === 'onfoot') {
+      updateFoot(dt);
+      if (state === 'onfoot') placePerson(me, dt);   // (getIn() may have just put you in the car)
+      placePerson(him, dt);
+      hazardMat.opacity = Math.floor(now / 380) % 2 ? 1 : 0.12;
+      markerSprite.position.y = 2.9 + Math.sin(now / 180) * 0.15;
+    } else if (race) updateHimLeft(dt);
+    if (race && state === 'driving') updateRace(dt);
+    drawRaceBar();
+    hud.dist.previousElementSibling.textContent = state === 'onfoot' ? 'YOUR CAR' : 'STORE';
     const braking = keys.has('down');
     // Stiff lane steering: each press of ◀ ▶ moves the whole car exactly one lane (tapLane, the moment it's
     // pressed); holding does nothing further. The car never turns: runner.js pins yaw to zero on the lateral path,
@@ -453,7 +640,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       if (ev.tokens) { tokens += ev.tokens; pop('+' + ev.tokens * 25); audio.token(); haptic(HAP.token, 60); bump(tokBox); }
       if (approaching) setHint(Math.abs(car.d - spot.d) < 0.8 ? 'Nice — hold the curb' : 'Pull right to the curb ▸');
       if (state === 'driving' && approaching && car.v < 0.3 && Math.abs(car.s - spot.s) < 2) park();
-      if (state === 'driving' && t <= 0) { t = 0; state = 'late'; Object.assign(result, { hits, tokens, nearMisses }); flash('TOO LATE — walk it in', 2600); endT = 0; }
+      if (state === 'driving' && t <= 0) { t = 0; state = 'late'; Object.assign(result, { hits, tokens, nearMisses, bully: raceResult() }); flash('TOO LATE — walk it in', 2600); endT = 0; }
     } else if (state === 'busted') {   // the street carries on around you while the police pull up
       trams.update(dt, car); world.update(dt, car, drove, 0);
       endT += dt;
@@ -541,7 +728,18 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       const high = arrivalFrom || (arrivalFrom = camPos.clone()), street = toV3(-3, 21, ground(-3, 21) + 2.6);
       targetPos = high.clone().lerp(street, e);
       targetLook = toV3(p.x, p.y, p.z).lerp(toV3(-3, 0, ground(-3, 0) + 4.2), e);
+    } else if (state === 'onfoot') {
+      // on foot: high behind you, a little to the street side, looking up the block. High enough to see over the
+      // bully on your heels and past the poles at the curb: from 3 m up and 6 m back (the first version) a signal
+      // pole beside the camera hid you completely at the start, and the bully, once close, stood between you and the
+      // camera (both checked in the running game). From here you, him and the sidewalk ahead are all in frame.
+      const cp = route.at(me.s - 10, me.d + 0.6);
+      targetPos = toV3(cp.x, cp.y, Math.max(me.z + 6.0, ground(cp.x, cp.y) + 1.8));
+      const lk = route.at(me.s + 7, me.d + 0.3);
+      targetLook = toV3(lk.x, lk.y, me.z + 0.9);
+      NEAR_CUT.value = 8;   // trees within 8 m of this camera are not drawn (landscape.js); you are ~12 m away
     } else {
+      NEAR_CUT.value = 0;   // the driving camera keeps every tree
       // h is measured from the car, but on a steep street the ground behind the car is higher than the car: on Luckie
       // St (s~48 m) a camera 3 m above the car ended up 0.7 m off the hillside behind it. Keep at least 2.5 m of air
       // under the camera itself.
@@ -602,7 +800,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   root.querySelector('[data-quit]').addEventListener('click', skip);
   for (const el of root.querySelectorAll('[data-skip], [data-pause], [data-resume], [data-quit]')) tapHaptic(el);
   // leaving the app mid-drive pauses it (a call, a text, the home screen): nothing happens while you're away
-  const onHide = () => { if (document.hidden && (state === 'driving' || state === 'countdown')) setPaused(true); };
+  const onHide = () => { if (document.hidden && (state === 'driving' || state === 'countdown' || state === 'onfoot')) setPaused(true); };
   document.addEventListener('visibilitychange', onHide);
   frame();
   // test hooks (drive QA + screenshots)
@@ -611,7 +809,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     ui: { flash, pop, bump, setHint, showBusted, gsap: G },   // the HUD's motion, for tests
     snapshot: (q = 0.85) => { comic.render(); return renderer.domElement.toDataURL('image/jpeg', q); } });
   // live getters (Object.assign would have frozen their values at assignment time)
-  Object.defineProperties(api, { state: { get: () => state }, time: { get: () => t } });
+  Object.defineProperties(api, { state: { get: () => state }, time: { get: () => t }, race: { get: () => race } });
+  api.foot = { me, him, homeS, homeD, doorS, doorD };
   window.__drive = api;
   return api;
 }
@@ -632,6 +831,7 @@ const HUD_HTML = `
   <div class="drive-box tok"><span>EBT</span><b class="drive-tokens">0</b></div>
   <div class="drive-box"><span>SPEED</span><b class="drive-speed">0 mph</b></div>
 </div>
+<div class="drive-race" hidden><div class="track"><b class="flag">STORE</b><i class="hd him" aria-label="The bully"></i><i class="hd you" aria-label="You"></i></div><span class="gap"></span></div>
 <div class="drive-light"><i></i><i></i><i></i><b></b></div>
 <div class="drive-msg"></div>
 <div class="drive-pop"></div>
