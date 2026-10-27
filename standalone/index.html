@@ -354,6 +354,11 @@ var scale=1;
    reduce motion get the old instant changes, and so does any copy of the page without GSAP. */
 var GS=(typeof gsap!=="undefined")?gsap:null;
 var MOTION=!!GS && !(typeof matchMedia==="function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+// When the phone stalls (the first sound starting up on the START DRIVE tap took ~0.4 s in testing), GSAP would count
+// the stall as time passed and a 0.3 s fade would already be over on the first frame you see: a hard cut. Any gap
+// over 0.2 s counts as one frame instead, so a fade always plays from its start. (One GSAP for the page: the drive
+// uses this copy too.)
+if(GS) GS.ticker.lagSmoothing(200,33);
 // the score as drawn: counts up to S.score (draw() and the list HUD read it)
 var SHOWN={v:0};
 function shownScore(){ return MOTION? Math.round(SHOWN.v) : S.score; }
@@ -975,14 +980,16 @@ function driveAvailable(){ return /^https?:$/.test(location.protocol) && !/[?&]n
 // onto the real one nothing moves. In order: its dark backing fades up over the how-to-play (the how-to-play stays
 // put under it, then goes), then AUBURN AVE fades in on a clean screen (the two screens' words never mix), and it
 // lifts once that's done and the drive's screen is up and styled (or at once if the drive fails).
-function driveCover(){
+function driveCover(mount){
   var c=document.createElement("div");
   c.setAttribute("style","position:fixed;inset:0;z-index:60;background:#101318;display:grid;place-content:center;text-align:center;color:#fff;font-family:system-ui,-apple-system,'Segoe UI',sans-serif");
   c.innerHTML='<div style="display:grid;gap:8px"><b style="font:900 34px/1 system-ui,sans-serif;letter-spacing:.12em;color:#ffd400">AUBURN AVE</b><span style="opacity:.75">Get to the corner store</span>'
     +'<i style="display:block;height:5px;width:5%;background:#ffd400;border-radius:3px;margin:8px auto 0;max-width:260px"></i></div>';
   document.body.appendChild(c);
   var ready=!MOTION, styled=false;
-  var under=function(){ ["ovTitle","ovDriveHow","ovHow"].forEach(hideNow); };   // whatever screen it came from, gone underneath
+  // once the backing is fully up: whatever screen it came from goes, and the drive (kept invisible in its mount until
+  // now, so its own loader can't show through the cover's fade) is let out underneath
+  var under=function(){ ["ovTitle","ovDriveHow","ovHow"].forEach(hideNow); mount.style.visibility=""; };
   if(MOTION) GS.timeline({onComplete:function(){ ready=true; if(styled) lift(); }})
     .fromTo(c,{opacity:0},{opacity:1,duration:SCREEN_FADE,ease:"power1.inOut",onComplete:under})
     .fromTo(c.firstChild,{opacity:0},{opacity:1,duration:0.2,ease:"power1.out"});
@@ -1001,15 +1008,20 @@ function startWithDrive(){
   if(!driveAvailable()){ showStoreHow(null); return; }
   if(S.mode==="drive") return;                         // a second tap while it loads
   S.mode="drive"; storeView(false);
-  var lift=driveCover();   // (it takes the how-to-play off once it's covered it)
+  // the drive mounts in here: an empty, unpositioned box (the drive's own screen is position:fixed, so it lays out and
+  // stacks exactly as if it were in <body>), hidden until the cover is fully up
+  var mount=document.createElement("div"); mount.style.visibility="hidden"; document.body.appendChild(mount);
+  var unmount=function(){ if(mount.parentNode) mount.parentNode.removeChild(mount); };
+  var lift=driveCover(mount);   // (it takes the how-to-play off once it's covered it)
   import(DRIVE_URL).then(function(m){
-    return m.startDrive({ mount: document.body, muted: !!S.muted, onDone: function(r){
+    return m.startDrive({ mount: mount, muted: !!S.muted, onDone: function(r){
+      unmount();
       if(r && r.busted){ S.mode=""; startWithDrive(); return; }   // hit a cop: jail, then back to the start of the drive
       showStoreHow(r);                                  // you're at the store: its how-to-play first, then the run
     }});
   }).catch(function(e){
     console.warn("drive unavailable, going to the store:", e);
-    var d=document.querySelector(".drive-root"); if(d&&d.parentNode) d.parentNode.removeChild(d);   // never leave a half-built drive over the store
+    unmount();   // never leave a half-built drive over the store
     lift(); showStoreHow(null);
   });
 }
