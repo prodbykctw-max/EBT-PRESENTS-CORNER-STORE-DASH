@@ -23,12 +23,22 @@ export class TopSurface {
       }
     });
     this.grid = new Map(); for (const [k, l] of lists) this.grid.set(k, Int32Array.from(l));
+    // each triangle's x/z bounds, padded 1 cm, so a query can skip the triangles it is nowhere near with four
+    // comparisons before the exact test (the padding is far wider than the exact test's 1e-6 tolerance, so nothing it
+    // would have found is skipped: same answers, a fraction of the work; the wheels, crowd and props ask ~500 times a frame)
+    const T = this.tri, B = (this.box = new Float32Array(t * 4)), PAD = 0.01;
+    for (let q = 0; q < t; q++) {
+      const o = q * 9;
+      B[q * 4] = Math.min(T[o], T[o + 3], T[o + 6]) - PAD; B[q * 4 + 1] = Math.max(T[o], T[o + 3], T[o + 6]) + PAD;
+      B[q * 4 + 2] = Math.min(T[o + 2], T[o + 5], T[o + 8]) - PAD; B[q * 4 + 3] = Math.max(T[o + 2], T[o + 5], T[o + 8]) + PAD;
+    }
   }
   /** highest surface at three-space (x, z) that is below `below`: { y, name } or null */
   top(x, z, below = Infinity) {
     const ids = this.grid.get(Math.floor(x / this.cell) * 65536 + Math.floor(z / this.cell)); if (!ids) return null;
-    const T = this.tri; let bestY = -Infinity, bestW = -1;
+    const T = this.tri, B = this.box; let bestY = -Infinity, bestW = -1;
     for (let q = 0; q < ids.length; q++) {
+      const b = ids[q] * 4; if (x < B[b] || x > B[b + 1] || z < B[b + 2] || z > B[b + 3]) continue;
       const o = ids[q] * 9, ax = T[o], ay = T[o + 1], az = T[o + 2], bx = T[o + 3], by = T[o + 4], bz = T[o + 5], cx = T[o + 6], cy = T[o + 7], cz = T[o + 8];
       const d = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz); if (d > -1e-9 && d < 1e-9) continue;
       const l1 = ((bz - cz) * (x - cx) + (cx - bx) * (z - cz)) / d, l2 = ((cz - az) * (x - cx) + (ax - cx) * (z - cz)) / d, l3 = 1 - l1 - l2;

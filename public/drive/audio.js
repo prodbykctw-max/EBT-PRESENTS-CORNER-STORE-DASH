@@ -90,11 +90,14 @@ export class DriveAudio {
     // recordings sit around mid revs: idle plays them at ~0.55×, the redline at ~1.7×
     const rate = 0.55 + (this.rpm - IDLE) / (REDLINE - IDLE) * 1.15;
     const [on, off] = this.layers;
-    for (const ly of this.layers) ly.src.playbackRate.setTargetAtTime(rate, t, 0.04);
-    on.g.gain.setTargetAtTime(Math.sin(l * Math.PI / 2) * 0.9, t, 0.06);          // equal-power crossfade
-    off.g.gain.setTargetAtTime(Math.cos(l * Math.PI / 2) * 0.75, t, 0.06);
-    this.engLP.frequency.setTargetAtTime(2400 + this.rpm * 0.6, t, 0.08);
-    this.squeal.gain.setTargetAtTime(slip > 0.3 ? Math.min(0.55, (slip - 0.3) * 1.1) : 0, t, 0.05);
+    // each glide is only re-aimed when its target changes: re-aiming at the same target from wherever it has got to
+    // traces exactly the same curve, so a car sitting still (or cruising) stops queueing ~6 automation events a frame
+    const aim = (param, v, tc) => { if (param._aim !== v) { param.setTargetAtTime(v, t, tc); param._aim = v; } };
+    for (const ly of this.layers) aim(ly.src.playbackRate, rate, 0.04);
+    aim(on.g.gain, Math.sin(l * Math.PI / 2) * 0.9, 0.06);          // equal-power crossfade
+    aim(off.g.gain, Math.cos(l * Math.PI / 2) * 0.75, 0.06);
+    aim(this.engLP.frequency, 2400 + this.rpm * 0.6, 0.08);
+    aim(this.squeal.gain, slip > 0.3 ? Math.min(0.55, (slip - 0.3) * 1.1) : 0, 0.05);
   }
 
   play(name, { gain: g = 1, rate = 1, bus, delay = 0 } = {}) {

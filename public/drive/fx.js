@@ -62,7 +62,7 @@ export class ImpactFX {
     if (kind === 'metal') {
       const n = Math.round(70 + 90 * power);
       for (let k = 0; k < n; k++) {
-        const i = this.sp.n++ % MAX_SPARKS, sp = rnd(4, 13) * (0.6 + power * 0.6);
+        const i = this.sp.n++ % MAX_SPARKS, sp = rnd(4, 13) * (0.6 + power * 0.6); this.busy = true;
         // sprayed forward and sideways off the impact, a few straight up
         const a = Math.atan2(fwd.z, fwd.x) + rnd(-1.4, 1.4), up = rnd(0.5, 5.5);
         this.sp.pos.set([at.x + rnd(-0.3, 0.3), at.y + rnd(-0.2, 0.3), at.z + rnd(-0.3, 0.3)], i * 3);
@@ -88,10 +88,15 @@ export class ImpactFX {
   }
 
   update(dt, camera, renderer) {
+    // nothing burning, flying or smoking (almost every frame): the buffers already hold all-dead sparks from the
+    // last pass, so skip the 600-spark sweep and the re-upload of ~40 KB of unchanged vertex data
+    if (!this.busy && !this.debris.length && !this.smoke.some((sm) => sm.life > 0)) return;
     // sparks
     const P = this.sp.pos, V = this.sp.vel, L = this.lifeAttr.array;
+    let live = 0;
     for (let i = 0; i < MAX_SPARKS; i++) {
       if (this.sp.life[i] <= 0) { L[i] = 0; this.streakCol.fill(0, i * 6, i * 6 + 6); continue; }
+      live++;
       this.sp.life[i] -= dt; const k = i * 3;
       V[k + 1] -= G * dt; V[k] *= 1 - dt * 1.5; V[k + 2] *= 1 - dt * 1.5;
       P[k] += V[k] * dt; P[k + 1] += V[k + 1] * dt; P[k + 2] += V[k + 2] * dt;
@@ -105,6 +110,7 @@ export class ImpactFX {
     }
     this.lines.geometry.attributes.position.needsUpdate = true; this.lines.geometry.attributes.color.needsUpdate = true;
     this.points.geometry.attributes.position.needsUpdate = true; this.lifeAttr.needsUpdate = true;
+    this.busy = live > 0;   // (the pass after the last spark dies has just written them all dead: then it can rest)
     this.sparkMat.uniforms.uScale.value = renderer.domElement.height * 0.55; // point size in world-ish units
     // debris
     let n = 0;
