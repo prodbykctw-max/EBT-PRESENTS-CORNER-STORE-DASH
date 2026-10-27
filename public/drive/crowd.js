@@ -187,7 +187,7 @@ export class Crowd {
     const acc = (Math.random() < 0.22 ? ACC.cap : 0) | (Math.random() < 0.25 ? ACC.long : 0) | (Math.random() < 0.2 ? ACC.bag : 0) | (Math.random() < 0.18 ? ACC.hood : 0);
     const ix = (a) => (Math.random() * a.length) | 0;
     return { h: rnd(0.9, 1.1), w: rnd(0.88, 1.15), pal: [ix(SKIN), ix(TOPS), ix(BOTTOMS), ix(ACCENT)], acc,
-      phase: rnd(0, 6.28), phone: 0, startle: 0, lean: 0, ds: 0, dd: 0, s: 0, d: 0, yaw: 0 };
+      phase: rnd(0, 6.28), phone: 0, startle: 0, lean: 0, ds: 0, dd: 0, s: 0, d: 0, yaw: 0, yi: 0 };
   }
   addGroup({ kind, s, side, n, anchored = false, dAt }) {
     const g = { kind, s, side, anchored, dir: kind === 'walk' ? (Math.random() < 0.5 ? 1 : -1) : 0, v: rnd(1.05, 1.6), lane: rnd(0.15, 0.85), members: [] };
@@ -208,7 +208,9 @@ export class Crowd {
 
   update(dt, car, hornT) {
     this.t += dt;
+    if (!this._init) { this._init = true; for (const m of this.people) this.traits(m); }
     const r = this.route, sim0 = car.s + SIM[0], sim1 = car.s + SIM[1];
+    this.watch(dt);
     // simulate what's near the car or on screen; everyone else is out of sight and simply waits
     const active = this.groups.filter((g) => (g.s > sim0 && g.s < sim1) || g.members.some((m) => m.on));
     const walkers = { 1: [], [-1]: [] };
@@ -248,29 +250,215 @@ export class Crowd {
       // the car or the horn: flinch away from the curb
       const near = g.s - car.s, curbSide = Math.sign(car.d) === g.side && Math.abs(car.d) > r.hw(car.s) - 2.2;
       const scare = (near > -3 && near < 7 && curbSide ? 1 : 0) || (hornT > 0 && Math.abs(near) < 25 ? 0.55 : 0);
+      // the runner and the bully coming up the pavement: who sees it, who steps where (see react)
+      const picks = this.thr.length ? [] : null;
       g.members.forEach((m, k) => {
         m.startle = Math.max(scare, m.startle - dt * 1.4);
         // m.shove: knocked aside (drive.js, when the runner or the bully barges into them on foot), easing back over ~2 s
         if (m.shove) { m.shove *= Math.exp(-dt * 0.9); if (Math.abs(m.shove) < 0.01) m.shove = 0; }
-        const s = g.s + (single ? -g.dir * k * 0.85 : m.ds), d = g.cd + (single ? 0 : m.dd) + m.startle * 0.9 + (m.shove || 0);
-        m.s += (s - m.s) * Math.min(1, dt * 6); m.d += (Math.min(hi + 0.3, d) - m.d) * Math.min(1, dt * 4);
-        if (g.kind === 'walk') m.phase += dt * g.v * 2 * Math.PI / (1.35 * m.h);
-        else m.phase = 0.6 * Math.sin(this.t * 0.7 + k);      // standing: a slow weight shift
-        m.lean = g.kind === 'walk' ? 0.03 : 0;
-        m.lean -= m.startle * 0.08;
+        const [mlo, mhi] = this.bandAt(g.side, m.s);
+        m.sT = g.s + (single ? -g.dir * k * 0.85 : m.ds);
+        m.dT = Math.min(mhi + 0.3, g.cd + (single ? 0 : m.dd) + m.startle * 0.9 + (m.shove || 0));   // where they'd stand if nobody came
+        m.lo = mlo; m.hi = mhi;
+        if (picks) this.react(m, g, dt, picks);
+        else this.calm(m, dt);
+      });
+      if (picks && picks.length > 1) this.spread(picks);
+      g.members.forEach((m, k) => {
+        // move: critically damped springs (no overshoot, no snapping, the same at any frame rate). Along the walk they ride
+        // the group's own speed; across they ease to where they'd stand, or to the gap they've picked to let you by
+        const evading = m.ev !== null;
+        const vt = g.kind === 'walk' ? g.dir * g.v : 0;
+        const dT = evading ? Math.min(m.hi + 0.1, Math.max(m.lo - 0.25, m.ev + (m.shove || 0))) : m.dT;
+        const w = evading ? m.wEv : 6.5;
+        this.spring(m, 's', 'vs', m.sT, vt, 6, dt);
+        const d0 = m.d;
+        this.spring(m, 'd', 'vd', dT, 0, w, dt);
+        const vmax = 4.2;
+        if (m.vd > vmax) m.vd = vmax; else if (m.vd < -vmax) m.vd = -vmax;
+        if (m.ev !== null || m.shove) this.keepOut(m, g.side, d0);
+        const speed = Math.hypot(m.vs, m.vd);
+        m.sp += (speed - m.sp) * Math.min(1, dt * 12);
+        // legs follow the ground actually covered (a step aside is a few quick steps, standing is a slow weight shift)
+        m.phase += dt * (m.sp > 0.2 ? m.sp * 2 * Math.PI / (1.35 * m.h) : 0.7);
+        m.lean = Math.min(0.09, m.sp * 0.025) - Math.max(m.startle, m.fl) * 0.08;
+        if (m.fl > 0) m.fl = Math.max(0, m.fl - dt * 1.6);
+        if (m.hop >= 0) { m.hop += dt / 0.4; if (m.hop >= 1) m.hop = -1; }
         this.face(m);
+        const da = Math.atan2(Math.sin(m.yawT - m.yaw), Math.cos(m.yawT - m.yaw));
+        const turn = da * Math.min(1, dt * (m.lkT > 0 ? 12 : 7)), cap = 14 * dt;   // eased, and never faster than a quick turn on the spot
+        m.yaw += Math.max(-cap, Math.min(cap, turn));
         m.dirty = true;
       });
     }
     this.render(car);
   }
 
-  /** facing: along the walk; talkers face the middle of their circle; everyone else (and anyone startled) faces the road */
+  // ------------------------------------------------------------------ people see you coming
+  /** per person, once: how attentive they are. About one in five is distracted (a phone, a conversation) and only looks up
+   *  when you're nearly on them, so running into someone is rare, not impossible. */
+  traits(m) {
+    const late = Math.random() < 0.2;
+    Object.assign(m, {
+      late, flinchy: Math.random() < 0.5,
+      tl: late ? rnd(0.2, 0.34) : rnd(1.6, 2.1),     // seconds before you'd reach them that they notice you (the bully: shorter)
+      dl: late ? rnd(0.1, 0.18) : rnd(0.14, 0.34),   // …and how long they take to start moving once they have
+      wEv: late ? 9 : rnd(7, 10.5),                  // how brisk the step aside is (spring rate)
+      vs: m.g.kind === 'walk' ? m.g.dir * m.g.v : 0, vd: 0, sp: 0, sT: m.s, dT: m.d, lo: 0, hi: 0,
+      ev: null, evSide: 0, nt: -1, rl: 0, lkT: 0, lkS: 0, lkD: 0, fl: 0, hop: -1, yawT: m.yaw, yi: 1,
+    });
+  }
+  /** the runner and the bully this frame (drive.js sets crowd.runner / crowd.chaser every on-foot step: route-space s, d, v) */
+  watch(dt) {
+    const T = this.thr || (this.thr = []), W = this._w || (this._w = {}); T.length = 0;
+    for (const who of ['runner', 'chaser']) {
+      const o = this[who]; if (!o) continue;
+      const w = W[who] || (W[who] = { t: NaN, age: 9, d: 0, s: 0, dv: 0, init: false });
+      if (o.t !== w.t) { w.t = o.t; w.age = 0; } else w.age += dt;
+      if (w.age > 0.3) { w.init = false; continue; }                    // not on foot any more: nobody reacts
+      if (w.init && Math.abs(o.s - w.s) < 3 && dt > 1e-5) w.dv += ((o.d - w.d) / dt - w.dv) * Math.min(1, dt * 10);   // sideways speed
+      else w.dv = 0;
+      w.init = true; w.d = o.d; w.s = o.s;
+      T.push({ who, s: o.s, d: o.d, v: o.v, dv: w.dv, clear: who === 'runner' ? 0.95 : 1.05 });
+    }
+  }
+  /** nobody is coming: wind down any reaction */
+  calm(m, dt) {
+    if (m.nt >= 0) m.nt = -1;
+    // (they close back up a moment after you've gone by; sooner if the spot they stepped to is now in the way of a tree or bench)
+    if (m.ev !== null) { m.rl -= dt; if (m.rl <= 0 || this.blocked(m.g.side, m.s, m.ev)) { m.ev = null; m.evSide = 0; } }
+    if (m.lkT > 0) m.lkT -= dt;
+  }
+  /** Anyone ahead of the runner (or the bully) within a few seconds of reaching them sees them coming: they look, a
+   *  moment later they step out of the way (toward the buildings, or toward the curb if that side has the room), some
+   *  flinch or hop back, and they close back up once you're past. Distance scales with speed because it's seconds. */
+  react(m, g, dt, picks) {
+    const side = g.side;
+    let seen = false, hold = false, need = false, ints = null, lookAt = null, dirS = 1, byRunner = false;
+    for (const tr of this.thr) {
+      if (Math.abs(m.s - tr.s) > 24) continue;
+      const speed = Math.abs(tr.v), moving = speed >= 0.5;
+      dirS = tr.v >= 0 ? 1 : -1;
+      const rel = (m.s - tr.s) * dirS, cdr = side * tr.d, cdv = side * tr.dv;   // crowd d: + toward the buildings
+      if (Math.abs(cdr - m.d) > 4.5) continue;                                   // across the street: not their business
+      let tA;
+      if (moving) {
+        const closing = speed - m.vs * dirS;
+        if (rel < -0.9 || (closing < 0.35 && rel > 1.2)) continue;
+        tA = rel <= 0 ? 0 : rel / Math.max(0.35, closing);
+      } else { if (Math.abs(rel) > 1.6) continue; tA = 0; }
+      const bully = tr.who === 'chaser';
+      // the bully's path clears a little later (shorter look-ahead, a longer pause before they move); once they're stepping aside
+      // they hold it until he's past too, instead of drifting back in front of him
+      const tl = (bully ? Math.min(m.tl, 1.15) : m.tl) * (m.ev !== null ? 1.5 : 1);
+      if (tA > tl && rel > 1.5) { if (bully && m.ev !== null && rel < 16 && moving) hold = true; continue; }
+      seen = true; hold = true; if (!bully) byRunner = true;
+      lookAt = tr;
+      const c = Math.min(m.hi + 0.6, Math.max(m.lo - 0.8, cdr + Math.max(-2, Math.min(2, cdv)) * Math.min(tA, 0.4)));   // where they'll be when they reach them
+      // (a runner who is changing lanes could end up anywhere across it, so the gap widens with his sideways speed)
+      const cl = tr.clear + Math.min(0.35, 0.08 + 0.15 * Math.abs(cdv));
+      (ints || (ints = [])).push([c - cl, c + cl, c]);
+      if ((m.dT > c - cl - 0.05 && m.dT < c + cl + 0.05) || (m.d > c - cl - 0.05 && m.d < c + cl + 0.05)) need = true;
+    }
+    if (!seen) {
+      if (m.nt >= 0 && m.ev === null) m.nt = -1;
+      if (hold) m.rl = 0.5;
+      this.calm(m, dt); return;
+    }
+    // noticed: look; after their reaction time, move
+    if (m.nt < 0) m.nt = 0; else m.nt += dt;
+    const dly = m.dl + (byRunner ? 0 : 0.22);
+    if (m.nt > 0.04) { m.lkT = 0.9; m.lkS = lookAt.s; m.lkD = lookAt.d; }
+    m.rl = 0.5;
+    if (!need) { if (m.ev !== null && m.nt >= dly) this.evade(m, side, ints, picks, dirS); return; }
+    if (m.nt < dly) return;
+    this.evade(m, side, ints, picks, dirS);
+  }
+  /** pick the gap: just outside every path that's coming, on a side with room (not through a tree or a wall) */
+  evade(m, side, ints, picks, dirS) {
+    const lo = m.lo - 0.25, hi = m.hi + 0.1;   // right up to the wall, or to the very edge of the curb
+    const inside = (x, eps = 0) => ints.some((i) => x > i[0] - eps && x < i[1] + eps);
+    const cand = [];
+    for (const i of ints) for (const x of [i[1] + 0.05, i[0] - 0.05]) {
+      if (x < lo || x > hi || inside(x, 0.02) || this.blocked(side, m.s, x, m.d)) continue;
+      cand.push(x);
+    }
+    let x = null;
+    if (cand.length) {
+      let best = Infinity;
+      for (const c of cand) {
+        const sd = c > ints[0][2] ? 1 : -1;
+        const cost = Math.abs(c - m.d) + (c < m.d ? 2 : 0) + (m.evSide && sd !== m.evSide ? 8 : 0);
+        if (cost < best) { best = cost; x = c; }
+      }
+    } else {   // no room to get clear: go to the edge farthest from the path, as far as the pavement and the furniture allow
+      const c0 = ints[0][2], far = m.evSide ? (m.evSide > 0 ? hi : lo) : c0 > (lo + hi) / 2 ? lo : hi;   // (keeping to the side they chose)
+      x = null; for (let k = 0; k <= 12 && x === null; k++) { const t = far + (far === lo ? 1 : -1) * 0.12 * k; if (!this.blocked(side, m.s, t, m.d)) x = t; }
+      if (x === null) x = m.d;   // boxed in by furniture: stay put (and flinch)
+    }
+    const started = m.ev === null;
+    m.ev = x; m.evSide = x > ints[0][2] ? 1 : -1;
+    if (started && m.flinchy) { m.fl = 1; m.hop = 0; m.vs += dirS * 1.3; }   // a flinch: hands up and a little hop back
+    picks.push(m);
+  }
+  /** two people stepping to the same side shouldn't stack on each other: the outer one takes the outer spot */
+  spread(picks) {
+    for (const sd of [1, -1]) {
+      const grp = picks.filter((m) => m.ev !== null && m.evSide === sd && Math.abs(m.ev - picks.find((o) => o.evSide === sd).ev) < 0.5);
+      if (grp.length < 2) continue;
+      grp.sort((a, b) => (b.d - a.d) * sd);                         // the one nearest the edge they're heading for goes first
+      grp.forEach((m, k) => { const nx = Math.min(m.hi + 0.1, Math.max(m.lo - 0.25, m.ev + sd * 0.42 * (grp.length - 1 - k))); if (!this.blocked(m.g.side, m.s, nx, m.d)) m.ev = nx; });
+    }
+  }
+  /** is standing at crowd-d x (at s) inside a trunk, pole, bench or shelter? `from` is where they are now: crossing one is blocked too */
+  blocked(side, s, x, from) {
+    const obs = this.obst[side];
+    let a = 0, b = obs.length;
+    while (a < b) { const mid = (a + b) >> 1; if (obs[mid].s < s - 3) a = mid + 1; else b = mid; }
+    for (let i = a; i < obs.length && obs[i].s <= s + 3; i++) {
+      const o = obs[i], gap = o.r + 0.3, ds = Math.abs(o.s - s); if (ds >= gap) continue;
+      const hw = Math.sqrt(gap * gap - ds * ds), lo = o.d - hw, hi = o.d + hw;
+      if (x > lo && x < hi) return true;
+      if (from !== undefined && ((from <= lo && x >= hi) || (from >= hi && x <= lo))) return true;
+    }
+    return false;
+  }
+  /** last line of defence: nobody ends a frame inside street furniture or a wall (pushed out along the pavement's width) */
+  keepOut(m, side, d0) {
+    const obs = this.obst[side];
+    let a = 0, b = obs.length;
+    while (a < b) { const mid = (a + b) >> 1; if (obs[mid].s < m.s - 2.5) a = mid + 1; else b = mid; }
+    for (let i = a; i < obs.length && obs[i].s <= m.s + 2.5; i++) {
+      const o = obs[i], gap = o.r + 0.27, ds = o.s - m.s; if (Math.abs(ds) >= gap) continue;
+      const hw = Math.sqrt(gap * gap - ds * ds); if (Math.abs(m.d - o.d) >= hw) continue;
+      if (Math.abs(d0 - o.d) < hw) continue;   // they were already standing in it (a group placed beside a bin): let them walk out, don't snap them
+      const up = d0 >= o.d;
+      m.d = up ? o.d + hw : o.d - hw; m.vd = up ? Math.max(0, m.vd) : Math.min(0, m.vd);
+    }
+    if (m.ev !== null) {   // (only someone stepping aside is held to the pavement's width: the standing groups keep their places)
+      if (m.d > m.hi + 0.1) { m.d = Math.max(d0 > m.hi + 0.1 ? Math.min(d0, m.d) : m.hi + 0.1, m.hi + 0.1); if (m.vd > 0) m.vd = 0; }
+      if (m.d < m.lo - 0.25) { m.d = Math.min(d0 < m.lo - 0.25 ? Math.max(d0, m.d) : m.lo - 0.25, m.lo - 0.25); if (m.vd < 0) m.vd = 0; }
+    }
+  }
+  /** critically damped spring on m[key] toward target (moving at tv), velocity in m[vkey]; exact for any dt */
+  spring(m, key, vkey, target, tv, w, dt) {
+    const x = m[key] - target, v = m[vkey] - tv, e = Math.exp(-w * dt), k = v + w * x;
+    m[key] = target + (x + k * dt) * e; m[vkey] = tv + (v - w * k * dt) * e;
+  }
+
+  /** facing: along the walk; talkers face the middle of their circle; everyone else (and anyone startled) faces the road.
+   *  Someone who has seen you coming looks at you, and turns to where they're stepping while they step. (This sets the
+   *  target; update eases the body round to it.) */
   face(m) {
-    const g = m.g, a = this.route.at(m.s).a, road = a + (g.side > 0 ? -Math.PI / 2 : Math.PI / 2);
-    m.yaw = m.startle > 0.3 ? road
+    const g = m.g, side = g.side, a = this.route.at(m.s).a, road = a + (g.side > 0 ? -Math.PI / 2 : Math.PI / 2);
+    let t;
+    if (m.lkT > 0 && m.ev !== null && Math.abs(m.vd) > 0.9) t = a + Math.atan2(side * m.vd, m.vs * 0.5);
+    else if (m.lkT > 0 && Math.hypot(m.lkS - m.s, m.lkD - side * m.d) > 0.4) t = a + Math.atan2(m.lkD - side * m.d, m.lkS - m.s);
+    else t = m.startle > 0.3 ? road
       : g.kind === 'walk' ? a + (g.dir > 0 ? 0 : Math.PI)
       : g.kind === 'talk' && g.members.length > 1 ? a + Math.atan2(-m.dd * g.side, -m.ds) : road;
+    m.yawT = t;
+    if (!m.yi) { m.yaw = t; m.yi = 1; }
   }
 
   /** draw everyone the camera can see (with a margin, so nobody pops in at the edge of the frame) */
@@ -299,10 +487,10 @@ export class Crowd {
         i = Math.abs(rx * ax.x + ry * ax.y + rz * ax.z) <= lim && Math.abs(rx * ay.x + ry * ay.y + rz * ay.z) <= lim ? lo++ : cap - 1 - hi++;
       } else i = lo++;
       // model faces +Z; heading a in the route plane maps to three yaw a + π/2
-      m4.compose(pos.set(m.x, m.z, -m.y), q.setFromAxisAngle(up, m.yaw + Math.PI / 2), sc.set(m.w, m.h, m.w));
+      m4.compose(pos.set(m.x, m.z + (m.hop >= 0 ? 0.12 * Math.sin(Math.PI * m.hop) : 0), -m.y), q.setFromAxisAngle(up, m.yaw + Math.PI / 2), sc.set(m.w, m.h, m.w));
       M.setMatrixAt(i, m4);
-      A.iAnim.setXYZW(i, m.phase, m.g.kind === 'walk' ? 1 : 0.05, m.acc, m.lean);
-      A.iPose.setXY(i, m.phone && m.startle < 0.3 ? 1 : 0, Math.min(1, m.startle * 1.4));
+      A.iAnim.setXYZW(i, m.phase, Math.min(1.15, Math.max(0.05, m.sp / 1.3)), m.acc, m.lean);
+      A.iPose.setXY(i, m.phone && m.startle < 0.3 && !(m.fl > 0.3) && !(m.lkT > 0) ? 1 : 0, Math.min(1, Math.max(m.startle, m.fl) * 1.4));
       A.iPal.setXYZW(i, ...m.pal);
     }
     if (hi) {   // close the gap: the ones outside the shadow box (filled from the back) move up behind the rest

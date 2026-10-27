@@ -98,7 +98,8 @@ obstacles and collisions line up exactly with what's painted on the road.
     the corner store. Some check their phones.
   - **Sidewalk band:** they keep between the curb or roadway and the building line, step round
     trees, lamps, benches and shelters (single file if they must), and keep right for oncoming groups.
-  - **Reactions:** they flinch back and put their hands up when you run close to their curb or honk.
+  - **Reactions:** they flinch back and put their hands up when you run close to their curb or honk. On foot they see
+    you and the bully coming and step out of the way (see "The street sees you coming" under The chase).
   - **Cost:** only people near the car or on camera are simulated. Only those the camera can see
     are drawn, with a margin that grows with distance, so nobody ever pops in. Phones skip crowd
     shadows.
@@ -171,6 +172,27 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
     random 0.4 m jump every frame. Each runner has a soft shadow on the ground under them (their sun shadow is a couple
     of texels on a phone): without it, from up here, the facade 6 to 10 m further down the hill sat right beside you
     on screen and you looked pressed into the wall.
+  - **The street sees you coming** (`react` / `evade` / `watch` in `crowd.js`; `updateFoot` hands the crowd you and the bully
+    each step as `crowd.runner` / `crowd.chaser`: route-space s, d, speed). Before (Oct 27 2026) people only reacted after
+    you had already hit them (`knock`). Now everyone on that sidewalk ahead of you is judged by **seconds until you would
+    reach them**, not metres, so the warning distance grows with your speed (at full run 5.6 m/s a normal person notices
+    you 1.6 to 2.1 s out, about 9 to 12 m; for the bully, who is shorter-fused, about 1.1 s). They first **turn to look**
+    (and drop the phone), after a reaction time of 0.14 to 0.34 s (bully: +0.22 s) they **step aside**, and some (half)
+    flinch with hands up and a small hop back. Where they step: just outside your predicted path (your sideways speed
+    widens the gap a little) toward the buildings, or toward the curb only if the buildings side has no room; never
+    through a wall, tree, lamp or bench (the gap is checked against `obst`, and `keepOut` is the last line of defence);
+    they never leave the pavement (the building line is the limit, the curb edge is as far as they go). Once chosen,
+    a person keeps to that side (no flip-flopping as you swerve round a tree); two people heading for the same side
+    spread out instead of stacking (`spread`); a pair you run between part to either side; everyone **closes back up**
+    about half a second after you (and the bully) have gone by. **One in five is distracted** (`late` in `traits`: notices
+    at 0.2 to 0.34 s, about 1.5 m out), so running into someone is rare, not impossible; those few still get `knock`
+    and you still stumble. The bully barges as before (he still `knock`s whoever is in his way and shoves through); the
+    difference is that people in his path now scatter first, a little later than they do for you.
+  - **A smoother, livelier crowd** (same models, colours, density): every person moves on critically damped springs
+    (exact for any frame time) instead of a lerp that snapped when a group went single file; they turn at a limited
+    rate (before, facing flipped in one frame, up to 174 rad/s; now at most 14 rad/s); the legs follow the ground
+    actually covered (a step aside is a few quick steps, standing is a slow weight shift), so feet don't skate; they
+    lean into a step and look up at whoever is running at them.
 - **The on-foot camera** sits 10 m behind you, 6 m up and 0.6 m to the street side, looking 7 m ahead. The first
   version (6 m back, 3 m up, 1.6 m to the street side) had a signal pole beside the camera that hid you completely at
   the start, and once the bully was close he stood between you and the camera; from up here you, him and the sidewalk
