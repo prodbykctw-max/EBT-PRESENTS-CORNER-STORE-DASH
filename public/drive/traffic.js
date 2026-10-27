@@ -685,10 +685,13 @@ export class Traffic {
       const parkEnds = (e.ref === 'pR' || e.ref === 'pL') && r.parkD(S + dir * (8 + sp * 1.5), e.ref === 'pR' ? -1 : 1) === null;
       if ((!threat && (passed || this.clock - e.refT > 2.5)) || parkEnds) {
         const homeLane = dir === -1 ? 1 : 0, ref = homeLane ? 'l1' : 'l0', c = this.refD(ref, S);   // (home is the lane of our direction, whichever lane we swapped into)
+        // (stopped at the end of the parking lane for a while: the gap behind it is only asked to be enough for whoever is coming to brake
+        // for, the way a driver noses out of a parking lane into slow traffic; with no room at all beside it, a car nobody can see turns off)
+        const stalled = parkEnds && sp < 0.5 && (e.stopT || 0) > 4;
         if (this.stripFree(e, c - e.W / 2, c + e.W / 2, S - e.L / 2 - 5, S + e.L / 2 + 8, 1.0)) {
-          const bh = this.behind(e, dir, c - 1, c + 1, 70, true);
-          if (!bh || bh.gap > 10 + Math.max(0, dir * bh.ob.vs - sp) * 4) { this.changeRef(e, ref, 1.9); e.evac = false; e.lane = homeLane; }
-        }
+          const bh = this.behind(e, dir, c - 1, c + 1, 70, true), cv = bh ? Math.max(0, dir * bh.ob.vs) : 0;
+          if (!bh || bh.gap > 10 + Math.max(0, dir * bh.ob.vs - sp) * 4 || (stalled && bh.gap > 4 + cv * cv / 8)) { this.changeRef(e, ref, 1.9); e.evac = false; e.lane = homeLane; }
+        } else if (stalled && e.stopT > 10 && !this.onScreen(e) && !(e.s > car.s - 15 && e.s < car.s + 160)) { e.alive = false; this.stats.despawned++; }
       }
       return;
     }

@@ -171,6 +171,15 @@ cross streets) and calls `traffic.step()` every frame. Cars used to be steered b
   flagger is not stuck: the flagger rotates it. A state that has gone on for 14 s (`z.t2`) is forced to the other direction (`forced`), never
   earlier. A queue that has backed up into a work zone from a red light beyond it, with nobody able to see it and nobody within 15 m behind to
   140 m ahead of you, is removed a car at a time (`despawned`), like an unseen car stuck at a dead end. In sight it waits for the light.
+- **Two cars never stay inside each other** (`untangle`, `overlapping`). If two cars' boxes overlap by more than a touch for 0.4 s,
+  one that nobody can see is removed. If both can be seen, only one of them moves, and only through that one car, never through a
+  queue: two going the same way, the one behind backs off out of it when it has room (otherwise it waits, and the one in front pulls away
+  as soon as it can); head on, or against a parked car or the streetcar, the moving one carries on through that one car alone.
+  (An earlier version let it go through everything in its way, which in a queue at a light set off a chain of cars driving into each other.)
+- **The end of the parking lane.** A car that pulled into the parking lane to let you by and has stopped at its end for 4 s noses back
+  into its lane with only the gap a car coming up behind needs to brake for (4 m plus v²/8), the way a driver noses out of a parking lane
+  into slow traffic; with no room beside it at all, after 10 s a car nobody can see turns off (`despawned`). (Measured once at 41.7 s
+  stopped there before this.)
 - **Car pulling out and returning home.** A car that pulls out of a parking spot checks the lane beside it and the spot's neighbours
   (`touching`), and a car returning to its own lane from the parking lane or from a pass waits only as long as it needs: room ahead of its nose
   that grows with its speed (a car creeping in a queue can slot in behind a stopped one), and a stopped follower needs 3.5 m, not 10. A queue of
