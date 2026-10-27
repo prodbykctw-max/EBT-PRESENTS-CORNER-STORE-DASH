@@ -634,12 +634,18 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       // through the middle of the trunk at s 46)
       const ds = o.s - s, R = o.r + 0.5, od = -o.d, core = o.r + 0.45, a = Math.abs(ds) - core;
       const k = a <= 0 ? 1 : 1 - THREE.MathUtils.smoothstep(a, 0, ds > 0 ? 2.4 : 0.8);
-      if (k <= 0) continue;
+      if (ds < -core - 0.8 || ds > core + 4) continue;
       const half = R * k;
-      if (Math.abs(d - od) >= half) continue;
-      let side = cur >= od ? 1 : -1;
-      if (od + side * R > hi + 0.05 || od + side * R < lo - 0.05) side = -side;   // no room on your side: the other one
-      d = THREE.MathUtils.clamp(od + side * half, lo, hi);
+      // which side: the one with room for you; if both have room, the side you're on (decided by room, not by where you
+      // are this instant, so it can't flip-flop as you cross over)
+      const roomUp = od + R <= hi + 0.05, roomDown = od - R >= lo - 0.05;
+      const side = roomUp && roomDown ? (cur >= od ? 1 : -1) : roomUp ? 1 : roomDown ? -1 : (cur >= od ? 1 : -1);
+      // where you'd run is on the other side of it: drift over starting 4 m before it (continuously, from wherever
+      // you are), so you're across its line long before you could touch it; then the clear zone holds you off it
+      let want = d;
+      if (side > 0 ? d < od : d > od) { const k2 = 1 - THREE.MathUtils.smoothstep(a, 0, 4); want = THREE.MathUtils.lerp(d, od + side * R, k2); }
+      want = side > 0 ? Math.max(want, od + half) : Math.min(want, od - half);
+      d = THREE.MathUtils.clamp(want, lo, hi);
     }
     return d;
   };
