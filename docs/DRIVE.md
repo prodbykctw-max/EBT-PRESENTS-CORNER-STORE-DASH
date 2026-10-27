@@ -334,7 +334,8 @@ black screen). START DRIVE calls `startWithDrive()`, which dynamic-imports `./dr
 When it ends, `showStoreHow()` shows the store's how-to-play (`ovHow`, also plain black), and START RUN calls
 `startStoreRun()`: `startRun()`, then the drive bonus. "Run it back" skips the drive and both how-to-plays. If it's
 offline, opened from disk, or `?nodrive` is set, TAP TO START goes straight to the store's how-to-play, so the
-single-file build stays drive-free. The drive's code is prefetched while the title screen is up.
+single-file build stays drive-free. The drive's code is prefetched while the title screen is up. How each screen
+hands off to the next (loading screens, fades, what's hidden when): `docs/FLOW.md`.
 
 **QA:** `/drive/index.html` is a standalone harness. Add `?qa` to either page to drive the loop from a
 timer, since hidden tabs pause `requestAnimationFrame`.

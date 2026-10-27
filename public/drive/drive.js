@@ -41,6 +41,8 @@ const SKIPFOOT = QA && new URLSearchParams(location.search).has('skipfoot');
 const FOOT = { run: 5.6, back: 2.2, bully: 5.3, bullyGo: 0.8, start: 14, carAhead: 30, bullyBehind: 8, stun: 0.9, reach: 0.9, pause: 1.1 };
 const RACE = { pace: 17, accel: 3.4, hop: 1.6, tail: 4.5, shake: 60, maxLead: 30 };   // 17 m/s: a good run beats him by ~6 s; an average one gets caught late
 const nextFrame = QA ? (f) => setTimeout(f, 16) : requestAnimationFrame;
+// screen-to-screen fades (the loader lifting, the fade to black at the end): the store page's SCREEN_FADE, one pace
+const SCREEN_FADE = 0.3;
 const cancelFrame = QA ? clearTimeout : cancelAnimationFrame;
 
 export async function startDrive({ mount = document.body, muted = false, onDone = () => {}, onProgress = () => {} } = {}) {
@@ -570,6 +572,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
   // ---------- loop ----------
   let last = performance.now(), raf = 0, acc = 0;
+  let holding = false;   // the first picture is up under the loader; nothing moves until the loader has faded off it
   const FIXED = 1 / 120;
   // The physics runs in fixed 1/120 s steps, but frames don't land on step boundaries (a phone's frame times wobble,
   // and many screens aren't 60 or 120 Hz), so drawing the car exactly where the last step left it showed it up to
@@ -580,7 +583,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     raf = nextFrame(frame);
     if (root.clientWidth + 'x' + root.clientHeight !== sized) resize();
     const now = performance.now(), dt = Math.min((now - last) / 1000, 0.05); last = now;
-    if (paused || api.pause) { comic.render(); return; }   // paused (or QA freeze-frame): the world holds still   // QA: freeze-frame for look-dev
+    if (paused || api.pause || holding) { comic.render(); return; }   // paused (or QA freeze-frame): the world holds still   // QA: freeze-frame for look-dev
     hornT -= dt;
     if (state === 'countdown') {
       countdown -= dt;
@@ -779,20 +782,25 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     comic.render();
   }
 
+  // The way out fades to black inside the drive (a veil over it), never to whatever page is underneath: fading the
+  // whole drive out used to show the store under it for most of the fade, then cut to the black how-to-play.
+  // Black to black, the next screen (the store's how-to-play, or the drive again after BUSTED) comes up seamlessly.
+  let finished = false;
   function finish() {
+    if (finished) return; finished = true;   // SKIP tapped twice, or SKIP and the bot's timer: one exit
     cancelFrame(raf); audio.stop(); document.removeEventListener('visibilitychange', onHide);
     removeEventListener('keydown', kd); removeEventListener('keyup', ku); removeEventListener('resize', resize);
-    root.classList.add('out');
-    setTimeout(() => { renderer.dispose(); root.remove(); onDone({ ...result }); }, 450);
+    const veil = document.createElement('div'); veil.className = 'drive-veil'; root.appendChild(veil);
+    const done = () => {
+      renderer.dispose(); renderer.forceContextLoss();   // hand the GPU memory back now, not whenever the page gets round to it
+      root.remove(); onDone({ ...result });
+    };
+    if (G) G.to(veil, { opacity: 1, duration: SCREEN_FADE, ease: 'power1.inOut', onComplete: done });
+    else { veil.getBoundingClientRect(); veil.classList.add('on'); setTimeout(done, SCREEN_FADE * 1000); }   // drive.css fades it
   }
 
   progress(1, 'Ready');
   const loadingScreen = root.querySelector('.drive-loading');
-  if (G) {   // the loading screen fades away; the HUD drops in from the top and the pedals rise from the bottom
-    G.to(loadingScreen, { opacity: 0, duration: 0.35, ease: 'power1.out', onComplete: () => loadingScreen.remove() });
-    G.from(root.querySelectorAll('.drive-hud > *'), { y: -24, opacity: 0, duration: 0.45, stagger: 0.07, delay: 0.15, ease: 'back.out(1.7)', clearProps: 'transform,opacity' });
-    G.from(root.querySelectorAll('.drive-pad'), { y: 40, opacity: 0, duration: 0.5, stagger: 0.08, delay: 0.2, ease: 'back.out(1.5)', clearProps: 'transform,opacity' });
-  } else loadingScreen.remove();
   const skip = () => { haptic(HAP.tap); paused = false; Object.assign(result, { hits, tokens, nearMisses }); finish(); };
   root.querySelector('[data-skip]').addEventListener('click', skip);
   root.querySelector('[data-pause]').addEventListener('click', () => { haptic(HAP.tap); setPaused(true); });
@@ -802,7 +810,20 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // leaving the app mid-drive pauses it (a call, a text, the home screen): nothing happens while you're away
   const onHide = () => { if (document.hidden && (state === 'driving' || state === 'countdown' || state === 'onfoot')) setPaused(true); };
   document.addEventListener('visibilitychange', onHide);
-  frame();
+  // The loader stays up until the first picture is actually on screen. That first frame is the slow one (the GPU
+  // builds every shader and uploads every texture it needs), so it runs under the loader: placing you, the bully and
+  // the camera, then drawing. Then two display frames for it to reach the screen, and only then the loader fades
+  // (it used to start fading before the first frame was drawn, so on a phone it froze half-faded while the GPU
+  // caught up). Nothing moves while it fades (holding): the chase starts on the picture you can see. The loader sits
+  // above the HUD (drive.css), so no button shows before the screen is ready; the HUD drops in as it lifts.
+  last = performance.now(); frame(); holding = true;
+  await new Promise((ok) => nextFrame(() => nextFrame(ok)));
+  const go = () => { holding = false; last = performance.now(); };
+  if (G) {   // the loading screen fades away; the HUD drops in from the top and the pedals rise from the bottom
+    G.to(loadingScreen, { opacity: 0, duration: SCREEN_FADE, ease: 'power1.inOut', onComplete: () => { loadingScreen.remove(); go(); } });
+    G.from(root.querySelectorAll('.drive-hud > *'), { y: -24, opacity: 0, duration: 0.45, stagger: 0.07, delay: 0.15, ease: 'back.out(1.7)', clearProps: 'transform,opacity' });
+    G.from(root.querySelectorAll('.drive-pad'), { y: 40, opacity: 0, duration: 0.5, stagger: 0.08, delay: 0.2, ease: 'back.out(1.5)', clearProps: 'transform,opacity' });
+  } else { loadingScreen.remove(); go(); }
   // test hooks (drive QA + screenshots)
   Object.assign(api, { car, world, route, spot, keys, result, audio, fx, city, comic, 
     three: { scene, camera, carRig, THREE, renderer },
@@ -848,5 +869,4 @@ const HUD_HTML = `
   <button class="dp brake" data-k="down" aria-label="Brake, hold to reverse"><b>BRAKE</b><small>HOLD = REV</small></button>
   <button class="dp gas" data-k="gas" aria-label="Gas"><b>GAS</b></button>
 </div>
-<div class="drive-tip">GAS to go · ◀ ▶ change lanes · HORN clears the way</div>
 <div class="drive-osm">© OpenStreetMap contributors</div>`;

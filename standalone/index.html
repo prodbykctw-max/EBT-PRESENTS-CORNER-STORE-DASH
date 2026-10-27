@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0A0A0C">
+<!-- home screen: opens as a full-screen app (no browser bars), dark from the first frame. "black" keeps the status
+     bar an opaque black strip above the game, so the top of the store (SCORE, the title) never sits under the notch. -->
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Store Dash">
+<link rel="manifest" href="game.webmanifest">
 <title>Corner Store Dash — the EBT browser game</title>
 <style>
   :root{ --pink:#E85D9E; --magenta:#C2255C; --gold:#F5C518; --cream:#FFF3E0; --coral:#F08C4B; --navy:#1E2340; --ink:#0A0A0C; }
@@ -11,7 +19,9 @@
     /* a held finger is gameplay, never a text selection or iOS's Copy / Look Up menu */
     -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
   input,textarea{ -webkit-user-select:text; user-select:text; }
-  html,body{ height:100%; }
+  /* a phone game screen: no rubber-band bounce or pull-to-refresh, and iOS never enlarges the text on rotation */
+  html{ -webkit-text-size-adjust:100%; text-size-adjust:100%; }
+  html,body{ height:100%; overscroll-behavior:none; }
   body{ background:var(--ink); color:var(--cream); overflow:hidden;
     font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
     touch-action:manipulation; user-select:none; -webkit-user-select:none;
@@ -44,8 +54,15 @@
   #stick.on{ opacity:1; }
   #stick i{ position:absolute; left:28px; top:28px; width:40px; height:40px; border-radius:50%;
     background:rgba(245,197,24,.85); box-shadow:0 2px 8px rgba(0,0,0,.4); }
-  .ov{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
-    background:rgba(10,10,14,.9); z-index:20; text-align:center; padding:20px; gap:14px; }
+  /* Screens keep clear of the notch, the home bar and rounded corners (safe-area insets, 20px minimum). Centred
+     with auto margins rather than justify-content:center, so a screen taller than a small phone (the end screen with
+     the leaderboard) scrolls from its top instead of being cut off at both ends. */
+  .ov{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:flex-start;
+    background:rgba(10,10,14,.9); z-index:20; text-align:center; gap:14px;
+    padding:max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+    overflow-y:auto; overscroll-behavior:contain; }
+  .ov > :first-child{ margin-top:auto; }
+  .ov > :last-child, #ovTitle > .btn{ margin-bottom:auto; }
   .ov.on{ display:flex; }
   /* the two how-to-play screens (the drive's, then the store's once you get there) sit on a plain black page:
      nothing of the game shows through behind them */
@@ -66,7 +83,9 @@
     box-shadow:0 4px 0 var(--navy); padding:12px 22px; }
   .btn:active{ transform:translateY(3px); box-shadow:0 1px 0 var(--navy); }
   .btn.alt{ background:var(--cream); }
-  .pulse{ animation:pulse 1.1s infinite; }
+  /* starts after the title's entrance (the card and button rise first; a running CSS opacity animation would
+     override that rise and pop the button in at full strength) */
+  .pulse{ animation:pulse 1.1s 1s infinite; }
   @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.45} }
   @media (prefers-reduced-motion:reduce){ .pulse{ animation:none; } }
   #endTitle{ font-size:28px; font-weight:900; text-shadow:3px 3px 0 var(--navy); }
@@ -340,21 +359,26 @@ var SHOWN={v:0};
 function shownScore(){ return MOTION? Math.round(SHOWN.v) : S.score; }
 // the active item pops into place when it appears; the PAY spots pop in when the list is done
 var REVEAL={k:1,idx:-1}, PAYIN={k:1,on:false};
-// overlays: fade in while their contents rise in one after another; fade out without catching taps on the way
-function overlayIn(o){
+// overlays: fade in while their contents rise in one after another; fade out without catching taps on the way.
+// Every screen-to-screen fade in the game (overlays, the boot loader, the drive's cover, loader and exit) takes
+// SCREEN_FADE seconds, so the hand-offs all move at one pace.
+var SCREEN_FADE=0.3;
+// coverNow: the overlay's backing is up at once (a solid how-to-play, or the title coming up under the boot loader),
+// so nothing behind it shows through on the way in. contentDelay: its words and buttons wait that long to rise.
+function overlayIn(o,contentDelay){
   if(!MOTION) return;
   GS.killTweensOf(o); GS.killTweensOf(o.children);
   GS.set(o,{pointerEvents:"auto"});
   // the plain-black how-to-play screens (data-solid) cover the game at once, so nothing of it ever shows through;
   // only their words and button move
-  if(o.hasAttribute("data-solid")) GS.set(o,{opacity:1});
-  else GS.fromTo(o,{opacity:0},{opacity:1,duration:0.28,ease:"power2.out"});
-  GS.fromTo(o.children,{y:18,opacity:0,scale:0.96},{y:0,opacity:1,scale:1,duration:0.45,ease:"back.out(1.6)",stagger:0.06,clearProps:"transform,opacity"});
+  if(o.hasAttribute("data-solid")||contentDelay) GS.set(o,{opacity:1});
+  else GS.fromTo(o,{opacity:0},{opacity:1,duration:SCREEN_FADE,ease:"power2.out"});
+  GS.fromTo(o.children,{y:18,opacity:0,scale:0.96},{y:0,opacity:1,scale:1,duration:0.45,delay:contentDelay||0,ease:"back.out(1.6)",stagger:0.06,clearProps:"transform,opacity"});
 }
 function overlayOut(o){
   GS.killTweensOf(o); GS.killTweensOf(o.children);
   o._leaving=true; GS.set(o,{pointerEvents:"none"});
-  GS.to(o,{opacity:0,duration:0.2,ease:"power1.in",onComplete:function(){ o._leaving=false; o.classList.remove("on"); GS.set(o,{clearProps:"opacity,pointerEvents"}); }});
+  GS.to(o,{opacity:0,duration:SCREEN_FADE,ease:"power1.inOut",onComplete:function(){ o._leaving=false; o.classList.remove("on"); GS.set(o,{clearProps:"opacity,pointerEvents"}); }});
 }
 // buttons give under the finger and spring back (the dip matches the old CSS press: 3px for big buttons, 1px small)
 function springButtons(){
@@ -890,7 +914,7 @@ function useContinue(){
 }
 function goMenu(){
   hide("ovEnd"); hide("ovPause"); hide("ovHow"); hide("ovDriveHow");
-  S.mode="title"; show("ovTitle");
+  S.mode="title"; storeView(true); show("ovTitle");
 }
 function togglePause(){
   if(S.mode==="play"){ S.mode="paused"; show("ovPause"); }
@@ -945,23 +969,39 @@ function endScreen(won){
    (opened from disk, offline, or an old copy with no /drive/ next to it) you go straight to the store's how-to-play. */
 var DRIVE_URL="./drive/drive.js";
 function driveAvailable(){ return /^https?:$/.test(location.protocol) && !/[?&]nodrive\b/.test(location.search); }
-// Cover the store the instant START is tapped: the drive's code (three.js + modules) takes a moment to
-// arrive, and its own loading screen only exists once it has. Same look as the drive's loader, so the
-// hand-off is seamless; it lifts once the drive's screen is up and styled (or if the drive fails).
+// Cover the screen the instant START is tapped: the drive's code (three.js + modules) takes a moment to
+// arrive, and its own loading screen only exists once it has. It is a copy of the drive's loader, bar and all
+// (drive.css .drive-loading: same font, sizes, gap and a bar at the 5% the drive starts it at), so when it lifts
+// onto the real one nothing moves. In order: its dark backing fades up over the how-to-play (the how-to-play stays
+// put under it, then goes), then AUBURN AVE fades in on a clean screen (the two screens' words never mix), and it
+// lifts once that's done and the drive's screen is up and styled (or at once if the drive fails).
 function driveCover(){
   var c=document.createElement("div");
-  c.setAttribute("style","position:fixed;inset:0;z-index:60;background:#101318;display:grid;place-content:center;gap:8px;text-align:center;color:#fff;font-family:system-ui,-apple-system,'Segoe UI',sans-serif");
-  c.innerHTML='<b style="font:900 34px/1 system-ui,sans-serif;letter-spacing:.12em;color:#ffd400">AUBURN AVE</b><span style="opacity:.75">Get to the corner store</span>';
+  c.setAttribute("style","position:fixed;inset:0;z-index:60;background:#101318;display:grid;place-content:center;text-align:center;color:#fff;font-family:system-ui,-apple-system,'Segoe UI',sans-serif");
+  c.innerHTML='<div style="display:grid;gap:8px"><b style="font:900 34px/1 system-ui,sans-serif;letter-spacing:.12em;color:#ffd400">AUBURN AVE</b><span style="opacity:.75">Get to the corner store</span>'
+    +'<i style="display:block;height:5px;width:5%;background:#ffd400;border-radius:3px;margin:8px auto 0;max-width:260px"></i></div>';
   document.body.appendChild(c);
-  var t=setInterval(function(){ var d=document.querySelector(".drive-root"); if(d&&getComputedStyle(d).position==="fixed") lift(); },50);
-  function lift(){ clearInterval(t); if(c.parentNode) c.parentNode.removeChild(c); }
+  var ready=!MOTION, styled=false;
+  var under=function(){ ["ovTitle","ovDriveHow","ovHow"].forEach(hideNow); };   // whatever screen it came from, gone underneath
+  if(MOTION) GS.timeline({onComplete:function(){ ready=true; if(styled) lift(); }})
+    .fromTo(c,{opacity:0},{opacity:1,duration:SCREEN_FADE,ease:"power1.inOut",onComplete:under})
+    .fromTo(c.firstChild,{opacity:0},{opacity:1,duration:0.2,ease:"power1.out"});
+  else under();
+  var t=setInterval(function(){ var d=document.querySelector(".drive-root"); if(d&&getComputedStyle(d).position==="fixed"){ styled=true; if(ready) lift(); } },50);
+  function lift(){ clearInterval(t); if(GS) GS.killTweensOf([c,c.firstChild]); if(c.parentNode) c.parentNode.removeChild(c); }
   return lift;
+}
+// an overlay off at once, no fade (it's already covered)
+function hideNow(id){
+  var o=el(id); if(!o.classList.contains("on")) return;
+  if(GS){ GS.killTweensOf(o); GS.killTweensOf(o.children); GS.set(o,{clearProps:"opacity,pointerEvents"}); GS.set(o.children,{clearProps:"transform,opacity"}); }
+  o._leaving=false; o.classList.remove("on");
 }
 function startWithDrive(){
   if(!driveAvailable()){ showStoreHow(null); return; }
   if(S.mode==="drive") return;                         // a second tap while it loads
-  hide("ovTitle"); hide("ovDriveHow"); hide("ovHow"); S.mode="drive";
-  var lift=driveCover();
+  S.mode="drive"; storeView(false);
+  var lift=driveCover();   // (it takes the how-to-play off once it's covered it)
   import(DRIVE_URL).then(function(m){
     return m.startDrive({ mount: document.body, muted: !!S.muted, onDone: function(r){
       if(r && r.busted){ S.mode=""; startWithDrive(); return; }   // hit a cop: jail, then back to the start of the drive
@@ -976,7 +1016,16 @@ function startWithDrive(){
 // Once you get to the store (the drive is over, or there is no drive): the store's how-to-play, on its own plain
 // screen. START RUN starts the run, then banks the drive's bonus on top of the fresh score.
 var arrival=null;
-function showStoreHow(r){ arrival=r||null; S.mode="how"; hide("ovTitle"); hide("ovDriveHow"); show("ovHow"); }
+function showStoreHow(r){ arrival=r||null; S.mode="how"; storeView(false); hide("ovTitle"); hide("ovDriveHow"); show("ovHow"); }
+/* The store only shows on its own turn: dimmed behind the title card, then the run and its pause / end screens. From
+   the drive's how-to-play until START RUN (the drive, its loading screens, the store's how-to-play) it is hidden and
+   not drawn at all, so no fade or hand-off can ever flash it, and a phone isn't drawing a hidden store under the drive. */
+var storeHidden=false;
+function storeView(on){
+  storeHidden=!on; var v=on?"":"hidden";
+  if(view) view.style.visibility=v;
+  var sb=document.querySelector(".sideBtns"); if(sb) sb.style.visibility=v;   // the store's pause / mute go with it
+}
 function startStoreRun(){
   var r=arrival; arrival=null;
   startRun();
@@ -1019,7 +1068,7 @@ function pickBullySpawn(){
 }
 function startRun(){
   hide("ovEnd"); hide("ovTitle"); hide("ovHow"); hide("ovDriveHow");
-  S.mode="play"; S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.runSecs=0; S.won=false; S.drive=null; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
+  S.mode="play"; storeView(true); S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.runSecs=0; S.won=false; S.drive=null; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
   S.bullyOutside=false; S.bullyIn=0; S.bullyTail=false;
   if(GS) GS.killTweensOf(SHOWN); SHOWN.v=0; REVEAL.idx=-1; PAYIN.on=false;   // motion state starts fresh with the run
   // one item live on the board at a time, in a fresh random order each run —
@@ -1486,10 +1535,10 @@ function submitScore(){
 
 /* ---------- boot / loop ---------- */
 function el(id){ return document.getElementById(id); }
-function show(id){
+function show(id,contentDelay){
   var o=el(id);
   if(o.classList.contains("on")&&!o._leaving) return;   // already up (a fade-out in progress is turned back around)
-  o._leaving=false; o.classList.add("on"); overlayIn(o);
+  o._leaving=false; o.classList.add("on"); overlayIn(o,contentDelay);
 }
 function hide(id){
   var o=el(id);
@@ -1636,7 +1685,7 @@ function loop(ts){
   if(!last) last=ts;
   var dt=Math.min(0.05,(ts-last)/1000); last=ts;
   update(dt);
-  if(S.mode!=="boot") draw();
+  if(S.mode!=="boot" && !storeHidden) draw();
   placeView(dt);
 }
 function init(){
@@ -1648,8 +1697,10 @@ function init(){
   var boardReady=false;
   function tryStart(){
     if(!boardReady||!playerReady||!bullyReady||!itemsReady) return;
-    S.mode="title"; show("ovTitle");
-    if(MOTION) GS.to(el("loading"),{opacity:0,duration:0.35,ease:"power1.out",onComplete:function(){ el("loading").style.display="none"; }});
+    // the title's dimmed backing is up at once under the loader (so the store never shows undimmed), the loader
+    // fades off it, and only then do the card and TAP TO START rise (they used to rise through the fading LOADING)
+    S.mode="title"; show("ovTitle",MOTION?SCREEN_FADE:0);
+    if(MOTION) GS.to(el("loading"),{opacity:0,duration:SCREEN_FADE,ease:"power1.inOut",onComplete:function(){ el("loading").style.display="none"; }});
     else el("loading").style.display="none";
   }
   img.onload=function(){
@@ -1675,7 +1726,7 @@ function init(){
   setTimeout(fit,300); setTimeout(fit,1000);
   // TAP TO START -> the drive's how-to-play -> START DRIVE -> the drive -> at the store, the store's how-to-play
   // -> START RUN -> the run. With no drive (opened from disk, ?nodrive) it goes straight to the store's.
-  el("btnTitle").addEventListener("click",function(){ hide("ovTitle"); if(driveAvailable()) show("ovDriveHow"); else showStoreHow(null); });
+  el("btnTitle").addEventListener("click",function(){ hide("ovTitle"); if(driveAvailable()){ storeView(false); show("ovDriveHow"); } else showStoreHow(null); });
   el("btnDrive").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
   el("btnStart").addEventListener("click",function(){ sfx.start(); startStoreRun(); });
   springButtons();
@@ -1703,6 +1754,9 @@ function init(){
   });
   el("ovPause").addEventListener("click",function(){ hide("ovPause"); if(S.mode==="paused"){S.mode="play"; last=0;} });
   bindTouch();
+  // iPhone Safari pinch-zooms the page whatever the viewport tag says: a game screen never zooms (two fingers on the
+  // store's drag area or a menu would otherwise scale the whole game and leave it off-centre)
+  document.addEventListener("gesturestart",function(e){ e.preventDefault(); },{passive:false});
   // iPhone: since iOS 26.5 only a REAL tap on a switch's label plays the haptic (a scripted label.click() no longer
   // buzzes), so every button gets an invisible label + switch laid over it: your tap flips it and the phone ticks.
   if(!HAPTICS) Array.prototype.forEach.call(document.querySelectorAll("button"),function(b){

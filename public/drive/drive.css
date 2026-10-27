@@ -18,12 +18,17 @@
 .drive-busted button { justify-self: center; margin-top: 8px; padding: 14px 30px; border: 0; border-radius: 12px; background: #ffd400; color: #111; font: 800 20px system-ui, sans-serif; cursor: pointer; }
 @keyframes drive-busted-in { from { opacity: 0; } to { opacity: 1; } }
 .drive-hint { position: absolute; bottom: 120px; left: 0; right: 0; text-align: center; font-weight: 700; font-size: 18px; text-shadow: 0 2px 6px #000; pointer-events: none; }
-/* touch controls: the whole screen is the steering zone; buttons sit on top of it, bottom right */
-.drive-tip { position: absolute; left: 0; right: 0; bottom: 36%; text-align: center; font-weight: 800; font-size: 17px; text-shadow: 0 2px 8px #000; pointer-events: none; display: none; animation: tipfade 5s forwards; }
-@keyframes tipfade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
-@media (pointer: coarse) { .drive-pad { display: flex; } .drive-tip { display: block; } .drive-box { min-width: 64px; padding: 4px 8px; } .drive-box b { font-size: 16px; } }
+/* touch controls: the whole screen is the steering zone; buttons sit on top of it, bottom right. (The old on-screen
+   tip, "GAS to go · ◀ ▶ change lanes · HORN clears the way", is gone: the drive's how-to-play already says it, and it
+   showed while you were still on foot, where it was the wrong instruction.) */
+@media (pointer: coarse) { .drive-pad { display: flex; } .drive-box { min-width: 64px; padding: 4px 8px; } .drive-box b { font-size: 16px; } }
 .drive-skip { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 12px; padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.2); background: rgba(10,12,16,.7); color: #fff; font-weight: 800; }
-.drive-loading { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; text-align: center; background: #101318; z-index: 2; }
+/* the loader covers everything in the drive, HUD and buttons included, until the first frame is on screen */
+.drive-loading { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; text-align: center; background: #101318; z-index: 20; }
+/* the way out: fades to black over the drive (drive.js finish), then the next screen comes up on black */
+.drive-veil { position: absolute; inset: 0; z-index: 30; background: #000; opacity: 0; transition: opacity .3s ease-in-out; }
+.drive-veil.on { opacity: 1; }
+.drive-root.gs .drive-veil { transition: none; }
 .drive-loading b { font: 900 34px/1 system-ui, sans-serif; letter-spacing: .12em; color: #ffd400; }
 .drive-loading span { opacity: .75; }
 .drive-loading i { display: block; height: 5px; width: 0; background: #ffd400; border-radius: 3px; transition: width .2s; margin: 8px auto 0; max-width: 260px; }
