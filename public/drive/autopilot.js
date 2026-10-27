@@ -12,7 +12,9 @@ const MARGIN = 0.35;     // lateral clearance the bot insists on (metres, each s
 // play fair: a player only sees what's on screen and needs a moment to react
 const REACTION = 0.25;   // seconds between seeing and acting (steer / brake / horn)
 
-export function autopilot(d, { log = console.log } = {}) {
+// `clock` (ms) and `manual` are for tests that step the game with __drive.tick(): there the real timers never fire, so the
+// test calls report.tick() itself every 50 ms of game time and passes the game's own clock. A player-facing run needs neither.
+export function autopilot(d, { log = console.log, clock = () => performance.now(), manual = false } = {}) {
   const { car, world, route } = d;
   const report = { hits: [], errors: [], popIn: [], popOut: [], teleports: [], stalls: 0, offroad: 0, brakes: 0, honks: 0, ticks: 0 };
   window.__botReport = report;
@@ -71,9 +73,9 @@ export function autopilot(d, { log = console.log } = {}) {
 
   let gasOn = false, braking = false, wantBrake = false, lastHonk = 0, slowFor = 0;
   const recorder = [];   // flight recorder: the last ~2 s of decisions, attached to every hit
-  const pending = [], act = (fn) => pending.push([performance.now() + REACTION * 1000, fn]);   // decided now, done a beat later
+  const pending = [], act = (fn) => pending.push([clock() + REACTION * 1000, fn]);   // decided now, done a beat later
   const tick = () => {
-    while (pending.length && pending[0][0] <= performance.now()) pending.shift()[1]();
+    while (pending.length && pending[0][0] <= clock()) pending.shift()[1]();
     if (d.state !== 'driving') { if (d.state === 'parked' || d.state === 'late' || d.state === 'busted') finish(); return; }
     report.ticks++;
     if (!gasOn && !braking) { gasOn = true; key('ArrowUp', true); }   // on the gas, like a player (off it to brake)
@@ -155,7 +157,8 @@ export function autopilot(d, { log = console.log } = {}) {
     if (Math.abs(car.d) > hw + 0.3) { report.offroad++; log('BOT OFFROAD', car.d.toFixed(2), 'hw', hw.toFixed(2)); }
     if (![car.s, car.d, car.v, car.pose.x, car.pose.y].every(Number.isFinite)) report.errors.push('non-finite car state');
   };
-  const timer = setInterval(tick, 50);
+  const timer = manual ? 0 : setInterval(tick, 50);
+  report.tick = tick;
   let done = false;
   function finish() {
     if (done) return; done = true; clearInterval(timer); if (braking) key('ArrowDown', false); key('ArrowUp', false);

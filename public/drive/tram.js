@@ -55,6 +55,7 @@ export class Streetcars {
     sh.count = this.stops.length; sh.castShadow = sh.receiveShadow = true; sh.name = 'street_tram_shelter'; scene.add(sh);
     this.shelters = this.stops.map((st) => { const p = r.at(st.s, r.hw(st.s) + 1.6); return [p.x, p.y]; });   // riders wait here (crowd.js)
 
+    this.clearTrack();
     this.cars = [];
     this.next = rnd(28, 40);                                                      // a second car later in the run
     if (this.s1 - this.s0 > 200) this.spawn(rnd(Math.max(this.s0 + 150, 450), Math.min(this.s1 - 60, 880)));
@@ -93,12 +94,38 @@ export class Streetcars {
     return m;
   }
 
+  /** a car parked ON the rails would stop the streetcar for the whole run: it has been towed (nothing but parked cars are ever here) */
+  clearTrack() {
+    for (const o of this.world.ents) {
+      if (!o.alive || !o.parked || !o.curb) continue;
+      const k = Math.round(o.s);
+      if (k < 0 || this.D[k] == null || o.s < this.s0 - LEN || o.s > this.s1 + LEN) continue;
+      for (let j = k; j <= k + 40; j += 4) if (this.D[j] != null && Math.abs(o.d - this.D[j]) < 1.95) { o.alive = false; break; }   // (the car stops for anything within 1.9 m of its centre line)
+    }
+    this.world.ents = this.world.ents.filter((e) => e.alive);
+  }
+
   trackD(s) { const k = Math.round(s); return this.D[k] ?? this.D[Math.max(0, Math.min(this.D.length - 1, k))] ?? this.route.lane(s, 1); }
 
   spawn(s) {
-    const e = this.world.add('tram', { s, d: this.trackD(s), v: 0, dir: -1, color: 0xffffff, tram: { speed: 0, dwell: 0, served: new Set(), bellT: 0 } });
-    // nothing else may already be standing in the car's footprint
-    for (const o of this.world.ents) if (o !== e && o.dir === -1 && !o.curb && Math.abs(o.s - s) < LEN / 2 + 5 && Math.abs(o.d - e.d) < 2) o.alive = false;
+    // (a work zone is one lane, taken in turns: a streetcar put down inside one would meet, head-on in that lane, the cars of ours already in it,
+    // and neither can back out. It starts clear of any zone instead, further on (or, when that is past the end of the track, before it),
+    // and arrives at the flagger's line like everything else. It is never put down where it can be seen, or on top of a car that can be seen.)
+    const W = this.world, zones = W.workZones || [], hi = this.s1 - LEN / 2, lo = this.s0;
+    const inZone = (x) => zones.find(([a, b]) => x + LEN / 2 > a - 10 && x - LEN / 2 < b + 10);
+    for (let k = 0; k < 3; k++) { const z = inZone(s); if (z) s = z[1] + 10 + LEN / 2 + 2; }
+    if (inZone(s) || s > hi) {
+      const z = inZone(s) || zones.find(([a, b]) => s + LEN / 2 > a - 10 - LEN && s - LEN / 2 < b + 10);
+      s = z ? z[0] - 10 - LEN / 2 - 2 : hi;
+      for (let k = 0; k < 3; k++) { const z2 = inZone(s); if (z2) s = z2[0] - 10 - LEN / 2 - 2; }
+    }
+    if (s > hi || s < lo || inZone(s)) return null;
+    const p = this.route.at(s, this.trackD(s));
+    if (W.camera && W.visible(p.x, p.y, p.z + 1.5, LEN / 2)) return null;
+    const hit = W.ents.filter((o) => o.alive && o.dir === -1 && !o.curb && Math.abs(o.s - s) < LEN / 2 + 5 && Math.abs(o.d - this.trackD(s)) < 2);
+    if (W.camera && hit.some((o) => { const q = this.route.at(o.s, o.d); return W.visible(q.x, q.y, q.z + 0.8, 6); })) return null;
+    const e = W.add('tram', { s, d: this.trackD(s), v: 0, dir: -1, color: 0xffffff, tram: { speed: 0, dwell: 0, served: new Set(), bellT: 0 } });
+    for (const o of hit) o.alive = false;
     this.cars.push(e);
     return e;
   }
@@ -108,7 +135,9 @@ export class Streetcars {
     this.next -= dt;
     if (this.next <= 0 && this.cars.length < 2) {                                 // a new car enters at the far end, off screen
       const src = this.s1 - LEN / 2, p = r.at(src, this.trackD(src));
-      if (!W.visible(p.x, p.y, p.z + 1.5, LEN / 2)) { this.spawn(src); this.next = 1e9; } else this.next = 0.5;
+      // (and not onto cars that are about to drive into it from the entrance: it enters when the stretch behind it is empty)
+      const busy = W.ents.some((o) => o.alive && !o.parked && o.dir === -1 && !o.scenery && o.type !== 'tram' && o.s > src - LEN / 2 - 25 && o.s < src + LEN / 2 + 80);
+      if (!busy && !W.visible(p.x, p.y, p.z + 1.5, LEN / 2)) { this.next = this.spawn(src) ? 1e9 : 0.5; } else this.next = 0.5;
     }
     for (const e of this.cars) {
       const T = e.tram, front = e.s - LEN / 2;                                     // it drives toward lower s
@@ -128,6 +157,12 @@ export class Streetcars {
         const gap = front - (o.s + (o.L || 4.5) / 2); if (gap > 30 || gap < -1) continue;
         want = Math.min(want, Math.max(0, (gap - 4) * 0.8));
       }
+      // the runner on foot (and the bully) on its track: it brings the bell and stops short, as for a car
+      for (const q of [W.runnerOn ? W.runner : null, ...(W.runnerOn ? W.others || [] : [])]) {
+        if (!q || q.o?.visible === false || q.s > e.s || Math.abs(q.d - e.d) > 2.3 + Math.abs(q.dv || 0) * 1.0) continue;
+        const gap = front - (q.s + 0.5); if (gap < -1 || gap > 45) continue;
+        want = Math.min(want, Math.max(0, (gap - 4) * 0.8)); if (gap < 28) this.ring(e, car);
+      }
       const pgap = front - (car.s + 2.5);
       if (pgap > -1 && pgap < 35 && Math.abs(car.d - e.d) < 2.1) { want = Math.min(want, Math.max(0, (pgap - 5) * 0.8)); if (pgap < 25) this.ring(e, car); }
       // red light: stop at the line
@@ -136,6 +171,10 @@ export class Streetcars {
       // a flagger at a work zone the player is coming through holds it short of the zone
       const zone = (W.workZones || []).find(([a, b]) => car.s > a - 70 && car.s < b + 5);
       if (zone && front > zone[1] + 4 && front < zone[1] + 70) want = Math.min(want, Math.max(0, (front - zone[1] - 6) * 0.8));
+      // and it takes its turn like the cars coming the same way: held short of a work zone's one lane while the other direction has it
+      // (a streetcar needs about 25 m to stop from its cruising speed: once it is closer to the line than it can stop in it is committed, and goes
+      // through, and the flagger counts it as already in the section; before that it brakes to stop at the line, on the same curve as for a red light)
+      for (const z of W.traffic?.zones || []) if (z.turn !== -1 && front > z.c1 + 1 && front < z.c1 + 90 && (T.speed < 0.5 || front - (z.c1 + 14) >= T.speed * T.speed / 4.4 - 2)) want = Math.min(want, Math.sqrt(Math.max(0, 2 * DEC * 0.9 * (front - (z.c1 + 14)))));
       // the end of its run along our road: it turns away there; wait out of sight
       if (front - 2 < this.s0 - LEN / 2) want = 0;
       T.speed += Math.max(-DEC * 1.6 * dt, Math.min(ACC * dt, want - T.speed));

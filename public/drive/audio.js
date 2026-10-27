@@ -119,6 +119,9 @@ export class DriveAudio {
     o.connect(g).connect(this.bus.fx); o.start(t); o.stop(t + 0.32);
   }
   horn() { this.play('horn', { gain: 0.8, rate: 1 }); }
+  /** another driver's horn (g = 0..1 by distance), a little different in pitch each time; and a skid when they stand on the brakes */
+  honkAt(g = 1) { this.play('horn', { gain: 0.55 * g, rate: rnd(0.88, 1.12) }); }
+  skid(g = 1) { this.play('screech', { gain: 0.3 * g, rate: rnd(1.0, 1.15) }); }
   token() { this.play('coin', { gain: 0.75, rate: rnd(1.25, 1.4) }); }
   whoosh() { this.air(); }
   air() { // near miss: a short band-passed air rush

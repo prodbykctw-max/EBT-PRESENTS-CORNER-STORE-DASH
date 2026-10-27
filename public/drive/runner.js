@@ -3,6 +3,7 @@
 // d = metres left(+)/right(-) of the centre line. That makes lanes, dodging and collision trivial and exact.
 import * as THREE from './vendor/three.module.min.js';
 import { LEVEL, standOn, deckTop } from './levels.js';
+import { Traffic, LIMIT } from './traffic.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
@@ -93,8 +94,19 @@ export class RouteFrame {
   oneway(s) { return this.ONEWAY[Math.round(this.i(s))]; }
   /** project a world point to route space (nearest sample) */
   project(x, y) {
-    let bi = 0, bd = 1e9;
-    for (let i = 0; i < this.n; i += 2) { const d = (this.X[i] - x) ** 2 + (this.Y[i] - y) ** 2; if (d < bd) { bd = d; bi = i; } }
+    // the nearest sample (even indices). Near the route (the only place this is asked in play) the spatial grid names the
+    // neighbourhood and only a few samples either side of its best are checked; the whole-route scan is the fallback far away.
+    // (This was a scan of every other sample of the route per call, per cross-street vehicle, every frame.)
+    let bi = -1, bd = 1e9;
+    const gx = Math.floor(x / 20), gy = Math.floor(y / 20);
+    let gi = -1, gd = 1e9;
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const i of this.grid.get((gx + a) + ',' + (gy + b)) || []) { const d = (this.X[i] - x) ** 2 + (this.Y[i] - y) ** 2; if (d < gd) { gd = d; gi = i; } }
+    if (gi >= 0) {
+      for (let i = Math.max(0, (gi - 4) & ~1), e = Math.min(this.n - 1, gi + 4); i <= e; i += 2) { const d = (this.X[i] - x) ** 2 + (this.Y[i] - y) ** 2; if (d < bd) { bd = d; bi = i; } }
+    } else {
+      bi = 0;
+      for (let i = 0; i < this.n; i += 2) { const d = (this.X[i] - x) ** 2 + (this.Y[i] - y) ** 2; if (d < bd) { bd = d; bi = i; } }
+    }
     const a = this.A[bi];
     return { s: bi, d: -(x - this.X[bi]) * Math.sin(a) + (y - this.Y[bi]) * Math.cos(a) };
   }
@@ -226,8 +238,6 @@ const ON_FOOT = new Set(['panhandler', 'seller', 'dog']);   // hit one and they 
 /** the traffic mix: mostly private cars, about one in ten a driverless robotaxi, one in twenty a police cruiser */
 const carType = () => pickWeighted([['sedan', 5], ['suv', 3], ['robotaxi', 0.9], ['police', 0.5]]);
 const parkedType = () => pickWeighted([['sedan', 5], ['suv', 3], ['police', 0.25]]);
-/** does o block e's lane? vehicles by lane; people and dogs only if they're actually in e's path */
-const blocks = (o, e) => Math.abs(o.d - e.d) < (VEHICLE[o.type] ? 1.8 : (e.W || 1.8) / 2 + (o.W || 0.5) / 2 + 0.25);
 // obstacles drawn bigger than life and ringed with a warning halo while they're in the street ahead
 const HAZARD_SCALE = { cone: 1.45, barricade: 1.25, dog: 1.5, seller: 1.2, panhandler: 1.2 };
 const HALO = { cone: [0.75, 0xff7a1a], barricade: [1.3, 0xff7a1a], dog: [1.1, 0xffd400], seller: [1.0, 0xff3b3b], panhandler: [1.0, 0xff3b3b] };
@@ -266,16 +276,20 @@ export class World {
     this.halo.count = 0; this.halo.frustumCulled = false; this.halo.renderOrder = 3; scene.add(this.halo);
     this.nextOncoming = 2; this.ambient = [];
     this.stats = { oncoming: 0 };   // QA: how much oncoming traffic a run actually got
+    this.traffic = new Traffic(this, { PLAYER, CARS, ON_FOOT });   // how every car in the street drives (traffic.js)
+    this.runner = null; this.runnerOn = false;   // the person on foot (drive.js sets these): cars see and avoid them
     this.plan();
   }
 
+  carType() { return carType(); }
+  paint() { return pick(PAINT); }
   add(type, props) { const e = { type, ...TYPES[type], v: 0, dv: 0, yaw: 0, alive: true, color: 0xffffff, ...props }; this.ents.push(e); return e; }
   /** 1–3 oncoming cars (a platoon) from s on, moving toward the player; returns where the platoon ends */
   oncomingPlatoon(s) {
-    const r = this.route, v0 = -rnd(9, 13), n = Math.random() < 0.6 ? 1 : Math.random() < 0.75 ? 2 : 3;
+    const r = this.route, v0 = -LIMIT * rnd(1.0, 1.2), n = Math.random() < 0.6 ? 1 : Math.random() < 0.75 ? 2 : 3;
     for (let k = 0; k < n; k++, s += rnd(18, 28)) {
       if (r.oneway(s)) continue;
-      this.add(carType(), { s, d: r.lane(s, 1), v: v0, v0, color: pick(PAINT), dir: -1 });
+      this.add(carType(), { s, d: r.lane(s, 1), v: v0, color: pick(PAINT), dir: -1 });
       this.stats.oncoming++;
     }
     return s;
@@ -287,23 +301,40 @@ export class World {
     let s = 70, k = 0;
     while (s < sStop - 95) {
       const hw = r.hw(s), right = r.lane(s, 0), left = r.lane(s, 1), two = !r.oneway(s);
-      const ev = pickWeighted([['slow', 2], ['parked', 2], ['construction', 1], ['tokens', 3]]);   // (panhandlers work the lights: planCorners)
-      if (ev === 'slow') this.add(carType(), { s, d: right, v: rnd(9, 13), color: pick(PAINT), dir: 1 });
-      if (ev === 'parked') {
-        const n = Math.random() < 0.25 ? 2 : 1;
-        for (let q = 0; q < n; q++) this.add(parkedType(), { s: s + q * 6.5, d: right - 0.35, color: pick(PAINT), dir: 1, parked: true });
-        if (!two && Math.random() < 0.5) this.add('sedan', { s: s + 30, d: left + 0.35, color: pick(PAINT), dir: 1, parked: true });
+      const ev = pickWeighted([['pullout', 2], ['construction', 1], ['tokens', 3]]);   // (panhandlers work the lights: planCorners; the traffic itself: below)
+      if (ev === 'pullout') {
+        // used to be a car parked in the middle of your lane for no reason. Now it's a car at the curb with a driver in it that
+        // pulls out when the street is clear (traffic.js maybePullOut); with no parking lane here, a car already driving
+        const pd = r.parkD(s, -1);
+        if (pd !== null) this.add(parkedType(), { s, d: pd, color: pick(PAINT), dir: 1, parked: true, curb: true, occupied: true });
+        else this.add(carType(), { s, d: right, v: LIMIT * rnd(1.0, 1.2), color: pick(PAINT), dir: 1, flow: true });
       }
-      if (ev === 'construction') {
+      // (a work zone is one lane, taken in turns: a signal in the middle of it would hold the cars in the section at a red light while the
+      // other direction waited for the section to clear, so none is laid out across a junction or crosswalk. Where this spot has one, the zone
+      // slides along the street to the nearest spot, within a block either way, that has none; where there is none it is not laid out.)
+      // (and clear of everything else already laid out: the events before were spaced from the old spot, so a car at the curb, a line of tokens or
+      // another zone can be where the cones would go. The events after are spaced from where the zone ends: see `s +=` below.)
+      let zs = null;
+      if (ev === 'construction') for (const off of [0, 8, -8, 16, -16, 24, -24, 32, -32, 40, -40, 48, -48, 56, -56, 64, -64]) {
+        const c = Math.round(s + off); let clear = c - 46 > 20 && c + 50 < sStop - 40;
+        for (let q = c - 46; clear && q <= c + 50; q++) if (this.marks && this.marks[q] === 0) clear = false;
+        const zo = s + off;
+        if (clear) clear = !(this.workZones || []).some(([a, b]) => zo + 40 + 12 > a && zo - 42 - 12 < b)
+          && !this.ents.some((o) => o.alive && o.s > zo - 46 && o.s < zo + 44)
+          && !this.tokens.some((tk) => tk.s > zo - 46 && tk.s < zo + 44);
+        if (clear) { zs = zo; break; }
+      }
+      if (ev === 'construction' && zs !== null) {
+        const zhw = r.hw(zs), zright = r.lane(zs, 0), zleft = r.lane(zs, 1);
         // taper the cones from the right curb to the centre line, then run them for 22 m; barricade at the head
-        this.add('worksign', { s: s - 38, d: -(hw + 1.6), yawOff: Math.PI });
+        this.add('worksign', { s: zs - 38, d: -(zhw + 1.6), yawOff: Math.PI });
         // taper from the right edge line to the lane line, then cones along the lane line: the right lane is closed
-        const edge = -hw + 0.35, line = (right + left) / 2 - 0.25;   // closes everything from the curb over (no parking in a work zone)
-        (this.workZones ??= []).push([s - 42, s + 40]);
-        for (let q = 0; q <= 5; q++) this.add('cone', { s: s + q * 2.4, d: edge + q / 5 * (line - edge) });
-        for (let q = 1; q <= 8; q++) this.add('cone', { s: s + 12 + q * 2.8, d: line });
-        this.add('barricade', { s: s + 4, d: right, yawOff: Math.PI });
-        s += 30;
+        const edge = -zhw + 0.35, line = (zright + zleft) / 2 - 0.25;   // closes everything from the curb over (no parking in a work zone)
+        (this.workZones ??= []).push([zs - 42, zs + 40]);
+        for (let q = 0; q <= 5; q++) this.add('cone', { s: zs + q * 2.4, d: edge + q / 5 * (line - edge) });
+        for (let q = 1; q <= 8; q++) this.add('cone', { s: zs + 12 + q * 2.8, d: line });
+        this.add('barricade', { s: zs + 4, d: zright, yawOff: Math.PI });
+        s = Math.max(s, zs) + 30;
       }
       if (ev === 'panhandler') this.add('panhandler', { s, d: (right + left) / 2, home: (right + left) / 2, color: pick(SHIRTS), dir: -1, sway: rnd(0, 6) }); // works the lane line
       if (ev === 'tokens') {
@@ -312,15 +343,24 @@ export class World {
       }
       s += rnd(75, 110) * (1 - Math.min(0.25, k * 0.015)); k++;   // roomier now that a real oncoming stream is the main pressure
     }
+    // the traffic going our way: a car every 55-110 m all down the street, already up to speed (traffic.js keeps it going,
+    // and feeds more in from behind). Not inside a work zone, not on top of anything.
+    for (let s1 = 62; s1 < sStop + 70; s1 += rnd(55, 110)) {
+      if ((this.workZones || []).some(([a, b]) => s1 > a - 25 && s1 < b + 25)) continue;
+      const d1 = r.lane(s1, 0);
+      if (this.ents.some((o) => o.alive && !o.scenery && o.solid && Math.abs(o.s - s1) < 18 && Math.abs(o.d - d1) < 2.4)) continue;
+      this.add(carType(), { s: s1, d: d1, v: LIMIT * rnd(1.0, 1.2), color: pick(PAINT), dir: 1, flow: true });
+    }
     // oncoming traffic already on the road, all the way down the far lane (fed from the far end in update)
     for (let s1 = 60; s1 < r.length - 10; s1 += rnd(50, 130)) s1 = this.oncomingPlatoon(s1);
     // cars parked along both curbs wherever there's a parking lane (~60 % full), clear of junctions and crosswalks
     const clearAt = (s1) => { for (let k = -8; k <= 8; k++) if (this.marks && this.marks[Math.round(s1) + k] === 0) return false; return true; };
     for (const side of [-1, 1]) for (let s1 = rnd(6, 12); s1 < r.length - 4; s1 += rnd(6.2, 7.2)) {
       const pd = r.parkD(s1, side); if (pd === null || !clearAt(s1) || Math.random() > 0.6) continue;
+      if (this.ents.some((o) => o.alive && o.parked && Math.abs(o.s - s1) < 5.6 && Math.abs(o.d - pd) < 2.2)) continue;   // (not on top of the car the 'pullout' event left at the curb)
       if (side < 0 && (this.workZones || []).some(([a, b]) => s1 > a && s1 < b)) continue;   // coned off
       if (side < 0 && s1 > sStop - 14 && s1 < sStop + 16) continue;                          // the store's P space (room to pull in)
-      this.add(parkedType(), { s: s1, d: pd + side * rnd(-0.1, 0.15), color: pick(PAINT), dir: side > 0 ? -1 : 1, parked: true, curb: true });
+      this.add(parkedType(), { s: s1, d: pd + side * rnd(-0.1, 0.15), color: pick(PAINT), dir: side > 0 ? -1 : 1, parked: true, curb: true, occupied: side < 0 && Math.abs(s1 - sStop) > 45 && Math.random() < 0.16 });
     }
     // a couple of cyclists in the bike lane (people on foot are the crowd: crowd.js)
     for (let q = 0; q < 5; q++) { const s0 = rnd(40, sStop - 60); this.add('cyclist', { s: s0, d: -(r.hw(s0) + 0.55), v: rnd(4.5, 6.5), color: pick(SHIRTS), dir: 1, scenery: true }); }
@@ -399,7 +439,7 @@ export class World {
   ambientOn(rd, pts, hs, type, i, t, color) {
     const RANK = { motorway: 6, trunk: 6, primary: 5, secondary: 4, tertiary: 3, residential: 2 };
     return { type, pts, hs, road: rd, deck: !!rd.h, dead_end: undefined, link: /_link/.test(rd.cls), bias: (RANK[rd.cls.replace('_link', '')] ?? 1) * 0.004, i, t,
-      v: rd.h ? rnd(20, 27) : type === 'bus' ? 8 : rnd(9, 13), color, lane: laneFor(rd, type === 'bus' ? 'bus' : 'suv') };
+      v: rd.h ? rnd(20, 27) : type === 'bus' ? 8 : LIMIT * rnd(0.95, 1.15), color, lane: laneFor(rd, type === 'bus' ? 'bus' : 'suv') };
   }
   /** at the end of its way a vehicle carries on along the connecting way (same street first), like real traffic */
   continueAmbient(a) {
@@ -427,7 +467,7 @@ export class World {
 
   /** advance everything; returns events for the HUD/audio */
   update(dt, car, t, hornT) {
-    const out = { hits: [], nearMiss: 0, tokens: 0 };
+    const out = { hits: [], nearMiss: 0, tokens: 0, honks: [], runnerHits: [] };
     const r = this.route;
     this.updateFrustum();
     const seen = (e, rad = 4) => { const p = r.at(e.s, e.d); return this.visible(p.x, p.y, p.z, rad); };
@@ -436,34 +476,24 @@ export class World {
     this.nextOncoming -= dt;
     if (this.nextOncoming <= 0) {
       const src = r.length - 6;
-      if (!seen({ s: src, d: r.lane(src, 1) }, 4)) {   // one car at a time: platoon spacing, then a real gap
-        if (!this.srcLeft) { this.srcLeft = Math.random() < 0.6 ? 1 : Math.random() < 0.75 ? 2 : 3; this.srcV = -rnd(9, 13); }
+      // (and never into a queue that has built up at the entrance: a car appearing inside the braking distance of the one in front)
+      const vm = -this.srcV || LIMIT * 1.1;
+      const jammed = this.ents.some((o) => {
+        if (!o.alive || o.parked || o.dir !== -1 || o.scenery || o.s > src + 4 || o.s < src - 160) return false;
+        const gap = src - (o.s + (o.L || 4.5) / 2) - 2.3, vl = Math.max(0, -(o.v || 0));
+        return gap < 3 + vm * 1.3 + Math.max(0, vm * vm - vl * vl) / 10;     // room to brake behind it, like the cars that follow
+      });
+      if (!jammed && !seen({ s: src, d: r.lane(src, 1) }, 4)) {   // one car at a time: platoon spacing, then a real gap
+        if (!this.srcLeft) { this.srcLeft = Math.random() < 0.6 ? 1 : Math.random() < 0.75 ? 2 : 3; this.srcV = -LIMIT * rnd(1.0, 1.2); }
         const v0 = this.srcV;                                   // a platoon shares one speed
-        this.add(carType(), { s: src, d: r.lane(src, 1), v: v0, v0, color: pick(PAINT), dir: -1 });
+        this.add(carType(), { s: src, d: r.lane(src, 1), v: v0, color: pick(PAINT), dir: -1 });
         this.stats.oncoming++;
         this.nextOncoming = (--this.srcLeft ? rnd(18, 28) : rnd(50, 130)) / -v0;
       } else this.nextOncoming = 0.5;
     }
-    // a blockage in the right lane: something stationary (parked car, work zone, a car waiting at one) and
-    // everything stationary right behind it; stretchFrom(s) = far end of the first one within 25 m ahead of s
-    const isStill = (o) => o.alive && !o.scenery && !o.flying && !o.curb && o.d < 0 && (o.solid >= 0.7 || o.type === 'cone') && (o.parked || Math.abs(o.v || 0) < 1);
-    const stills = this.ents.filter(isStill).sort((a, b) => a.s - b.s);
-    const stretchFrom = (s0) => {
-      let end = -1;
-      for (const o of stills) { if (o.s < s0 - 1) continue; if (end < 0 ? o.s - s0 > 25 : o.s - end > 15) break; end = o.s + (o.L || 1) / 2; }
-      return end;
-    };
-    // courtesy: once the player has stopped behind one, oncoming cars wait just past its far end and wave them through
-    const waitEnd = car.v < 3 ? stretchFrom(car.s) : -1;
-    // work zones on a two-lane street run alternating traffic: as the player comes up to one, a flagger holds the
-    // oncoming side just past its far end (cars already inside finish passing) so the open lane is theirs
-    const zone = (this.workZones || []).find(([a, b]) => car.s > a - 70 && car.s < b + 5);
-    for (const e of this.ents) if (e.dir === -1 && e.v0) {
-      const yieldHere = (waitEnd > 0 && e.s > waitEnd + 8 && e.s - waitEnd < 40) || (zone && e.s > zone[1] + 6 && e.s < zone[1] + 70);
-      e.v = yieldHere ? Math.min(0, e.v + 20 * dt) : Math.max(e.v0, e.v - 6 * dt);   // ease to a stop / back up to speed
-      const front = e.s - (e.L || 4.5) / 2, line = this.signals?.stopFor(front, -e.v, -1);     // red light: stop at the line
-      if (line != null) { const gap = front - line; e.v = Math.max(e.v, -(gap < 0.5 ? 0 : Math.sqrt(2 * 3 * gap))); }
-    }
+    // every car in the street (ours and oncoming) drives itself: traffic.js (IDM car-following, MOBIL lane changes, giving way to
+    // you and to the runner, red lights, the work-zone flagger)
+    this.traffic.step(dt, car, hornT, this.runnerOn ? this.runner : null, out);
     for (const e of this.ents) {
       if (!e.alive) continue;
       if (e.flying) { // knocked cones / barricades tumble away
@@ -473,7 +503,7 @@ export class World {
         if (Math.abs(e.fvs) < 0.3 && e.fz === 0) e.flying = false;
         continue;
       }
-      if (!e.parked) e.s += (e.v || 0) * dt;
+      if (!e.parked && !e.drv) e.s += (e.v || 0) * dt;   // (cars that drive themselves were moved in traffic.step)
       // HORN clears the way: anyone on foot in your path up ahead hops out of it (sideways, away from your line)
       // and waits a beat; a dog bolts for the sidewalk
       if (ON_FOOT.has(e.type) && hornT > 0 && !e.leaving && e.s > car.s - 2 && e.s - car.s < 40 && Math.abs(e.d - car.d) < 2) {
@@ -494,49 +524,6 @@ export class World {
           e.d = e.home + Math.sin(t * 0.8 + e.sway) * 0.6; // works the line between lanes
           if (hornT > 0 && e.s - car.s < 60 && e.s > car.s) { e.leaving = true; e.home2 = (Math.random() < 0.5 ? 1 : -1) * (r.hw(e.s) + 1.8); }
         }
-      }
-      // oncoming cars stop for anything in their lane: the car in front (maybe yielding), a car overtaking
-      // toward them, or the player
-      if (e.dir === -1 && e.v0) {
-        const ahead = this.ents.find((o) => o !== e && o.alive && !o.scenery && !o.flying && (VEHICLE[o.type] || ON_FOOT.has(o.type)) && o.s < e.s && e.s - o.s < (o.L || 4.5) / 2 + (e.L || 4.5) / 2 + 3 && blocks(o, e));
-        if (ahead) e.v = Math.max(e.v, Math.min(0, ahead.dir === -1 ? ahead.v : 0));
-        // the player over the line in front of them: ease over toward their own curb and squeeze past slowly
-        // (a real driver doesn't sit nose to nose); stop only if there's no room to get by
-        const lane = r.lane(e.s, 1), room = r.parkD(e.s, 1) !== null ? r.travel(e.s) - 0.3 : r.hw(e.s) - 0.95;   // not into parked cars
-        let aim = lane;
-        if (car.s < e.s + 3 && e.s - car.s < 22 && car.d > lane - 3.2) {
-          aim = Math.min(room, Math.max(lane, car.d + 2.15));
-          const need = PLAYER.halfW + (e.W || 1.9) / 2 + 0.05;                      // side-by-side clearance, this car's width
-          const clear = Math.abs(e.d - car.d) >= need;                              // already far enough over?
-          if (aim - car.d < need) { if (e.s - car.s < 13) e.v = Math.max(e.v, 0); }  // can't get by: wait
-          else e.v = Math.max(e.v, clear || e.s - car.s > 9 ? -4 : 0);               // move over first, then squeeze by
-        }
-        e.d += Math.max(-2 * dt, Math.min(2 * dt, aim - e.d));
-      }
-      // slow traffic in our direction drives like traffic: follows slower cars, and around a stationary blockage
-      // it overtakes through the other lane when that's clear (and pulls back in), otherwise waits behind it
-      if (CARS.has(e.type) && !e.parked && e.dir === 1 && !e.scenery) {
-        e.cruise ??= e.v;
-        const home = r.lane(e.s, 0), other = r.lane(e.s, 1);
-        const ahead = this.ents.find((o) => o !== e && o.alive && !o.scenery && !o.flying && o.solid && o.s > e.s && o.s - e.s < 14 && blocks(o, e));
-        if (!e.passing && ahead && isStill(ahead) && !r.oneway(e.s)) {
-          const end = stretchFrom(e.s) + 8;
-          // mirror check: no oncoming car in the way, and the player isn't beside them or coming up fast behind
-          const playerComing = (car.s < e.s && car.v > e.v + 2 && e.s - car.s < Math.max(22, (car.v - e.v) * 3))   // closing in behind
-            || (car.d > -0.5 && Math.abs(car.s - e.s) < 14);                                                      // or already beside/over the line
-          const clear = !this.ents.some((o) => o.alive && o.dir === -1 && o.s > e.s - 5 && o.s < end + 60 && Math.abs(o.d - other) < 2) && !playerComing;
-          if (clear) Object.assign(e, { passing: true, passEnd: end });
-        }
-        let target = home, want = e.cruise;
-        if (e.passing) { target = e.s < e.passEnd ? other : home; if (e.s >= e.passEnd && Math.abs(e.d - home) < 0.2) e.passing = false; }
-        else if (ahead) want = isStill(ahead) ? (ahead.s - e.s < 8 ? 0 : Math.min(e.cruise, (ahead.s - e.s - 8) * 1.5)) : Math.min(e.cruise, ahead.v || 0);
-        // and never into the back of the player
-        if (car.s > e.s && car.s - e.s < 16 && Math.abs(car.d - e.d) < 1.9) want = Math.min(want, car.s - e.s < 9 ? 0 : car.v);
-        const sl = this.signals?.stopFor(e.s + (e.L || 4.5) / 2, e.v, 1);                        // red light
-        if (sl != null) { const gap = sl - (e.s + (e.L || 4.5) / 2); want = Math.min(want, gap < 0.5 ? 0 : Math.sqrt(2 * 3 * gap)); }
-        if (e.backup) { const gap = car.s - 6.5 - e.s; target = car.d; want = gap < 0.3 ? 0 : Math.min(e.cruise, Math.sqrt(2 * 5 * gap)); }   // BUSTED: pulls up behind you
-        e.v += Math.max(-9 * dt, Math.min(4 * dt, want - e.v));
-        e.d += Math.max(-2.5 * dt, Math.min(2.5 * dt, target - e.d));
       }
       // cyclists turn around at the ends of the mapped street instead of piling up there
       if (e.scenery && e.v && (e.s < 3 || e.s > r.length - 3)) { e.v = Math.abs(e.v) * (e.s < 3 ? 1 : -1); e.s = Math.max(3, Math.min(r.length - 3, e.s)); }
@@ -591,22 +578,42 @@ export class World {
       if (a.through && !a.pts[a.i + 2] && a.t > 0.5 && a.x !== undefined && !this.visible(a.x, a.y, a.zAbs, a.type === 'bus' ? 7 : 3.5)) { a.dead = true; continue; }
       const [p, q] = [a.pts[a.i], a.pts[a.i + 1]];
       const L = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
-      const nt = a.t + a.v * dt / L, nx = p[0] + (q[0] - p[0]) * Math.min(nt, 1), ny = p[1] + (q[1] - p[1]) * Math.min(nt, 1);
+      // How a cross-street vehicle drives: it holds its pace (a.v), eases down to a stop at the line (3 m/s^2, harder
+      // only if the light turns on it), waits there, and eases away: a.vs is its real speed, so it never stops or starts in one
+      // step. On a signalised junction it goes on ITS green; at any other it goes when the route is clear for the next
+      // 4.5 s (crossClear), with a bit of patience, so nobody sits at a stop line for the whole run. It keeps a gap to
+      // whoever is ahead of it on the same street.
+      a.vd ??= a.v; a.vs ??= a.vd;
+      const clear = VEHICLE[a.type][0] + (a.type === 'bus' ? 2.6 : 1.2) + 3;     // stop line: the whole front half stays clear of the route's road (a 12 m bus stops further back)
+      const cx = a.x ?? p[0], cy = a.y ?? p[1], dCur = a.deck ? 1e9 : r.distTo(cx, cy), hwC = dCur < 60 ? r.hw(r.project(cx, cy).s) : 0;
+      const lineDist = dCur - (hwC + clear), prevD = a.dPrev ?? dCur; a.dPrev = dCur;
+      const approach = !a.deck && dCur < 70 && dCur > hwC + 0.3 && (dCur <= prevD + 1e-3 || a.waiting);
+      let vt = a.vd, hold = false;
+      if (approach && lineDist > -0.4) {
+        const gate = dCur < 30 ? this.signals?.crossGate(cx, cy) ?? null : null;
+        hold = gate === null ? !this.crossClear(a, cx, cy, car) : !gate;
+        if (a.dead_end) hold = true;
+        if (hold) vt = lineDist < 0.15 ? 0 : Math.min(a.vd, Math.sqrt(2 * 3.2 * lineDist));
+      }
+      a.waiting = approach && hold && lineDist < 1.5;
+      a.waitT = a.waiting && a.vs < 0.3 ? (a.waitT || 0) + dt : 0;
+      // a way that dead-ends at our road and has nowhere to go: after a spell at the line it is gone once the player is well away from it
+      a.stillT = a.vs < 0.3 ? (a.stillT || 0) + dt : 0;
+      if (a.dead_end && a.stillT > 15 && Math.hypot(cx - car.pose.x, cy - car.pose.y) > 55) { a.dead = true; continue; }
+      for (const b of this.ambient) {   // the vehicle ahead on the same street
+        if (b === a || b.dead || b.x === undefined || b.road !== a.road || Math.cos(a.h - b.h) < 0.3) continue;   // (one going the other way on that road is not in front of us: two of them head to head each waited for the other for the whole run)
+        const ox = b.x - cx, oy = b.y - cy, al = ox * Math.cos(a.h) + oy * Math.sin(a.h);
+        if (al > 0 && al < 30 && Math.abs(-ox * Math.sin(a.h) + oy * Math.cos(a.h)) < 2.5) vt = Math.min(vt, al < 9 ? 0 : (b.vs ?? b.vd) * Math.min(1, (al - 9) / 10));
+      }
+      a.vs += Math.max(-(approach ? 7 : 4) * dt, Math.min(2.2 * dt, vt - a.vs));
+      const nt = a.t + a.vs * dt / L, nx = p[0] + (q[0] - p[0]) * Math.min(nt, 1), ny = p[1] + (q[1] - p[1]) * Math.min(nt, 1);
       a.moved = a.x === undefined ? 0 : Math.hypot(nx - a.x, ny - a.y);
-      // red light for them: stop short of the route while the player is anywhere near
-      const near = !a.deck && Math.hypot(nx - car.pose.x, ny - car.pose.y) < 260;   // decks pass over: no light
-      // stop line: the vehicle's whole front half stays clear of the route's road (a 12 m bus stops further back)
-      const clear = VEHICLE[a.type][0] + (a.type === 'bus' ? 2.6 : 1.2) + 3;
       if (a.dead_end === undefined) { const e = a.pts[a.pts.length - 1]; a.dead_end = r.distTo(e[0], e[1]) < r.hw(r.project(e[0], e[1]).s) + 3 && !this.nextWay(a); }
       const dNext = r.distTo(nx, ny), hwHere = dNext < 20 ? r.hw(r.project(nx, ny).s) : 0;
       // the stop line: approaching our road and not yet in it (a vehicle already in the junction clears it)
       const stopLine = dNext < 20 && dNext < hwHere + clear && dNext < r.distTo(a.x ?? nx, a.y ?? ny) && dNext > hwHere + 0.3;
-      // a signalised junction: go on ITS green; elsewhere: yield while the player is near
-      const gate = stopLine ? this.signals?.crossGate(nx, ny) ?? null : null, hold = gate === null ? near : !gate;
       if (a.dead_end && stopLine && a.x !== undefined && !this.visible(a.x, a.y, a.zAbs, a.type === 'bus' ? 7 : 3.5)) { a.dead = true; continue; }   // gave up, out of sight
-      if (!((hold || a.dead_end) && stopLine)) {
-        a.t = nt; if (a.t >= 1) { a.i++; a.t = 0; }
-      }
+      a.t = nt; if (a.t >= 1) { a.i++; a.t = 0; }
       a.x = nx; a.y = ny; a.h = Math.atan2(q[1] - p[1], q[0] - p[0]);
       const zOld = a.zAbs;
       a.z = a.hs ? a.hs[a.i] + ((a.hs[a.i + 1] ?? a.hs[a.i]) - a.hs[a.i]) * Math.min(a.t, 1) : 0;
@@ -626,6 +633,27 @@ export class World {
     this.ambient = this.ambient.filter((a) => !a.dead);
     for (let k = 0; k < 2 && this.ambient.length < 14; k++) this.spawnAmbient(false);
     return out;
+  }
+
+  /** may a cross-street vehicle `a` at (x, y) go on across our road? True when nothing on the route (cars, the streetcar,
+   *  you) will be in the junction inside 4.5 s, or has stopped in it. After waiting 8 s it goes anyway if the junction itself is empty. */
+  crossClear(a, x, y, car) {
+    const r = this.route, js = r.project(x, y).s, hw = r.hw(js), TTA = 4.5;
+    const risk = (s, v, L, patient) => {
+      const inJ = Math.abs(s - js) < hw + L / 2 + 1.5;
+      if (inJ) return true;
+      if (patient) return false;
+      if (v > 0.3 && s < js) return (js - s) / v < TTA && js - s < 140;
+      if (v < -0.3 && s > js) return (s - js) / -v < TTA && s - js < 140;
+      return false;
+    };
+    const patient = a.waitT > 8;
+    for (const o of this.ents) {
+      if (!o.alive || o.scenery || o.flying || !o.solid || (o.parked && o.curb) || !(CARS.has(o.type) || o.type === 'tram')) continue;
+      if (Math.abs(o.s - js) > 150 || Math.abs(o.d) > hw) continue;
+      if (risk(o.s, o.v || 0, o.L || 4.5, patient)) return false;
+    }
+    return !risk(car.s, Math.max(car.v, car.s < js ? 3 : 0), 5, patient);
   }
 
   /** a water seller / panhandler working a red light (see planCorners). They wait on the corner; a beat after the
@@ -652,7 +680,7 @@ export class World {
     }
     if (e.phase === 'back') { ts = xs; td = curbD; sp = 1.7; }
     const ds = ts - e.s, dd = td - e.d, L = Math.hypot(ds, dd);
-    if (L > 0.05) { const k = Math.min(1, sp * dt / L); e.s += ds * k; e.d += dd * k; e.hd = Math.atan2(dd, ds); }
+    if (L > 0.05) { const k = Math.min(1, sp * dt / L); e.s += ds * k; e.d += dd * k; e.hd = Math.atan2(dd, ds); e.dd = dd * k / Math.max(dt, 1e-3); }
     else {
       e.hd = Math.atan2(car.d - e.d, car.s - e.s);                                // standing: face the traffic
       if (e.phase === 'out') e.phase = 'line';
@@ -688,7 +716,7 @@ export class World {
           : (o.s - e.s) * Math.sign(o.v) < 0 && Math.abs(o.s - e.s) < Math.abs(o.v) * 4 + 6))                        // or traffic about to get there
         && !(this.workZones || []).some(([a, b]) => e.s > a && e.s < b)) { e.crossing = -e.side; e.crossed = true; }
     }
-    e.s += vs * dt; e.d += vd * dt; e.v = 0;
+    e.s += vs * dt; e.d += vd * dt; e.v = 0; e.dd = vd;   // (dd: sideways speed, so cars can see it step into the road)
     if (Math.abs(vs) + Math.abs(vd) > 0.2) { e.hd = Math.atan2(vd, vs); e.gait += dt * (e.bolt ? 16 : e.crossing ? 12 : 7); }
   }
 
@@ -730,7 +758,7 @@ export class World {
       if (e.type === 'tram' || e.s < car.s - 400 || e.s > car.s + 800) continue;   // (tram.js draws the streetcar)
       const p = this.route.at(e.s, e.d);
       if ((e.s < win0 || e.s > win1) && !(cam && this.visible(p.x, p.y, p.z + 0.8, 4 + Math.hypot(p.x - cam.x, p.z - cam.y, -p.y - cam.z) * 0.04))) continue;
-      let yaw = p.a + (e.dir === -1 ? Math.PI : 0) + (e.yawOff || 0) + (e.v < 0 && e.scenery ? Math.PI : 0);
+      let yaw = p.a + (e.dir === -1 ? Math.PI : 0) + (e.yawOff || 0) + (e.v < 0 && e.scenery ? Math.PI : 0) + (e.yawLat || 0);   // (yawLat: the nose follows a lane change, traffic.js)
       const inStreet = Math.abs(e.d) < this.route.hw(e.s) + 0.2, lvl = inStreet ? LEVEL.ROUTE : LEVEL.TERRAIN;
       // the road surface right under it (`surf`), read once, and only when something below uses it: a car or cone
       // seated on its four corners replaces this height anyway
