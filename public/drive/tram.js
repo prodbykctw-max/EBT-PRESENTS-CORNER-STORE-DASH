@@ -55,6 +55,7 @@ export class Streetcars {
     sh.count = this.stops.length; sh.castShadow = sh.receiveShadow = true; sh.name = 'street_tram_shelter'; scene.add(sh);
     this.shelters = this.stops.map((st) => { const p = r.at(st.s, r.hw(st.s) + 1.6); return [p.x, p.y]; });   // riders wait here (crowd.js)
 
+    this.clearTrack();
     this.cars = [];
     this.next = rnd(28, 40);                                                      // a second car later in the run
     if (this.s1 - this.s0 > 200) this.spawn(rnd(Math.max(this.s0 + 150, 450), Math.min(this.s1 - 60, 880)));
@@ -93,6 +94,17 @@ export class Streetcars {
     return m;
   }
 
+  /** a car parked ON the rails would stop the streetcar for the whole run: it has been towed (nothing but parked cars are ever here) */
+  clearTrack() {
+    for (const o of this.world.ents) {
+      if (!o.alive || !o.parked || !o.curb) continue;
+      const k = Math.round(o.s);
+      if (k < 0 || this.D[k] == null || o.s < this.s0 - LEN || o.s > this.s1 + LEN) continue;
+      for (let j = k; j <= k + 40; j += 4) if (this.D[j] != null && Math.abs(o.d - this.D[j]) < 1.95) { o.alive = false; break; }   // (the car stops for anything within 1.9 m of its centre line)
+    }
+    this.world.ents = this.world.ents.filter((e) => e.alive);
+  }
+
   trackD(s) { const k = Math.round(s); return this.D[k] ?? this.D[Math.max(0, Math.min(this.D.length - 1, k))] ?? this.route.lane(s, 1); }
 
   spawn(s) {
@@ -108,7 +120,9 @@ export class Streetcars {
     this.next -= dt;
     if (this.next <= 0 && this.cars.length < 2) {                                 // a new car enters at the far end, off screen
       const src = this.s1 - LEN / 2, p = r.at(src, this.trackD(src));
-      if (!W.visible(p.x, p.y, p.z + 1.5, LEN / 2)) { this.spawn(src); this.next = 1e9; } else this.next = 0.5;
+      // (and not onto cars that are about to drive into it from the entrance: it enters when the stretch behind it is empty)
+      const busy = W.ents.some((o) => o.alive && !o.parked && o.dir === -1 && !o.scenery && o.type !== 'tram' && o.s > src - LEN / 2 - 25 && o.s < src + LEN / 2 + 80);
+      if (!busy && !W.visible(p.x, p.y, p.z + 1.5, LEN / 2)) { this.spawn(src); this.next = 1e9; } else this.next = 0.5;
     }
     for (const e of this.cars) {
       const T = e.tram, front = e.s - LEN / 2;                                     // it drives toward lower s
@@ -127,6 +141,12 @@ export class Streetcars {
       for (const o of W.ents) if (o !== e && o.alive && !o.scenery && !o.flying && o.s < e.s && Math.abs(o.d - e.d) < 1.9) {
         const gap = front - (o.s + (o.L || 4.5) / 2); if (gap > 30 || gap < -1) continue;
         want = Math.min(want, Math.max(0, (gap - 4) * 0.8));
+      }
+      // the runner on foot (and the bully) on its track: it brings the bell and stops short, as for a car
+      for (const q of [W.runnerOn ? W.runner : null, ...(W.runnerOn ? W.others || [] : [])]) {
+        if (!q || q.o?.visible === false || q.s > e.s || Math.abs(q.d - e.d) > 2.3 + Math.abs(q.dv || 0) * 1.0) continue;
+        const gap = front - (q.s + 0.5); if (gap < -1 || gap > 45) continue;
+        want = Math.min(want, Math.max(0, (gap - 4) * 0.8)); if (gap < 28) this.ring(e, car);
       }
       const pgap = front - (car.s + 2.5);
       if (pgap > -1 && pgap < 35 && Math.abs(car.d - e.d) < 2.1) { want = Math.min(want, Math.max(0, (pgap - 5) * 0.8)); if (pgap < 25) this.ring(e, car); }
