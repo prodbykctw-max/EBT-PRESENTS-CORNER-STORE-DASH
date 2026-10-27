@@ -252,7 +252,7 @@ export class Traffic {
       const inFwd = drivers.some((e) => e.dir === 1 && e.ref === 'l1' && e.s > z.a - 90 && e.s - e.L / 2 < z.c1 + 4);
       // (the streetcar runs in the left lane too, towards us: for the flagger it is oncoming traffic, and it holds short of the section like the cars do: see tram.js)
       const trams = this.world.ents.filter((t) => t.alive && t.type === 'tram' && t.s - (t.L || 24.8) / 2 < z.c1 + 90 && t.s + (t.L || 24.8) / 2 > z.c0 - 4);
-      const inOnc = drivers.some((e) => e.dir === -1 && e.s - e.L / 2 < z.c1 + 1 && e.s + e.L / 2 > z.c0 - 4) || trams.some((t) => { const f = t.s - (t.L || 24.8) / 2; return f < z.c1 + 1 || f - (z.c1 + 14) < t.v * t.v / 4.4 - 2; });   // (a streetcar too close to the line to stop at it is in: see tram.js)
+      const inOnc = drivers.some((e) => e.dir === -1 && e.s - e.L / 2 < z.c1 + 1 && e.s + e.L / 2 > z.c0 - 4) || trams.some((t) => { const f = t.s - (t.L || 24.8) / 2; return f < z.c1 + 1 || (Math.abs(t.v) > 0.5 && f - (z.c1 + 14) < t.v * t.v / 4.4 - 2); });   // (a streetcar too close to the line to stop at it is in: see tram.js)
       // (you are one of the cars of ours: waiting at the cones in the right lane, or coming up to them)
       const youNear = car.s > z.a - 80 && car.s < z.c1 && car.d < -0.5, youWait = youNear && car.v < 5, youComing = youNear && car.s > z.a - 45 && car.v >= 5;
       const waitFwd = youWait || drivers.some((e) => e.dir === 1 && e.ref !== 'l1' && e.s > z.a - 80 && e.s < z.c1 && e.sp < 5);

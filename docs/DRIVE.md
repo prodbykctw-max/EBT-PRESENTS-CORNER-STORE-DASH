@@ -142,14 +142,39 @@ cross streets) and calls `traffic.step()` every frame. Cars used to be steered b
   for the runner and the bully on its track and rings, curb-parked cars on its track are removed when the level is set up, and
   cross-street cars waiting at a dead end that nobody can see for 15 s are removed.
 - **The work-zone flagger** (`zoneTurns`): each work zone has a turn: ours goes, then ours stops while the cars in the zone clear,
-  then oncoming goes, then oncoming stops while theirs clear. A turn lasts at least 8 s and at most 20 s (a platoon that is
-  arriving extends it), and you waiting in the right lane at the cones counts as a car waiting. Held cars stop at hold lines 6 m
-  outside the cones.
+  then oncoming goes, then oncoming stops while theirs clear. A turn lasts at least 4 s (`TURN_SOFT`) and at most 10 s (`TURN_MAX`;
+  it was 5 and 12): a platoon that is still arriving, or a queue that is still discharging, extends it up to that cap, and you waiting in
+  the right lane at the cones counts as a car waiting. Held cars stop at hold lines outside the cones: ours 6 m short of them, oncoming
+  cars 10 m past the far end (`c1`; it was 6), the streetcar 14 m. The streetcar takes its turn like a car: one that can still stop
+  at its line brakes to it on the red-light curve, one already stopped short of the line stays stopped until the flagger turns to its
+  direction, and one too close to stop is committed (a moving streetcar that cannot stop short of the line counts as already in the
+  section, so the flagger waits for it; a stopped one does not, which used to hold the flagger in "oncoming stops" for as long as you
+  stood in the zone). A streetcar is never dropped inside a work zone when the level is set up. A car evading you never swaps into
+  the left lane in front of a held zone (`giveWay`).
+- **Work zones are laid out clear of junctions** (`runner.js`, the `construction` event): a signal in the middle of a one-lane section held the cars
+  inside it at a red light while the other direction waited for the section to clear. So a zone is only laid out where there is no junction or
+  crosswalk in its 96 m; where the event's own spot has one, the whole zone (sign, cones, barricade) slides along the street, a block
+  at most each way, to the nearest spot that has none, and where there is none it is not laid out. Measured over 80 layouts: 1.75 zones per
+  layout before, 1.43 now.
 - **Gridlock safety.** If two cars end up nose to nose (a pass that met the other direction), the one in the wrong lane goes back
-  into its own lane when it is free. If it cannot, after 7 s the one in its own lane pulls into its free parking lane and lets
-  the other by (`traffic.stats.asides`), then comes back. With no parking lane they wait. Only when neither car can be seen (outside the camera's
-  view) and neither is within 15 m behind to 140 m ahead of you do the two drive through each other, for 4 s, and only through
-  each other (`ghostOf`, `traffic.stats.standoffs`); it stops the moment either could be seen. You never see a car drive through a car.
+  into its own lane when it is free (and not across the nose of a car coming up behind it; a parked car alongside is not a car
+  behind). If it cannot, after 7 s the one in its own lane pulls into its free parking lane and lets the other by (`traffic.stats.asides`),
+  then comes back. If there is no parking lane, after 10 s in sight the one with room behind it backs out a few metres
+  (`traffic.stats.reversed`); out of sight, and neither within 15 m behind to 140 m ahead of you, the two drive through each other for 4 s,
+  and only through each other (`ghostOf`, `traffic.stats.standoffs`); it stops the moment either could be seen. You never see a car drive through a car.
+- **No car stays stopped for ever** (`unstick`, `help`, `roomBehind`, `noseTo`). A car that has not moved for 8 s (`STUCK_T`) for a reason that
+  does not end by itself (not a red light, a streetcar at its platform or moving, a person in the road, you waiting) is followed to the head of its
+  queue (`whyO`), and the head is helped in the mildest way that works, no more than one step every 3 s: 1) it swings into the free parking lane
+  (`asides`); 2) after 11 s, head on with something, whichever of the two has room behind backs out (`reversed`; the car it is nose to nose with is
+  found by position when its own reason is the flagger's line, `noseTo`, and only a car in a travel lane backs out, never one in the parking lane, which
+  ends and would move its line); 3) after 14 s, and only out of sight, it drives through what is in its way (`ghosted`). A car held by the
+  flagger is not stuck: the flagger rotates it. A state that has gone on for 14 s (`z.t2`) is forced to the other direction (`forced`), never
+  earlier. A queue that has backed up into a work zone from a red light beyond it, with nobody able to see it and nobody within 15 m behind to
+  140 m ahead of you, is removed a car at a time (`despawned`), like an unseen car stuck at a dead end. In sight it waits for the light.
+- **Car pulling out and returning home.** A car that pulls out of a parking spot checks the lane beside it and the spot's neighbours
+  (`touching`), and a car returning to its own lane from the parking lane or from a pass waits only as long as it needs: room ahead of its nose
+  that grows with its speed (a car creeping in a queue can slot in behind a stopped one), and a stopped follower needs 3.5 m, not 10. A queue of
+  cars waiting at a work zone does not chain the pass end through the oncoming queue (`blockEnd`), which left cars unable to return to their lane.
 - **Cost.** Every obstacle lookup (`ahead`, `behind`, `stripFree`, `laneClear`, `blockEnd`, `room`) looks only at the stretch of the
   sorted obstacle list that can matter (`lowerBound`), not the whole street; the route projection of cross-street vehicles uses the
   route's spatial grid. Measured on one page with the old and new code interleaved, `world.update` under a 4x CPU throttle: mean 1.30 to 1.20 ms,
@@ -172,6 +197,24 @@ cross streets) and calls `traffic.step()` every frame. Cars used to be steered b
 | `?qa&bot` runs that reach the store | 1 of 1 valid run, 77 s, 14.2 m/s | 14 of 14 (two batches, 8 and 6), 40 to 59 s, 18.7 to 27.3 m/s (the bot drives at up to 30 m/s) |
 | Collisions between two traffic cars | 1.2 per ghost run | 0.17 per ghost run (1 in 6) and 5 in the 14 bot runs |
 | Hits on the player in the bot runs | 1 (1 run) | 89 in 14 runs (6.4 per run): 86 the bot's own doing (ran into the back of a car it was closing on at 20 m/s or more, or clipped cones), 3 where a car moved sideways into it |
+
+**Measured again after the third round** (ghost player at 13 m/s, one run = the whole street, 80 s; "unexplained" = stopped over 3 s for no
+red light, work zone, police stop, queue behind a stop or person; side-street cars at a dead end are counted separately and left out):
+
+| | before (26 runs) | after (24 runs, then 48) |
+| --- | --- | --- |
+| Unexplained stuck cars per run | 1.3 | 2.3 (24 runs), 1.8 (48 runs): short ones, 4 to 6 s on average |
+| Of those, in sight of the player (15 m behind to 120 m ahead) | 0.27 per run | 0.71 (24 runs), 0.46 (48 runs) |
+| Unexplained for over 20 s | none | none (1 in 48 runs: a car waiting 17 s behind a curb-parked SUV) |
+| Car-car overlaps | 5 in 26 runs | 0 in 48 runs (a first batch of 12 had one, from two cars backing out at once; backing out is now only done in a travel lane) |
+| Work-zone waits (all cars, every zone on the street), median / 90th percentile / longest | 9.5 s / 31.7 s / 78.4 s (69 of 292 over 20 s) | 10.4 s / 23.1 s / 50.3 s (54 of 413 over 20 s) |
+| Work-zone waits for cars in sight of the player | 54 waits, median 6.5 s, longest 66 s, 14 over 20 s | 67 waits, median 9.6 s, longest 50 s, 8 over 20 s (the longest: a car waiting in the parking lane for the oncoming queue to move) |
+| Player standing still at the cones for 110 s (8 runs): oncoming cars waiting at the zone, longest | 48 s (before the streetcar fix below) | 17 s (the streetcar is held for as long as you stand in the zone, as before) |
+
+The cars that wait longest than 20 s are the tail of a queue at a zone entrance, out of sight, waiting for the cars ahead of them and the flagger's
+turns (about 10 s each way plus the clearing time), not a stuck state; no wait of the 413 passed 51 s, and nothing waits for ever (one cause of the old
+long hold of a zone in "oncoming stops" was a streetcar standing short of the line being counted as inside the section, so the flagger waited for
+it to leave while it was waiting for the flagger).
 
 Oncoming traffic that is moving averages 8.6 m/s, lower than before (10 m/s), because it now queues at red lights and behind the streetcar
 instead of driving through them; the share of oncoming samples that are stopped is 15 %, down from 27 to 30 %.
@@ -201,6 +244,16 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   speed for 0.55 s, "WATCH IT!" and the crash sound, at most once every 1.2 s, never game over. The camera follows a sidestep gently
   (`camD`) and keeps you framed anywhere in the street. Standing still next to a parked car, ◀ does nothing until a gap
   in the parked cars lines up, since the car is solid; running, you slip through the gaps.
+  **A last pass makes it a guarantee** (`solidPass` in `drive.js`): the line-bending above is a request, and something could still end up on
+  you (a car changing lane into your line, a streetcar arriving, a cone, a tree). So after all the steering of every 1/120 s step, and once more
+  after the traffic has moved, you and the bully are checked against the real boxes of every car and the streetcar (where each was at the start
+  of the step and is now, swept, grown by the body radius 0.42 m) and against the cones, barricades and street props (circles in `PATH.props`),
+  and anything you are inside you are pushed out of by the cheapest of four exits (along the street either way, across it either way), kept inside
+  the street's edges. A big push is eased on screen, settling in about 0.2 s (`m.ofs`, `exp(-dt*18)`), so you slide rather than jump.
+  Measured (the real game, 8 runs for each of five ways of running down the 86 m to the car: straight, holding ◀, holding ▶, tapping, ◀ then ▶; and the same with the
+  fixed props taken away): before, 2 of the 40 runs went inside something (a cone, 0.45 m deep); after, none: the closest you came to any car was 0.04 m and to any prop 0.04 m (your radius is already taken off,
+  so that is touching distance, never inside). Running to the car and getting in worked
+  in all 3 runs that were checked to the end (13.9 s, then the hazard lights and marker are hidden and you are driving).
 - **How you move on foot** (`updateFoot`, `posePerson`, the `PATH` block in `drive.js`). You and the bully move in the
   same fixed 1/120 s steps as the car and are drawn between the last two steps, so a phone's uneven frames (8 to 33 ms)
   don't make the run stutter. GAS gets you to full speed in about 0.35 s and letting go stops you in about 0.27 s

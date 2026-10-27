@@ -162,7 +162,7 @@ export class Streetcars {
       // and it takes its turn like the cars coming the same way: held short of a work zone's one lane while the other direction has it
       // (a streetcar needs about 25 m to stop from its cruising speed: once it is closer to the line than it can stop in it is committed, and goes
       // through, and the flagger counts it as already in the section; before that it brakes to stop at the line, on the same curve as for a red light)
-      for (const z of W.traffic?.zones || []) if (z.turn !== -1 && front > z.c1 + 1 && front < z.c1 + 90 && front - (z.c1 + 14) >= T.speed * T.speed / 4.4 - 2) want = Math.min(want, Math.sqrt(Math.max(0, 2 * DEC * 0.9 * (front - (z.c1 + 14)))));
+      for (const z of W.traffic?.zones || []) if (z.turn !== -1 && front > z.c1 + 1 && front < z.c1 + 90 && (T.speed < 0.5 || front - (z.c1 + 14) >= T.speed * T.speed / 4.4 - 2)) want = Math.min(want, Math.sqrt(Math.max(0, 2 * DEC * 0.9 * (front - (z.c1 + 14)))));
       // the end of its run along our road: it turns away there; wait out of sight
       if (front - 2 < this.s0 - LEN / 2) want = 0;
       T.speed += Math.max(-DEC * 1.6 * dt, Math.min(ACC * dt, want - T.speed));
