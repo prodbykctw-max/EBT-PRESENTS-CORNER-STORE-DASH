@@ -250,7 +250,9 @@ export class Crowd {
       const scare = (near > -3 && near < 7 && curbSide ? 1 : 0) || (hornT > 0 && Math.abs(near) < 25 ? 0.55 : 0);
       g.members.forEach((m, k) => {
         m.startle = Math.max(scare, m.startle - dt * 1.4);
-        const s = g.s + (single ? -g.dir * k * 0.85 : m.ds), d = g.cd + (single ? 0 : m.dd) + m.startle * 0.9;
+        // m.shove: knocked aside (drive.js, when the runner or the bully barges into them on foot), easing back over ~2 s
+        if (m.shove) { m.shove *= Math.exp(-dt * 0.9); if (Math.abs(m.shove) < 0.01) m.shove = 0; }
+        const s = g.s + (single ? -g.dir * k * 0.85 : m.ds), d = g.cd + (single ? 0 : m.dd) + m.startle * 0.9 + (m.shove || 0);
         m.s += (s - m.s) * Math.min(1, dt * 6); m.d += (Math.min(hi + 0.3, d) - m.d) * Math.min(1, dt * 4);
         if (g.kind === 'walk') m.phase += dt * g.v * 2 * Math.PI / (1.35 * m.h);
         else m.phase = 0.6 * Math.sin(this.t * 0.7 + k);      // standing: a slow weight shift
