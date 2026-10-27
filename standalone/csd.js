@@ -158,14 +158,16 @@ var SCREEN_FADE=0.3;
 // coverNow: the overlay's backing is up at once (a solid how-to-play, or the title coming up under the boot loader),
 // so nothing behind it shows through on the way in. contentDelay: its words and buttons wait that long to rise.
 function overlayIn(o,contentDelay){
-  if(!MOTION) return;
+  if(!MOTION){ o.classList.add("ready"); return; }
   GS.killTweensOf(o); GS.killTweensOf(o.children);
   GS.set(o,{pointerEvents:"auto"});
   // the plain-black how-to-play screens (data-solid) cover the game at once, so nothing of it ever shows through;
   // only their words and button move
   if(o.hasAttribute("data-solid")||contentDelay) GS.set(o,{opacity:1});
   else GS.fromTo(o,{opacity:0},{opacity:1,duration:SCREEN_FADE,ease:"power2.out"});
-  GS.fromTo(o.children,{y:18,opacity:0,scale:0.96},{y:0,opacity:1,scale:1,duration:0.45,delay:contentDelay||0,ease:"back.out(1.6)",stagger:0.06,clearProps:"transform,opacity"});
+  // .ready once everything has risen: TAP TO START's pulse waits for it (shell2.html), so it never pops in early
+  GS.fromTo(o.children,{y:18,opacity:0,scale:0.96},{y:0,opacity:1,scale:1,duration:0.45,delay:contentDelay||0,ease:"back.out(1.6)",stagger:0.06,clearProps:"transform,opacity",
+    onComplete:function(){ o.classList.add("ready"); }});
 }
 function overlayOut(o){
   GS.killTweensOf(o); GS.killTweensOf(o.children);
@@ -1337,7 +1339,7 @@ function el(id){ return document.getElementById(id); }
 function show(id,contentDelay){
   var o=el(id);
   if(o.classList.contains("on")&&!o._leaving) return;   // already up (a fade-out in progress is turned back around)
-  o._leaving=false; o.classList.add("on"); overlayIn(o,contentDelay);
+  o._leaving=false; o.classList.remove("ready"); o.classList.add("on"); overlayIn(o,contentDelay);
 }
 function hide(id){
   var o=el(id);

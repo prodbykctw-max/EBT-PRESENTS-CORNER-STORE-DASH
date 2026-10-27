@@ -17,7 +17,9 @@ next. The code is `standalone/csd.js` (the flow functions, `show` / `hide`, the 
   From the drive's how-to-play until START RUN it is hidden (`storeView(false)`) and not drawn at all, so no fade or
   hand-off can flash it, and a phone isn't drawing a hidden store under the 3D drive.
 - **Every screen-to-screen fade takes 0.3 s** (`SCREEN_FADE` in `csd.js` and `drive.js`). Fades go through black or
-  the dark loader colour, never through another screen.
+  the dark loader colour, never through another screen. If the phone stalls (the first sound starting up on the
+  START DRIVE tap took ~0.4 s in testing), GSAP counts any gap over 0.2 s as one frame (`lagSmoothing(200, 33)`), so
+  a fade plays from its start instead of being already over on the first frame you see.
 - **Nothing shows before it's ready**: the title's card and button rise only after LOADING has faded; the drive's
   loader stays on top of its HUD and buttons until the first 3D frame is on screen.
 - **Reduced motion** (phone setting) or no GSAP: the same order, with instant changes instead of fades and rises
@@ -29,7 +31,7 @@ next. The code is `standalone/csd.js` (the flow functions, `show` / `hide`, the 
 | --- | --- | --- | --- |
 | 1 | **LOADING…** (`#loading`, black) | first paint (the page's own colour is the game's black from the first frame) | when the store art has decoded: fades 0.3 s off the title's dimmed backing, which is already up underneath (the store never shows undimmed) |
 | 2 | **Title** (`ovTitle`: EBT PRESENTS / CORNER STORE DASH, TAP TO START, credits) over the dimmed store | its card and button rise once LOADING is gone; TAP TO START starts pulsing after its entrance (1 s) | TAP TO START: the drive's how-to-play covers it at once, the title fades away underneath |
-| 3 | **Drive how-to-play** (`ovDriveHow`, plain black) | solid at once, its lines and START DRIVE rise | START DRIVE: the AUBURN AVE screen's dark backing fades up over it (0.3 s), the how-to-play is removed underneath, then "AUBURN AVE / Get to the corner store" fades in (0.2 s) |
+| 3 | **Drive how-to-play** (`ovDriveHow`, plain black) | solid at once, its lines and START DRIVE rise | START DRIVE: the AUBURN AVE screen's dark backing fades up over it (0.3 s), the how-to-play is removed underneath, then "AUBURN AVE / Get to the corner store" fades in (0.2 s). The drive is mounted in a hidden box until the backing is fully up, so its own loader can't show through the fade |
 | 4 | **AUBURN AVE loading screen** | the store page's copy (`driveCover`) while the drive's code arrives, then the drive's own (`.drive-loading`, with the progress bar). The two are laid out identically (measured: same positions to 0.1 px), so the switch is invisible | the first 3D frame is drawn under it; two display frames later it fades 0.3 s; the world holds still until it's gone, then the chase starts; the HUD drops in from the top and the pedals rise as it lifts |
 | 5 | **The drive** (on foot to your car, then the race) | | parked, too late, SKIP or BUSTED → "Drive again": a black veil fades over it (0.3 s), then the drive is removed |
 | 6 | **Store how-to-play** (`ovHow`, plain black) | solid at once on the black (black to black: nothing flashes), its lines and START RUN rise | START RUN: fades 0.3 s onto the store, which then shows its whole layout for 1.6 s and zooms in on you (1 s) before anyone moves |
