@@ -109,11 +109,23 @@ export class Streetcars {
 
   spawn(s) {
     // (a work zone is one lane, taken in turns: a streetcar put down inside one would meet, head-on in that lane, the cars of ours already in it,
-    // and neither can back out. It starts clear of any zone instead, further on, and arrives at the flagger's line like everything else.)
-    for (let k = 0; k < 3; k++) for (const [a, b] of this.world.workZones || []) if (s + LEN / 2 > a - 10 && s - LEN / 2 < b + 10) s = b + 10 + LEN / 2 + 2;
-    const e =this.world.add('tram', { s, d: this.trackD(s), v: 0, dir: -1, color: 0xffffff, tram: { speed: 0, dwell: 0, served: new Set(), bellT: 0 } });
-    // nothing else may already be standing in the car's footprint
-    for (const o of this.world.ents) if (o !== e && o.dir === -1 && !o.curb && Math.abs(o.s - s) < LEN / 2 + 5 && Math.abs(o.d - e.d) < 2) o.alive = false;
+    // and neither can back out. It starts clear of any zone instead, further on (or, when that is past the end of the track, before it),
+    // and arrives at the flagger's line like everything else. It is never put down where it can be seen, or on top of a car that can be seen.)
+    const W = this.world, zones = W.workZones || [], hi = this.s1 - LEN / 2, lo = this.s0;
+    const inZone = (x) => zones.find(([a, b]) => x + LEN / 2 > a - 10 && x - LEN / 2 < b + 10);
+    for (let k = 0; k < 3; k++) { const z = inZone(s); if (z) s = z[1] + 10 + LEN / 2 + 2; }
+    if (inZone(s) || s > hi) {
+      const z = inZone(s) || zones.find(([a, b]) => s + LEN / 2 > a - 10 - LEN && s - LEN / 2 < b + 10);
+      s = z ? z[0] - 10 - LEN / 2 - 2 : hi;
+      for (let k = 0; k < 3; k++) { const z2 = inZone(s); if (z2) s = z2[0] - 10 - LEN / 2 - 2; }
+    }
+    if (s > hi || s < lo || inZone(s)) return null;
+    const p = this.route.at(s, this.trackD(s));
+    if (W.camera && W.visible(p.x, p.y, p.z + 1.5, LEN / 2)) return null;
+    const hit = W.ents.filter((o) => o.alive && o.dir === -1 && !o.curb && Math.abs(o.s - s) < LEN / 2 + 5 && Math.abs(o.d - this.trackD(s)) < 2);
+    if (W.camera && hit.some((o) => { const q = this.route.at(o.s, o.d); return W.visible(q.x, q.y, q.z + 0.8, 6); })) return null;
+    const e = W.add('tram', { s, d: this.trackD(s), v: 0, dir: -1, color: 0xffffff, tram: { speed: 0, dwell: 0, served: new Set(), bellT: 0 } });
+    for (const o of hit) o.alive = false;
     this.cars.push(e);
     return e;
   }
@@ -125,7 +137,7 @@ export class Streetcars {
       const src = this.s1 - LEN / 2, p = r.at(src, this.trackD(src));
       // (and not onto cars that are about to drive into it from the entrance: it enters when the stretch behind it is empty)
       const busy = W.ents.some((o) => o.alive && !o.parked && o.dir === -1 && !o.scenery && o.type !== 'tram' && o.s > src - LEN / 2 - 25 && o.s < src + LEN / 2 + 80);
-      if (!busy && !W.visible(p.x, p.y, p.z + 1.5, LEN / 2)) { this.spawn(src); this.next = 1e9; } else this.next = 0.5;
+      if (!busy && !W.visible(p.x, p.y, p.z + 1.5, LEN / 2)) { this.next = this.spawn(src) ? 1e9 : 0.5; } else this.next = 0.5;
     }
     for (const e of this.cars) {
       const T = e.tram, front = e.s - LEN / 2;                                     // it drives toward lower s

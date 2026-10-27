@@ -312,11 +312,17 @@ export class World {
       // (a work zone is one lane, taken in turns: a signal in the middle of it would hold the cars in the section at a red light while the
       // other direction waited for the section to clear, so none is laid out across a junction or crosswalk. Where this spot has one, the zone
       // slides along the street to the nearest spot, within a block either way, that has none; where there is none it is not laid out.)
+      // (and clear of everything else already laid out: the events before were spaced from the old spot, so a car at the curb, a line of tokens or
+      // another zone can be where the cones would go. The events after are spaced from where the zone ends: see `s +=` below.)
       let zs = null;
       if (ev === 'construction') for (const off of [0, 8, -8, 16, -16, 24, -24, 32, -32, 40, -40, 48, -48, 56, -56, 64, -64]) {
         const c = Math.round(s + off); let clear = c - 46 > 20 && c + 50 < sStop - 40;
         for (let q = c - 46; clear && q <= c + 50; q++) if (this.marks && this.marks[q] === 0) clear = false;
-        if (clear) { zs = s + off; break; }
+        const zo = s + off;
+        if (clear) clear = !(this.workZones || []).some(([a, b]) => zo + 40 + 12 > a && zo - 42 - 12 < b)
+          && !this.ents.some((o) => o.alive && o.s > zo - 46 && o.s < zo + 44)
+          && !this.tokens.some((tk) => tk.s > zo - 46 && tk.s < zo + 44);
+        if (clear) { zs = zo; break; }
       }
       if (ev === 'construction' && zs !== null) {
         const zhw = r.hw(zs), zright = r.lane(zs, 0), zleft = r.lane(zs, 1);
@@ -328,7 +334,7 @@ export class World {
         for (let q = 0; q <= 5; q++) this.add('cone', { s: zs + q * 2.4, d: edge + q / 5 * (line - edge) });
         for (let q = 1; q <= 8; q++) this.add('cone', { s: zs + 12 + q * 2.8, d: line });
         this.add('barricade', { s: zs + 4, d: zright, yawOff: Math.PI });
-        s += 30;
+        s = Math.max(s, zs) + 30;
       }
       if (ev === 'panhandler') this.add('panhandler', { s, d: (right + left) / 2, home: (right + left) / 2, color: pick(SHIRTS), dir: -1, sway: rnd(0, 6) }); // works the lane line
       if (ev === 'tokens') {
