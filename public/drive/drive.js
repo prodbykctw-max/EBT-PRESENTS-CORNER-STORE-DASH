@@ -826,6 +826,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     }
     tauntK -= dt;
     if (go && tauntK <= 0 && me.stun <= 0 && gap < 9) { tauntK = 2.6; pop(TAUNTS[(Math.random() * TAUNTS.length) | 0]); }
+    // the crowd watches you and the bully (route-space s, d, speed; t = when) and steps out of the way (crowd.js react)
+    crowd.runner = { s: me.s, d: me.d, v: me.v, t: footT }; crowd.chaser = { s: him.s, d: him.d, v: him.v, t: footT };
     if (Math.abs(me.s - doorS) < 1.4 && Math.abs(me.d - doorD) < 0.6 && me.stun <= 0) getIn();
   }
   // after you drive off he's still out there for a moment, running for his ride, until he's behind the camera
