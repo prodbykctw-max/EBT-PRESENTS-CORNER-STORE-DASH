@@ -54,6 +54,12 @@ for (const [from, to] of [['href="favicon.ico"', 'href="public/favicon.ico"'], [
   if (!pagesCopy.includes(from)) throw new Error(`${from} not found in the assembled game`);
   pagesCopy = pagesCopy.replaceAll(from, to);
 }
+// The web app manifest (home-screen install) belongs to the main link: its start_url is the site root, which on the
+// Pages copy would be the repo's public/ folder (the old modular build). The Pages copy goes without it; iPhones still
+// open it full-screen from the home screen through the apple-mobile-web-app tags.
+const MANIFEST = '<link rel="manifest" href="game.webmanifest">\n';
+if (!pagesCopy.includes(MANIFEST)) throw new Error('manifest link not found in the assembled game');
+pagesCopy = pagesCopy.replace(MANIFEST, '');
 writeFileSync(here('../index.html'), pagesCopy);
 // the files AI assistants read: edit them in public/ (the main link serves them); the GitHub Pages copy gets the same
 for (const f of ['llms.txt', 'llms-full.txt']) copyFileSync(here(`../public/${f}`), here(`../${f}`));

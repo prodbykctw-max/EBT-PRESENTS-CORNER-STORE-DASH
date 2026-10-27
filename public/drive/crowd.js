@@ -9,6 +9,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { mergeGeometries } from './vendor/BufferGeometryUtils.js';
 import { LEVEL } from './levels.js';
+import { uploadUsed, shadowSplit } from './runner.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 // palettes (sRGB); skin weighted to the neighbourhood
@@ -167,6 +168,7 @@ export class Crowd {
     this.mesh = new THREE.InstancedMesh(geo, mat, cap);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     Object.assign(this.mesh, { name: 'crowd', frustumCulled: false, castShadow: !mobile, receiveShadow: true, customDepthMaterial: depth, count: 0 });
+    shadowSplit(this.mesh);
     scene.add(this.mesh);
     this.t = 0;
   }
@@ -219,7 +221,13 @@ export class Crowd {
         g.s += g.dir * g.v * dt;
         if (g.s < 3 || g.s > r.length - 3) { g.dir = g.s < 3 ? 1 : -1; g.s = Math.max(3, Math.min(r.length - 3, g.s)); }
         // street furniture a few steps ahead: pass on the roomier side, or go single file
-        for (const o of this.obst[g.side]) {
+        // (the list is sorted by s: start a little before the first one that can be within 3.5 m and stop a little past it, instead of
+        // walking every tree and lamp on that side of the route for every group, every frame; same order, same pick)
+        const obs = this.obst[g.side];
+        let lo0 = 0, hi0 = obs.length;
+        while (lo0 < hi0) { const mid = (lo0 + hi0) >> 1; if (obs[mid].s < g.s - 3.6) lo0 = mid + 1; else hi0 = mid; }
+        for (let oi = lo0; oi < obs.length && obs[oi].s <= g.s + 3.6; oi++) {
+          const o = obs[oi];
           const ahead = (o.s - g.s) * g.dir; if (ahead < -0.8 || ahead > 3.5) continue;
           if (Math.abs(o.d - g.cd) > o.r + half + 0.15) continue;
           const left = o.d - o.r - half - 0.2, right = o.d + o.r + half + 0.2;
@@ -242,7 +250,9 @@ export class Crowd {
       const scare = (near > -3 && near < 7 && curbSide ? 1 : 0) || (hornT > 0 && Math.abs(near) < 25 ? 0.55 : 0);
       g.members.forEach((m, k) => {
         m.startle = Math.max(scare, m.startle - dt * 1.4);
-        const s = g.s + (single ? -g.dir * k * 0.85 : m.ds), d = g.cd + (single ? 0 : m.dd) + m.startle * 0.9;
+        // m.shove: knocked aside (drive.js, when the runner or the bully barges into them on foot), easing back over ~2 s
+        if (m.shove) { m.shove *= Math.exp(-dt * 0.9); if (Math.abs(m.shove) < 0.01) m.shove = 0; }
+        const s = g.s + (single ? -g.dir * k * 0.85 : m.ds), d = g.cd + (single ? 0 : m.dd) + m.startle * 0.9 + (m.shove || 0);
         m.s += (s - m.s) * Math.min(1, dt * 6); m.d += (Math.min(hi + 0.3, d) - m.d) * Math.min(1, dt * 4);
         if (g.kind === 'walk') m.phase += dt * g.v * 2 * Math.PI / (1.35 * m.h);
         else m.phase = 0.6 * Math.sin(this.t * 0.7 + k);      // standing: a slow weight shift
@@ -252,7 +262,7 @@ export class Crowd {
         m.dirty = true;
       });
     }
-    this.render();
+    this.render(car);
   }
 
   /** facing: along the walk; talkers face the middle of their circle; everyone else (and anyone startled) faces the road */
@@ -264,10 +274,15 @@ export class Crowd {
   }
 
   /** draw everyone the camera can see (with a margin, so nobody pops in at the edge of the frame) */
-  render() {
+  render(car) {
     const r = this.route, M = this.mesh, A = this.attr, m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0),
-      pos = new THREE.Vector3(), sc = new THREE.Vector3(), cam = this.camera.position;
-    let i = 0;
+      pos = new THREE.Vector3(), sc = new THREE.Vector3(), cam = this.camera.position, cap = M.instanceMatrix.count;
+    // where the crowd casts shadows (desktop), the people inside the sun's shadow box go first and the shadow pass draws
+    // only them (see World.render: same box, same generous margin, so the shadow map is unchanged)
+    const SB = M.castShadow && car ? this.shadowBox : null, cp = SB ? r.at(car.s, car.d) : null;
+    let ax, ay, lim;
+    if (SB) { const zA = new THREE.Vector3().copy(SB.dir).normalize(); ax = new THREE.Vector3(0, 1, 0).cross(zA).normalize(); ay = zA.clone().cross(ax); lim = SB.half() + 25; }
+    let lo = 0, hi = 0;
     for (const m of this.people) {
       if (m.dirty || m.x === undefined) {                       // moved (or never placed): find the ground under them
         const p = r.at(m.s, m.g.side * m.d), gz = this.ground(p.x, p.y);
@@ -276,18 +291,27 @@ export class Crowd {
       }
       // margin grows with distance (≈2.3°): a turning camera sweeps far-off sidewalks into view within a frame
       const far = Math.hypot(m.x - cam.x, m.z - cam.y, -m.y - cam.z);
-      m.on = this.visible(m.x, m.y, m.z + 0.9, 3 + far * 0.04) && i < M.instanceMatrix.count;
+      m.on = this.visible(m.x, m.y, m.z + 0.9, 3 + far * 0.04) && lo + hi < cap;
       if (!m.on) continue;
+      let i;
+      if (SB) {
+        const rx = m.x - cp.x, ry = m.z - cp.z, rz = -m.y + cp.y;
+        i = Math.abs(rx * ax.x + ry * ax.y + rz * ax.z) <= lim && Math.abs(rx * ay.x + ry * ay.y + rz * ay.z) <= lim ? lo++ : cap - 1 - hi++;
+      } else i = lo++;
       // model faces +Z; heading a in the route plane maps to three yaw a + π/2
       m4.compose(pos.set(m.x, m.z, -m.y), q.setFromAxisAngle(up, m.yaw + Math.PI / 2), sc.set(m.w, m.h, m.w));
       M.setMatrixAt(i, m4);
       A.iAnim.setXYZW(i, m.phase, m.g.kind === 'walk' ? 1 : 0.05, m.acc, m.lean);
       A.iPose.setXY(i, m.phone && m.startle < 0.3 ? 1 : 0, Math.min(1, m.startle * 1.4));
       A.iPal.setXYZW(i, ...m.pal);
-      i++;
     }
-    M.count = i; M.instanceMatrix.needsUpdate = true;
-    for (const a of Object.values(A)) a.needsUpdate = true;
+    if (hi) {   // close the gap: the ones outside the shadow box (filled from the back) move up behind the rest
+      M.instanceMatrix.array.copyWithin(lo * 16, (cap - hi) * 16, cap * 16);
+      for (const a of Object.values(A)) a.array.copyWithin(lo * a.itemSize, (cap - hi) * a.itemSize, cap * a.itemSize);
+    }
+    const n = lo + hi;
+    M.count = n; M.userData.shadowCount = lo; uploadUsed(M.instanceMatrix, n);
+    for (const a of Object.values(A)) uploadUsed(a, n);   // only the people drawn this frame (the buffers hold the whole route)
   }
 }
 const xy = (p) => [p.x, p.y];

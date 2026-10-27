@@ -195,8 +195,21 @@ export function buildGrass(W, ground, route, streets, isFree, tex) {
       im.setMatrixAt(i, m4.compose(v.set(x, ground(x, y) + LEVEL.AREA, -y), q.setFromEuler(e.set(0, h * 40, 0)), sc.set(w, 0.3 + hash(h * 7e5) * 0.25, w)));
     });
     im.receiveShadow = true; im.computeBoundingSphere(); im.name = 'grass_tufts'; group.add(im);
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const [x, y] of chunk) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    im.userData.box = [x0, x1, y0, y1];
   }
   group.userData.count = pts.length;
+  // A tuft more than 55 m from the camera has sunk flat into the lawn (the shader above), so it draws nothing, but its
+  // tile was still sent through the GPU whenever it was in view. Tiles entirely past 55 m (+0.5 m to spare) are now
+  // skipped: the same pixels, less vertex work. Called with the camera's position just before each render.
+  group.userData.cull = (cam) => {
+    const cx = cam.x, cy = -cam.z;
+    for (const im of group.children) {
+      const [x0, x1, y0, y1] = im.userData.box, dx = Math.max(x0 - cx, 0, cx - x1), dy = Math.max(y0 - cy, 0, cy - y1);
+      im.visible = dx * dx + dy * dy < 55.5 * 55.5;
+    }
+  };
   return group;
 }
 

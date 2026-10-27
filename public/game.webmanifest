@@ -1,0 +1,16 @@
+{
+  "name": "Corner Store Dash",
+  "short_name": "Store Dash",
+  "description": "Outrun the bully to your car, race him to the corner store, then grab the EBT list before he catches you.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0A0A0C",
+  "theme_color": "#0A0A0C",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

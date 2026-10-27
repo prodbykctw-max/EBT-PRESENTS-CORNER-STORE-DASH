@@ -128,6 +128,41 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   shoves through people. He runs 5.3 m/s, so a clean run gets away and a sloppy one gets caught: a catch is a **shove**
   ("SHOVED!", 0.9 s down), never the end. Near the car you cut over to the driver's door yourself and jump in: "GO! GO!
   GO!", no 3-2-1, and the car swings straight into the travel lane. The drive's clock only runs once you're driving.
+- **How you move on foot** (`updateFoot`, `posePerson`, the `PATH` block in `drive.js`). You and the bully move in the
+  same fixed 1/120 s steps as the car and are drawn between the last two steps, so a phone's uneven frames (8 to 33 ms)
+  don't make the run stutter. GAS gets you to full speed in about 0.35 s and letting go stops you in about 0.27 s
+  (0.45 m), easing in and out instead of a flat ramp and a dead stop. ◀ ▶ is a smooth sidestep (a stiff spring, 90 % of
+  the way in 0.35 s, at most 5 m/s sideways); you turn a little toward where you're going and lean into it, so it reads
+  as a cut, not a slide. The camera follows on a critically damped spring (no overshoot, the same at any frame rate)
+  and follows a sidestep more gently than you make it.
+  - **Your two lines on the sidewalk** are built once from the street: the curb side of the sidewalk, the building
+    line from the real building footprints (every 0.5 m along, 5 cm across), and the street furniture at body height
+    (tree trunks 0.24 m, poles ~0.2 m, benches, bins, hydrants). Your body (with the bully's arms swinging: 0.42 m each
+    side) keeps 0.3 m off the walls, the line never bends more than 0.35 m across per metre along, it moves in before a
+    building corner and eases out after one, and it steps round trunks and poles in good time. The curb-side line sits
+    at 0.12 of the room, the building-side line at 0.62 (0.9 hugged the facade). The first version read the crowd's
+    2 m-step sidewalk band: your line twitched sideways every 2 m, it ran through three street trees, and at the corner
+    of the building at s ~55 m the band jumped out before the corner had passed. The bully runs his own line at his own
+    spot on the street (he used to copy your sideways position, which a few metres back was inside that building: 35
+    frames, 0.26 m deep) and only closes onto you in the last few metres. Near the car you run up its driver's side
+    1.6 m off its centre line (it's 1.08 m to its mirrors; at 1.15 m your shoulder ran 0.35 m into the car).
+  - **The animation** blends a standing pose, the walk and the run by speed on one clock that moves with the ground
+    you cover, measured off each clip as the speed a planted foot sweeps backwards (the run 1.44 m per clip second).
+    The first version took one foot sweep as the whole clip, but the clip holds two strides: the legs ran at twice the
+    speed you moved (12.6 steps a second at full speed, now 6.6) and the feet skated. Stopping now settles into the
+    standing pose (`makeStandClip`: every joint at its average over the walk) instead of freezing mid-stride, and
+    backing up plays the run backwards. `makeRunClip` meant to make the hips bob more but scaled the forward/back
+    component (the rig is Z-up under a Root bone): the hips surged 0.2 m back and forth every stride; it now scales
+    the height.
+  - **Height** follows the ground under you and a step ahead on a short spring, so a 0.32 m curb (s ~76 m) is a step,
+    not a one-frame pop of you and the camera.
+  - **Bumps and the shove read as a stagger**: run into someone and you check to 45 % speed, rock back and sway, and
+    they're knocked aside (`knock`, `shove` in `crowd.js`, eased back over ~2 s) instead of you running on through
+    them. Shoved, you lurch forward, pitch over and recover over the 0.9 s; he eases to your pace as he closes instead
+    of stopping dead from 5.3 m/s, and stops to gloat. The on-foot camera jolt is two quick smooth wobbles, not a new
+    random 0.4 m jump every frame. Each runner has a soft shadow on the ground under them (their sun shadow is a couple
+    of texels on a phone): without it, from up here, the facade 6 to 10 m further down the hill sat right beside you
+    on screen and you looked pressed into the wall.
 - **The on-foot camera** sits 10 m behind you, 6 m up and 0.6 m to the street side, looking 7 m ahead. The first
   version (6 m back, 3 m up, 1.6 m to the street side) had a signal pole beside the camera that hid you completely at
   the start, and once the bully was close he stood between you and the camera; from up here you, him and the sidewalk
@@ -139,8 +174,8 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   other messages.
 - **The people** are the store's own character in 3D (`people.js`, `character.glb`: the rigged Tripo model from the
   commercial's Blender scene, decimated to 16k triangles, exported by `drive/tools/export_character.py`), with its walk
-  and a run built from it at load time (`makeRunClip`). The run plays at the speed you actually cover ground (stride
-  measured off the clip), so the feet don't skate. The bully is the same model recoloured in the shader exactly as the
+  and a run built from it at load time (`makeRunClip`), plus a standing pose (`makeStandClip`); see "How you move on
+  foot" above for how they're played. The bully is the same model recoloured in the shader exactly as the
   store's sprite sheet is (white tee -> red, denim -> charcoal, red kicks -> black) and drawn taller.
 - **The race.** When you get in he runs for his own ride (1.6 s), then comes after you at 17 m/s, shown only on the bar
   at the top (`.drive-race`: your head, his head, the STORE flag; `heads.png`). If he gets within 4.5 m he's **on your
@@ -150,7 +185,9 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   least 2 s; a "HE'S COMING" pill counts it down), or 1.4 s in, with a burst, if he caught up. Skip the drive and the
   store plays as before (he starts somewhere in the store and your first pickup sets him off).
 - **QA:** `?qa&skipfoot` starts in the car with the old 3-2-1; `?qa&bot` runs to the car on its own, then the autopilot
-  drives. Hooks: `__drive.foot` (`me`, `him`, `homeS`, `doorS`, ...), `__drive.race`.
+  drives. Hooks: `__drive.foot` (`me`, `him`, `homeS`, `doorS`, `path` (`line(s, lane)`, `inner`, `outer`, `wall`),
+  `lane`, ...), `__drive.race`. `__drive.manual = true` stops the live loop and `__drive.tick(dt)` runs one frame at
+  exactly that dt without drawing, so a test can replay a phone's uneven frame times and measure every frame.
 
 ## Controls (mobile-first: the game is played on phones)
 
@@ -212,6 +249,100 @@ The store level has to stay smooth, so the drive has to earn every byte.
 
 The drive's code and assets load on demand (dynamic `import()` + fetch). Nothing is added
 to the store level's startup cost.
+
+## Frame rate: keeping the drive smooth on phones
+
+The drive felt choppy because of two things: every frame drew far more than the screen could show, and every so
+often one frame froze for a quarter of a second to three seconds. Neither changed how anything looks; the fixes below
+were each checked by rendering the same moments of the same run (same random seed, same frames) before and after:
+the pictures match pixel for pixel (see "Same picture" below).
+
+**What a frame cost before** (measured in the game, phone portrait, 1.5× pixel ratio, driving on Luckie St):
+about 3 million triangles and ~360 draw calls a frame, 610k of the triangles in the sun's shadow pass. Most of it
+was out of sight: every road, curb and the whole terrain of downtown were one mesh each (so all of downtown was drawn
+whatever you looked at), the lawns of every park a kilometre or two off were drawn triangle by triangle, and all
+~100 parked and moving cars went through the shadow pass although only the ones near you can cast a shadow you see.
+
+What changed (code, then what it does):
+
+- **The city is drawn in tiles** (`city.js` `tileForCulling`/`splitMesh`). The big static meshes (roads, curbs,
+  terrain, lawns and lots, the freeway, and anything else over 30k triangles) are also drawn as 300 m square tiles,
+  so three.js skips every tile the camera, or the sun's shadow camera, can't see. The tiles share the original's
+  vertex data (each tile is only its own list of triangles, in the original order), and the originals stay in the
+  scene hidden, so raycasts and the QA scanner still find them by name. About 40% fewer triangles a frame.
+- **Ground cover past the end of the fog is skipped** (`city.js` `cull`, called from `drive.js` just before each
+  render). Lawns, lots, streets, curbs, crosswalks and contact shadows lie flat on the terrain, and past the fog's end
+  three.js paints them in nothing but the fog colour, the same colour as the terrain under them, so they are left
+  out there. The distance accounts for the fog being measured along the view direction (screen corners).
+- **Grass tiles that have sunk flat are skipped** (`landscape.js` `buildGrass` → `userData.cull`): tufts sink into the
+  lawn 40–55 m out, so a tile entirely past 55 m draws nothing; it is no longer sent to the GPU.
+- **Only cars that can cast a shadow go through the shadow pass** (`runner.js` `World.render` + `shadowSplit`;
+  `crowd.js` `render` on desktop, where the crowd casts shadows). Instances inside the sun's 220 m shadow box (+25 m
+  to spare) are written first in each instanced buffer and the shadow pass draws just that run. Shadow-pass triangles
+  roughly halve.
+- **Bird flocks no longer freeze the game** (`city.js` `rayTargets`, used for `roofAt` in `drive.js`). Placing a
+  flock fires ~13 straight-down rays per try to find the roof heights along its path, and each ray tested every roof
+  in the city and the whole freeway (~100k triangles): 0.2–3 s frozen frames, several times a run. The same meshes are
+  now cut into 32 m ray tiles, so a ray tests only what's under it; the heights found are the same.
+- **Parked things aren't re-seated every frame** (`runner.js` `World.render`): seating a car or cone on the road reads
+  the road triangles under its four corners. Things that haven't moved keep the answer (same inputs, same pose):
+  ~300 road-height lookups a frame became ~80. The lookup itself (`surface.js` `TopSurface.top`) now skips
+  triangles by their bounding box before the exact test (same answers).
+- **Less sent to the GPU every frame**: instanced buffers upload only the instances drawn (`runner.js` `uploadUsed`;
+  the crowd's buffers hold the whole route's ~500 people), the spark/debris effect skips its 600-particle sweep and
+  upload when nothing is flying (`fx.js`), and the city's matrices are worked out once instead of every frame
+  (`drive.js`, `matrixAutoUpdate = false` on the city and storefronts).
+- **No canvas MSAA** (`drive.js` renderer `antialias: false`): the scene already renders with MSAA into the look pass's
+  own target (`look.js`); the canvas only receives one full-screen quad, so its multisampling was pure cost.
+- **No mid-drive shader builds or texture uploads** (`drive.js`, before the first frame): `compileAsync` builds every
+  material's shader up front (the first EBT token, hazard ring, crash sparks and debris each used to build one the
+  moment they first appeared), and every texture is sent to the GPU up front (the lawn photos used to upload when the
+  first park came into view).
+- **Steadier motion** (`drive.js` `frame`): the world steps by requestAnimationFrame's timestamp (the frame's own time)
+  instead of whenever the callback happened to start, and the HUD only rewrites text that changed. The crowd's walk
+  round street furniture looks only at the furniture near each group (`crowd.js`, binary search; same choices).
+- **Adaptive resolution** (`drive.js` `adaptRes`): if frames run slower than 60 a second for 1.5 s, the pixel ratio
+  steps down by 0.25 (never below 1 pixel per CSS pixel, so a 1:1 screen never changes), kept only if frames then get at least
+  10% faster within 2 s, otherwise put back and left alone for 30 s (doubling each time: iOS Low Power Mode caps at
+  30 fps whatever the resolution). It steps back up after a while of fast frames. A phone that keeps up never changes.
+  Off with `?qa` or `?fixedres`. Test hook: `__drive.adaptRes`.
+
+**Measured result** (phone portrait, 390x844, same seeded run before and after, in-car at points along the route; the
+count is what the renderer reports for one whole frame, shadow pass included):
+
+| Where on the route (s, metres) | Triangles before | after | Draw calls before | after |
+| --- | --- | --- | --- | --- |
+| On foot at the start (92) | 1.78 M | 1.03 M | 207 | 233 |
+| 60 | 1.69 M | 0.93 M | 199 | 229 |
+| 224 (busiest) | 2.94 M | 1.85 M | 326 | 371 |
+| 449 | 2.75 M | 1.89 M | 300 | 338 |
+| 673 | 2.40 M | 1.52 M | 260 | 292 |
+| 898 | 2.06 M | 1.02 M | 219 | 249 |
+| 1088 (at the store) | 1.91 M | 0.78 M | 214 | 237 |
+
+Triangles fall by 35-60% (the GPU's work, which is what makes a phone choppy). Draw calls go UP by about 12-15%: a big
+mesh drawn as tiles is a few draw calls instead of one. That is a deliberate trade (a draw call costs the phone's CPU a
+few microseconds; a million triangles costs its GPU milliseconds); the render-submission time on the CPU measured the
+same to about 1 ms higher in the middle of the route. Shader programs: 46 at the start of the drive growing to 51 as
+things first appeared (five builds mid-drive) before; 48 built up front and one more later (a shadow-depth variant that
+first appears near the store, which `compileAsync` doesn't cover) now. The longest single-frame freeze in a full
+run of the game's code (rendering skipped, so this is JS only) fell from 1,150 ms (a bird flock being placed) to
+about 90 ms, and the bird-flock cost from 0.69 ms a frame on average to 0.11 ms. A full QA-bot run
+(`?qa&bot`) arrives, parks cleanly and scores the same before and after (`__drive.result` identical).
+
+**Same picture:** the same moments of the same run (frames 60, 400, 1200, 1500, 1900, 2400, 3000, 3600: on foot, driving, parked)
+rendered before and after are identical pixel for pixel; the largest difference anywhere is one shade of one colour
+channel on 1 to 2 pixels out of 740,610 in two of the frames.
+
+Still over the 500k-triangle budget above on the busiest stretches (~1–1.9M on a phone): the lawns' terrain-following
+subdivision (every lawn triangle ≤ 4 m, ~500k triangles of park within the fog), parked cars (~2,700 triangles each,
+~75 in view), trees and the crowd. Cutting those further means level-of-detail models, which change how distant things
+look; not done.
+
+**How to measure:** a seeded, virtual-clock run of the drive (`?qa&bot`, Math.random and every timer replaced so each run is
+the same frame for frame), `renderer.info` read right after the main render for triangles and draw calls, and snapshots
+of the same frames compared pixel by pixel. Software WebGL (SwiftShader, as in a cloud session) can't say what a phone's
+GPU does, so the counts and the JS time are the evidence; a real-phone frame time was not measured.
 
 ## Hero storefronts
 
@@ -334,7 +465,8 @@ black screen). START DRIVE calls `startWithDrive()`, which dynamic-imports `./dr
 When it ends, `showStoreHow()` shows the store's how-to-play (`ovHow`, also plain black), and START RUN calls
 `startStoreRun()`: `startRun()`, then the drive bonus. "Run it back" skips the drive and both how-to-plays. If it's
 offline, opened from disk, or `?nodrive` is set, TAP TO START goes straight to the store's how-to-play, so the
-single-file build stays drive-free. The drive's code is prefetched while the title screen is up.
+single-file build stays drive-free. The drive's code is prefetched while the title screen is up. How each screen
+hands off to the next (loading screens, fades, what's hidden when): `docs/FLOW.md`.
 
 **QA:** `/drive/index.html` is a standalone harness. Add `?qa` to either page to drive the loop from a
 timer, since hidden tabs pause `requestAnimationFrame`.

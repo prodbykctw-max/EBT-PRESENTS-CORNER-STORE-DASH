@@ -214,12 +214,116 @@ export function buildCity(W, tex, ground, route, props, trees) {
   const isFree = (x, y) => outside(x, y) && !inHero(x, y);
   const streetscape = buildStreetscape(W, ground, route, streets, props, isFree, trees, tex);
   const group = new THREE.Group();
-  group.add(
-    buildTerrain(W, tex, ground),
-    buildCover(W, ground, tex, streets),
-    buildContactShadows(W, ground, (bd) => { let cx = 0, cy = 0; for (const [x, y] of bd.pts) { cx += x; cy += y; } return inHero(cx / bd.pts.length, cy / bd.pts.length); }),
-    streets.group, streets.freeway.group, b.group,
-    streetscape, buildGrass(W, ground, route, streets, isFree, tex),
-  );
-  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces, isFree, furniture: streetscape.userData.placed, signals: streetscape.userData.signals };
+  // (built in this order, as before: material and object ids, which three.js sorts draws by, stay the same)
+  const terrain = buildTerrain(W, tex, ground), cover = buildCover(W, ground, tex, streets);
+  const contact = buildContactShadows(W, ground, (bd) => { let cx = 0, cy = 0; for (const [x, y] of bd.pts) { cx += x; cy += y; } return inHero(cx / bd.pts.length, cy / bd.pts.length); });
+  const grass = buildGrass(W, ground, route, streets, isFree, tex);
+  group.add(terrain, cover, contact, streets.group, streets.freeway.group, b.group, streetscape, grass);
+
+  tileForCulling(group);
+  // what lies flat on the terrain (lawns, lots, streets, curbs, crosswalks, contact shadows): past the end of the fog
+  // it is drawn in nothing but the fog colour, exactly the colour of the terrain under it there, so it can be skipped
+  const flatOnly = [], corner = new THREE.Vector3();
+  group.traverse((o) => { if (o.isMesh && !o.isInstancedMesh && o.visible && FLAT.test(o.name)) flatOnly.push(o); });   // (not the hidden originals of tiles)
+  for (const o of flatOnly) { o.updateMatrixWorld(true); o.userData.wbox = (o.geometry.boundingBox || (o.geometry.computeBoundingBox(), o.geometry.boundingBox)).clone().applyMatrix4(o.matrixWorld); }
+  const grassCull = grass.userData.cull || (() => {});
+  /** per frame, just before drawing (see drive.js) */
+  const cull = (camera, fog) => {
+    grassCull(camera.position);
+    if (!fog || !fog.isFog) return;
+    // Three.js fogs by depth along the view direction, not distance: anything further than fog.far / cos(angle of
+    // the screen's corners off the view axis) is past the fog's end wherever it shows on screen. (+5 m to spare)
+    let minCos = 1;
+    for (const [x, y] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      corner.set(x, y, 1).applyMatrix4(camera.projectionMatrixInverse);
+      minCos = Math.min(minCos, -corner.z / corner.length());
+    }
+    const far = fog.far / Math.max(0.2, minCos) + 5, far2 = far * far, p = camera.position;
+    for (const o of flatOnly) o.visible = o.userData.wbox.distanceToPoint(p) ** 2 < far2;
+  };
+  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces, isFree, furniture: streetscape.userData.placed, signals: streetscape.userData.signals, cull };
+}
+const FLAT = /^(cover_.*|roads|roads_tile|route_road|route_road_tile|curbs|curbs_tile|junctions|junctions_tile|crosswalks|crosswalks_tile|contact_shadows|contact_shadows_tile)$/;
+
+/** The big static city meshes (every road in downtown, the whole terrain, all the curbs, the freeway, the walls)
+ *  were each ONE mesh, so the camera and the sun's shadow pass drew all of each, every frame, wherever you were:
+ *  ~1.5 million triangles a frame, most of them behind the camera or kilometres off to the side. Each is now also
+ *  drawn as square tiles (`cell` metres) so three.js skips every tile the camera (or the shadow camera) can't see.
+ *  The tiles share the original's vertex buffers (each tile is only a list of which triangles are its own, in the
+ *  original order), so the picture is the same triangles with the same materials and no vertex data is copied.
+ *  The original stays in the scene, hidden: raycasts (the birds' roof heights) and the QA scanner still find it by
+ *  name, and three.js never draws or uploads a hidden mesh. */
+export function tileForCulling(root, { cell = 300, minTris = 30000 } = {}) {
+  const big = [];
+  root.traverse((o) => {
+    if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || !o.visible || !o.frustumCulled || o.children.length) return;
+    const g = o.geometry, tris = (g.index ? g.index.count : g.attributes.position.count) / 3;
+    if (tris >= minTris && !g.morphAttributes.position && !g.groups.length) big.push(o);
+  });
+  for (const o of big) {
+    const tiles = splitMesh(o, cell);
+    if (tiles.length < 2) continue;
+    for (const tile of tiles) {
+      tile.name = o.name + '_tile';
+      Object.assign(tile, { castShadow: o.castShadow, receiveShadow: o.receiveShadow, renderOrder: o.renderOrder,
+        customDepthMaterial: o.customDepthMaterial, customDistanceMaterial: o.customDistanceMaterial });
+      tile.layers.mask = o.layers.mask;
+      o.parent.add(tile);
+    }
+    o.visible = false;
+    o.layers.set(31);   // (and out of raycasts: the tiles answer those, see rayTargets)
+  }
+}
+
+/** a mesh's triangles grouped into square tiles (world x/z, `cell` metres) as meshes of their own that share its
+ *  vertex buffers and material: each tile is just the list of its triangles, in the original order, with bounds of
+ *  its own (three.js would measure the whole shared vertex buffer). Not added to anything. */
+export function splitMesh(o, cell) {
+  const g = o.geometry, P = g.attributes.position, I = g.index ? g.index.array : null, n = I ? I.length : P.count;
+  o.updateMatrixWorld(true);
+  const m = o.matrixWorld.elements, cells = new Map();
+  for (let k = 0; k < n; k += 3) {
+    // the triangle's centre in world x/z picks its tile
+    let cx = 0, cz = 0;
+    for (let q = 0; q < 3; q++) {
+      const v = I ? I[k + q] : k + q, x = P.getX(v), y = P.getY(v), z = P.getZ(v);
+      cx += m[0] * x + m[4] * y + m[8] * z + m[12]; cz += m[2] * x + m[6] * y + m[10] * z + m[14];
+    }
+    const key = Math.floor(cx / 3 / cell) * 65536 + Math.floor(cz / 3 / cell);
+    let list = cells.get(key); if (!list) cells.set(key, (list = []));
+    list.push(I ? I[k] : k, I ? I[k + 1] : k + 1, I ? I[k + 2] : k + 2);
+  }
+  const big32 = P.count > 65535, out = [];
+  for (const list of cells.values()) {
+    const t = new THREE.BufferGeometry();
+    for (const [name, attr] of Object.entries(g.attributes)) t.setAttribute(name, attr);   // shared, not copied
+    t.setIndex(new THREE.BufferAttribute(big32 ? Uint32Array.from(list) : Uint16Array.from(list), 1));
+    const box = new THREE.Box3(), v = new THREE.Vector3();
+    for (const i of list) box.expandByPoint(v.fromBufferAttribute(P, i));
+    t.boundingBox = box;
+    const c = box.getCenter(new THREE.Vector3());
+    let r2 = 0; for (const i of list) r2 = Math.max(r2, c.distanceToSquared(v.fromBufferAttribute(P, i)));
+    t.boundingSphere = new THREE.Sphere(c, Math.sqrt(r2));
+    const tile = new THREE.Mesh(t, o.material);
+    tile.position.copy(o.position); tile.quaternion.copy(o.quaternion); tile.scale.copy(o.scale);
+    if (o.parent) { tile.matrix.copy(o.matrix); tile.matrixWorld.copy(o.matrixWorld); }
+    out.push(tile);
+  }
+  return out;
+}
+
+/** What a straight-down ray (the birds' "how high is the roof here") should test, answering exactly as the given
+ *  objects would: every plain mesh among them cut into small detached tiles (same triangles, same material and
+ *  placement), so a ray only tests the few hundred triangles under it instead of every roof in the city and the whole
+ *  freeway (~100k triangles, which froze the game for a quarter to three seconds each time a flock was placed).
+ *  Instanced meshes and the rest are passed through as they are; meshes hidden for rendering are skipped (their tiles
+ *  are in the list instead). */
+export function rayTargets(objects, cell = 32) {
+  const out = [];
+  for (const root of objects) root.traverse((o) => {
+    if (o.isInstancedMesh || !o.isMesh) { if (o.isInstancedMesh || ((o.isPoints || o.isLine || o.isSprite) && o.layers.isEnabled(0))) out.push(o); return; }
+    if (/_tile$/.test(o.name)) return;                                   // render tiles: their original is split here
+    out.push(...splitMesh(o, cell));
+  });
+  return out;
 }

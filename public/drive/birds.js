@@ -3,7 +3,7 @@
 // scenery: nothing to hit or dodge, but they cast shadows. The ground flocks are placed along the whole route at
 // load (nothing ever appears on screen); flyers are dropped once they're out of view.
 import * as THREE from './vendor/three.module.min.js';
-import { bakedGeometry, propMaterial } from './runner.js';
+import { bakedGeometry, propMaterial, uploadUsed } from './runner.js';
 
 const PLUMAGE = [0x5d6169, 0x4a4e57, 0x6f747e, 0x3e4148, 0x7d8189, 0x2f3238, 0x575250];
 // mesh 0 = pigeon, 1 = crow (grackles are the crow model smaller, with a blue-purple sheen). rate: wingbeats / s
@@ -131,6 +131,6 @@ export class Birds {
       }
     }
     this.flocks = this.flocks.filter((f) => !f.dead);
-    this.meshes.forEach((im, k) => { im.count = counts[k]; im.instanceMatrix.needsUpdate = true; im.instanceColor.needsUpdate = true; });
+    this.meshes.forEach((im, k) => { im.count = counts[k]; uploadUsed(im.instanceMatrix, im.count); uploadUsed(im.instanceColor, im.count); });
   }
 }
