@@ -573,7 +573,7 @@ export class World {
       a.stillT = a.vs < 0.3 ? (a.stillT || 0) + dt : 0;
       if (a.dead_end && a.stillT > 15 && Math.hypot(cx - car.pose.x, cy - car.pose.y) > 55) { a.dead = true; continue; }
       for (const b of this.ambient) {   // the vehicle ahead on the same street
-        if (b === a || b.dead || b.x === undefined || b.road !== a.road) continue;
+        if (b === a || b.dead || b.x === undefined || b.road !== a.road || Math.cos(a.h - b.h) < 0.3) continue;   // (one going the other way on that road is not in front of us: two of them head to head each waited for the other for the whole run)
         const ox = b.x - cx, oy = b.y - cy, al = ox * Math.cos(a.h) + oy * Math.sin(a.h);
         if (al > 0 && al < 30 && Math.abs(-ox * Math.sin(a.h) + oy * Math.cos(a.h)) < 2.5) vt = Math.min(vt, al < 9 ? 0 : (b.vs ?? b.vd) * Math.min(1, (al - 9) / 10));
       }

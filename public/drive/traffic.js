@@ -231,7 +231,7 @@ export class Traffic {
       const inFwd = drivers.some((e) => e.dir === 1 && e.ref === 'l1' && e.s > z.a - 90 && e.s - e.L / 2 < z.c1 + 4);
       const inOnc = drivers.some((e) => e.dir === -1 && e.s - e.L / 2 < z.c1 + 1 && e.s + e.L / 2 > z.c0 - 4);
       // (you are one of the cars of ours: waiting at the cones in the right lane, or coming up to them)
-      const youNear = car.s > z.a - 80 && car.s < z.c0 && car.d < -0.5, youWait = youNear && car.v < 5, youComing = youNear && car.s > z.a - 45 && car.v >= 5;
+      const youNear = car.s > z.a - 80 && car.s < z.c1 && car.d < -0.5, youWait = youNear && car.v < 5, youComing = youNear && car.s > z.a - 45 && car.v >= 5;
       const waitFwd = youWait || drivers.some((e) => e.dir === 1 && e.ref !== 'l1' && e.s > z.a - 80 && e.s < z.c1 && e.sp < 5);
       const waitOnc = drivers.some((e) => e.dir === -1 && e.s - e.L / 2 >= z.c1 + 1 && e.s < z.c1 + 90 && e.sp < 5);
       // a platoon on its way keeps the turn a little longer, but never past 20 s
@@ -300,11 +300,11 @@ export class Traffic {
     }
 
     // --- a pass that met the other direction head on: the car in the wrong lane backs out of it, else both drive through
-    if (sp < 0.3 && lead && lead.ob.veh && !lead.ob.player && !lead.ob.cross && lead.ob.o.dir === -dir && lead.gap < 9) e.faceT = (e.faceT || 0) + dt; else e.faceT = 0;
+    if (sp < 0.3 && lead && lead.ob.veh && !lead.ob.cross && (lead.ob.player ? (e.ref === 'l1' ? 1 : 0) !== (dir === -1 ? 1 : 0) : lead.ob.o.dir === -dir) && lead.gap < 9) e.faceT = (e.faceT || 0) + dt; else e.faceT = 0;
     if (e.faceT > 3) {
       const home = dir === -1 ? 1 : 0, c0 = this.refD(home ? 'l1' : 'l0', e.s);
       if ((e.ref === 'l1' ? 1 : 0) !== home && !e.prof && this.stripFree(e, c0 - e.W / 2, c0 + e.W / 2, e.s - e.L / 2 - 1, e.s + e.L / 2 + 4, 0.5)) { this.changeRef(e, home ? 'l1' : 'l0', 1.8); e.lane = home; e.passEnd = undefined; e.faceT = 0; }
-      else if (e.faceT > 7) { e.ghostUntil = this.clock + 6; e.faceT = 0; this.stats.standoffs++; }
+      else if (e.faceT > 7 && !lead.ob.player) { e.ghostUntil = this.clock + 6; e.faceT = 0; this.stats.standoffs++; }
     }
     // --- give people and slow things room: shift to the far side of our lane when one is close to our side of it
     this.room(e, dir, sp, dt);
@@ -483,10 +483,10 @@ export class Traffic {
       const threat = this.threat(e, dir, car, hornT);
       const parkEnds = (e.ref === 'pR' || e.ref === 'pL') && r.parkD(S + dir * (8 + sp * 1.5), e.ref === 'pR' ? -1 : 1) === null;
       if ((!threat && (passed || this.clock - e.refT > 2.5)) || parkEnds) {
-        const ref = e.lane ? 'l1' : 'l0', c = this.refD(ref, S);
+        const homeLane = dir === -1 ? 1 : 0, ref = homeLane ? 'l1' : 'l0', c = this.refD(ref, S);   // (home is the lane of our direction, whichever lane we swapped into)
         if (this.stripFree(e, c - e.W / 2, c + e.W / 2, S - e.L / 2 - 5, S + e.L / 2 + 8, 1.0)) {
           const bh = this.behind(e, dir, c - 1, c + 1);
-          if (!bh || bh.gap > 10 + Math.max(0, dir * bh.ob.vs - sp) * 4) { this.changeRef(e, ref, 1.9); e.evac = false; }
+          if (!bh || bh.gap > 10 + Math.max(0, dir * bh.ob.vs - sp) * 4) { this.changeRef(e, ref, 1.9); e.evac = false; e.lane = homeLane; }
         }
       }
       return;
@@ -504,7 +504,7 @@ export class Traffic {
     if (hasPark && this.stripFree(e, pc - 1.0, pc + 1.0, S - 7, S + 9 + sp * T * 0.5 + sp * sp / 8, T)) { this.changeRef(e, pref, T); e.evac = true; this.stats.evacuated++; return; }
     if (two || true) {
       const lane2 = e.lane ? 0 : 1, c2 = this.refD(lane2 ? 'l1' : 'l0', S);
-      if (!two && this.laneClear(e, c2, S - 8, S + 12 + sp * 3, hold, two, dir, car, sp) || (two && this.canSwap(e, dir, c2, hold, car, sp))) {
+      if (!two && this.laneClear(e, c2, S - 8, S + 12 + sp * 3, hold, two, dir, car, sp) || (two && dir === 1 && this.canSwap(e, dir, c2, hold, car, sp))) {   // (oncoming cars never swap into your lane: that is where you will be)
         this.changeRef(e, lane2 ? 'l1' : 'l0', T); e.lane = lane2; e.evac = true; e.refT = this.clock; this.stats.evacuated++; return;
       }
     }

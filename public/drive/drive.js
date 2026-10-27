@@ -746,7 +746,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     return pick;
   }
   function getIn() {
-    state = 'driving'; gasLabel(false); me.o.visible = me.blob.visible = false; hazards.visible = false; markerSprite.visible = false;
+    state = 'driving'; world.runnerOn = false; gasLabel(false); me.o.visible = me.blob.visible = false;   // (the runner is in the car: traffic stops treating the spot he got in at as a person standing in the road) hazards.visible = false; markerSprite.visible = false;
     // you peel out: the car swings straight into the travel lane (the parking lane ahead is full of parked cars)
     laneK = 1; followLane(); if (BOT) car.targetD = route.lane(car.s, 0);
     hud.pop.replaceChildren();   // a taunt still floating up would sit on top of GO! GO! GO!

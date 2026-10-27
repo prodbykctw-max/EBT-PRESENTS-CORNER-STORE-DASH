@@ -84,8 +84,8 @@ obstacles and collisions line up exactly with what's painted on the road.
   - The mast lamps really light (lit lamp plus glow, dark others). A HUD light on the left shows the next
     signal and its distance, since lamps are small from overhead.
   - Running a red means meeting cross traffic.
-- **Work zones** run alternating traffic: as the player comes up to one, a flagger holds oncoming cars and the
-  streetcar past its far end, so the open lane is theirs.
+- **Work zones** run alternating one-lane traffic (see "The work-zone flagger" below): one direction goes at a time, the
+  other waits at its end of the cones, and the turn changes when the cars on the road have cleared.
 - **Crowd** (`crowd.js`): one parametric low-poly person (~200 tris), drawn as a single InstancedMesh.
   - **Variety:** each person has their own height, build, skin tone, top, bottoms, and hair, cap,
     locs, backpack or hood.
@@ -104,17 +104,73 @@ obstacles and collisions line up exactly with what's painted on the road.
     shadows.
 - **Pickups:** EBT tokens in lines and weaves (+25). A NEAR MISS against oncoming traffic is +50.
 - **Density:** an in-lane event every 75–110 m, tightening slightly as the run goes on.
-- **Traffic flow:** oncoming traffic is a steady stream of singles and 2–3 car platoons.
-  - It fills the far lane from the start and is fed from past the store.
-  - Oncoming cars stop for anything in their lane, squeeze past a player over the line, and wave
-    you through once you've stopped behind a blockage.
-  - Slow cars follow, overtake parked cars and work zones when the other lane is clear, check
-    their mirrors, and never rear-end the player.
+- **Traffic flow:** every car in the street (ours, oncoming and parked cars pulling out) is driven by `traffic.js`, see
+  "Traffic: how the cars drive" below. Oncoming traffic is still a steady stream of singles and 2-3 car platoons that
+  fills the far lane from the start and is fed from past the store; it never has to appear on screen.
+  - Nothing sits in the street for no reason: a car is only stopped by a red light, the car in front, a work-zone
+    flagger, a streetcar, a person in its lane or a police stop, and all of those clear.
   - Cross traffic never stops inside the route's road.
-  - With this traffic a clean run spends ~10 s waiting, hence the 70 s clock.
 - **Finish:** the car slows for the store by itself. Pull right to the curb into the P space.
   bonus = timeLeft × 50 + tokens × 25 + nearMisses × 50 + 500 (clean park) + 300 (no hits).
 - **Balance:** the QA bot parks clean with about 14 s left.
+
+## Traffic: how the cars drive (`traffic.js`)
+
+All of this is plain logic (no three.js) in `public/drive/traffic.js`; `runner.js` owns the cars (spawning, drawing, the
+cross streets) and calls `traffic.step()` every frame. Cars used to be steered by a few special cases in `runner.js`
+(oncoming cars stopped for anything in their lane, "slow" cars ran at 9-13 m/s, and a car stopped for any reason stayed stopped).
+
+- **Speed.** The street limit is taken to be **25 mph (11.2 m/s)**: OpenStreetMap has no `maxspeed` for this route, so this
+  is an assumption, not data. Each driver wants the limit plus 5 to 30 % (about 11.8 to 14.6 m/s; robotaxis 8 %, police 22 %), less in bends
+  (`curveV`) and in work zones (8 m/s); cars that are free actually average about 12.3 m/s. Before, traffic wanted 9 to 13 m/s and spent
+  most of its time stopped.
+- **Following (IDM).** Each car follows the one in front with the Intelligent Driver Model (`idmAccel`): a time gap of 1.0 to 1.5 s, comfortable braking, a hard-braking limit when something appears close. Starts and stops are smooth (no jerk, no
+  wobble); lateral moves use a Hermite curve that starts and ends with zero sideways speed.
+- **Lane changes (MOBIL-style).** A car passes only when the thing ahead is really in the way (a parked car in the lane, a cone,
+  a stalled car, something much slower), never a queue that is just waiting its turn, and only when the other lane is clear
+  for the whole pass (`laneClear`, projecting moving cars forward) and the car can get back. It returns to its lane once clear.
+  Cars also keep a personal offset in their lane (`pers`) and lean away from people close to their side (`room`).
+- **Giving way to you (`giveWay`).** A car ahead of you that you are closing on, in the lane you are in, looks at your closing speed
+  and distance and moves into the parking lane when there is room all along it (and it is a lane next to its own), or
+  brakes early. A horn tap makes it clear out faster. Oncoming cars that see you in their lane brake or swerve early. Nobody pulls
+  out in front of you (`maybePullOut` checks your speed and where you will be).
+- **Runner on foot.** Cars see the runner (and the bully) as a person in the street: they brake hard with a horn (and a skid
+  when they have to stand on it), or swerve. A car that physically cannot stop in time gives a soft bump (below); it is never game
+  over.
+- **Red lights, cross traffic, trams.** Unchanged in what they do; cars now queue behind each other properly, the streetcar stops
+  for the runner and the bully on its track and rings, curb-parked cars on its track are removed when the level is set up, and
+  cross-street cars waiting at a dead end that nobody can see for 15 s are removed.
+- **The work-zone flagger** (`zoneTurns`): each work zone has a turn: ours goes, then ours stops while the cars in the zone clear,
+  then oncoming goes, then oncoming stops while theirs clear. A turn lasts at least 8 s and at most 20 s (a platoon that is
+  arriving extends it), and you waiting in the right lane at the cones counts as a car waiting. Held cars stop at hold lines 6 m
+  outside the cones.
+- **Gridlock safety.** If two cars end up nose to nose (a pass that met the other direction), the one in the wrong lane backs
+  into its own lane when it is free; after 7 s both are allowed to drive through each other so nothing sits there for the run
+  (counted in `traffic.stats.standoffs`, rare).
+- **Diagnostics.** Every car records why it is slow (`whyK`: `light`, `zone`, `parked`, the type of the car in front, `free`)
+  and what is limiting it (`whyO`); `traffic.stats` counts passes, lane changes, evacuations, honks and runner brakes.
+
+**Measured** (headless browser, the real game, `?qa&bot` autopilot and a kinematic "ghost" player; a car counts as stuck when it is under
+0.5 m/s for more than 3 s; "no reason" means not a red light, work zone, streetcar, queue behind a stop, police stop or a person in the lane):
+
+| | before | after |
+| --- | --- | --- |
+| Ghost player at 13 m/s down the whole street, 6 runs each: cars stuck for no reason, per run | 7.3 (5.7 of them for over 20 s; in the one `?qa&bot` run 6 cars sat in the lane for the whole run) | 2.0 (none over 20 s) |
+| Bot runs: cars stuck for no reason in the playable street (not counting side-street cars waiting 12 to 22 s at a stop line) | not comparable: 6 cars sat in the lane for the whole run | about 1 per run, none over 5 s on the route |
+| Same, player at 6 m/s (4 runs) | not run | 3.3, none over 20 s (the rest are side-street cars at a dead end that give up after 15 s) |
+| Forward traffic stopped (share of samples) | 47 % (85 % in the one bot run) | 16 to 32 % (red lights and queues) |
+| Forward traffic, average speed while moving | 6.5 m/s (11.8 in the bot run) | 8.9 to 9.1 m/s |
+| What the drivers want (limit assumed 25 mph = 11.2 m/s) | 9 to 13 m/s (mean 11) | 11.8 to 14.6 m/s (mean 12.7), free cars measured at about 12.3 |
+| `?qa&bot` runs that reach the store | 1 of 1 valid run, 77 s, 14.2 m/s | 14 of 14 (two batches, 8 and 6), 40 to 59 s, 18.7 to 27.3 m/s (the bot drives at up to 30 m/s) |
+| Collisions between two traffic cars | 1.2 per ghost run | 0.17 per ghost run (1 in 6) and 5 in the 14 bot runs |
+| Hits on the player in the bot runs | 1 (1 run) | 89 in 14 runs (6.4 per run): 86 the bot's own doing (ran into the back of a car it was closing on at 20 m/s or more, or clipped cones), 3 where a car moved sideways into it |
+
+Oncoming traffic that is moving averages 8.6 m/s, lower than before (10 m/s), because it now queues at red lights and behind the streetcar
+instead of driving through them; the share of oncoming samples that are stopped is 15 %, down from 27 to 30 %.
+
+Sizes: a sedan is 4.5 x 1.8 m, an SUV 4.75 x 1.95 m, the bus 12 x 2.55 m and the streetcar 24.8 x 2.65 m; the travel lanes are
+3.45 to 4.89 m wide (median 3.96 m), so the cars are not too big for the road; a lane is about twice a car's width, which is
+standard. Nothing about the car models, sizes or looks was changed.
 
 ## The chase (Kema's opening): on foot to your car, then race the bully to the store
 
@@ -128,6 +184,15 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   shoves through people. He runs 5.3 m/s, so a clean run gets away and a sloppy one gets caught: a catch is a **shove**
   ("SHOVED!", 0.9 s down), never the end. Near the car you cut over to the driver's door yourself and jump in: "GO! GO!
   GO!", no 3-2-1, and the car swings straight into the travel lane. The drive's clock only runs once you're driving.
+- **The street is yours too** (`streetPath`, `streetEvents`, `runnerShove` in `drive.js`). ◀ ▶ now take you off the curb and
+  across the whole street to the far curb (`PATH.far`; before, ◀ stopped at the centre line of the sidewalk). Parked cars, moving cars,
+  the streetcar, cones and barricades are solid: each is checked where it will be over the next 1.8 s as well as where it is, and your
+  line is moved to the nearest free side, preferring the side you are already leaning to; with no gap at all you stop and wait
+  (`me.blocked`) instead of running into it. The bully follows you into the street. The traffic keeps running while you are on foot and
+  reacts to you (honks, skids). If a car really cannot stop you get a **soft bump**: you stagger to the side out of its way, lose
+  speed for 0.55 s, "WATCH IT!" and the crash sound, at most once every 1.2 s, never game over. The camera follows a sidestep gently
+  (`camD`) and keeps you framed anywhere in the street. Standing still next to a parked car, ◀ does nothing until a gap
+  in the parked cars lines up, since the car is solid; running, you slip through the gaps.
 - **How you move on foot** (`updateFoot`, `posePerson`, the `PATH` block in `drive.js`). You and the bully move in the
   same fixed 1/120 s steps as the car and are drawn between the last two steps, so a phone's uneven frames (8 to 33 ms)
   don't make the run stutter. GAS gets you to full speed in about 0.35 s and letting go stops you in about 0.27 s
@@ -462,6 +527,7 @@ into `drive/art/foliage/`; photo-scanned tree models run 0.3–17 M triangles, f
 | `tram.js` | Atlanta Streetcar: embedded rails from OSM, the westbound car on its real track, platform dwells, bell |
 | `integrity.js`, `autopilot.js` | QA only: world scanner; player-like autopilot with hit and pop-in audits |
 | `runner.js` | route space (RouteFrame), the auto-driving car, obstacle/scenery/traffic population, collisions, instanced rendering |
+| `traffic.js` | how every car drives: IDM car-following, lane changes, giving way to the player and the runner, the work-zone flagger (pure logic, no three.js) |
 | `audio.js`, `sfx/` | recorded engine and effects mix |
 | `props.glb` | traffic, bus, panhandler, cyclist, cones, barricade, sign (vertex colour; white = per-instance tint) |
 | `weather.js` | live Atlanta weather → sky, sun, shadows, haze, wet roads |
