@@ -128,6 +128,41 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   shoves through people. He runs 5.3 m/s, so a clean run gets away and a sloppy one gets caught: a catch is a **shove**
   ("SHOVED!", 0.9 s down), never the end. Near the car you cut over to the driver's door yourself and jump in: "GO! GO!
   GO!", no 3-2-1, and the car swings straight into the travel lane. The drive's clock only runs once you're driving.
+- **How you move on foot** (`updateFoot`, `posePerson`, the `PATH` block in `drive.js`). You and the bully move in the
+  same fixed 1/120 s steps as the car and are drawn between the last two steps, so a phone's uneven frames (8 to 33 ms)
+  don't make the run stutter. GAS gets you to full speed in about 0.35 s and letting go stops you in about 0.27 s
+  (0.45 m), easing in and out instead of a flat ramp and a dead stop. ◀ ▶ is a smooth sidestep (a stiff spring, 90 % of
+  the way in 0.35 s, at most 5 m/s sideways); you turn a little toward where you're going and lean into it, so it reads
+  as a cut, not a slide. The camera follows on a critically damped spring (no overshoot, the same at any frame rate)
+  and follows a sidestep more gently than you make it.
+  - **Your two lines on the sidewalk** are built once from the street: the curb side of the sidewalk, the building
+    line from the real building footprints (every 0.5 m along, 5 cm across), and the street furniture at body height
+    (tree trunks 0.24 m, poles ~0.2 m, benches, bins, hydrants). Your body (with the bully's arms swinging: 0.42 m each
+    side) keeps 0.3 m off the walls, the line never bends more than 0.35 m across per metre along, it moves in before a
+    building corner and eases out after one, and it steps round trunks and poles in good time. The curb-side line sits
+    at 0.12 of the room, the building-side line at 0.62 (0.9 hugged the facade). The first version read the crowd's
+    2 m-step sidewalk band: your line twitched sideways every 2 m, it ran through three street trees, and at the corner
+    of the building at s ~55 m the band jumped out before the corner had passed. The bully runs his own line at his own
+    spot on the street (he used to copy your sideways position, which a few metres back was inside that building: 35
+    frames, 0.26 m deep) and only closes onto you in the last few metres. Near the car you run up its driver's side
+    1.6 m off its centre line (it's 1.08 m to its mirrors; at 1.15 m your shoulder ran 0.35 m into the car).
+  - **The animation** blends a standing pose, the walk and the run by speed on one clock that moves with the ground
+    you cover, measured off each clip as the speed a planted foot sweeps backwards (the run 1.44 m per clip second).
+    The first version took one foot sweep as the whole clip, but the clip holds two strides: the legs ran at twice the
+    speed you moved (12.6 steps a second at full speed, now 6.6) and the feet skated. Stopping now settles into the
+    standing pose (`makeStandClip`: every joint at its average over the walk) instead of freezing mid-stride, and
+    backing up plays the run backwards. `makeRunClip` meant to make the hips bob more but scaled the forward/back
+    component (the rig is Z-up under a Root bone): the hips surged 0.2 m back and forth every stride; it now scales
+    the height.
+  - **Height** follows the ground under you and a step ahead on a short spring, so a 0.32 m curb (s ~76 m) is a step,
+    not a one-frame pop of you and the camera.
+  - **Bumps and the shove read as a stagger**: run into someone and you check to 45 % speed, rock back and sway, and
+    they're knocked aside (`knock`, `shove` in `crowd.js`, eased back over ~2 s) instead of you running on through
+    them. Shoved, you lurch forward, pitch over and recover over the 0.9 s; he eases to your pace as he closes instead
+    of stopping dead from 5.3 m/s, and stops to gloat. The on-foot camera jolt is two quick smooth wobbles, not a new
+    random 0.4 m jump every frame. Each runner has a soft shadow on the ground under them (their sun shadow is a couple
+    of texels on a phone): without it, from up here, the facade 6 to 10 m further down the hill sat right beside you
+    on screen and you looked pressed into the wall.
 - **The on-foot camera** sits 10 m behind you, 6 m up and 0.6 m to the street side, looking 7 m ahead. The first
   version (6 m back, 3 m up, 1.6 m to the street side) had a signal pole beside the camera that hid you completely at
   the start, and once the bully was close he stood between you and the camera; from up here you, him and the sidewalk
@@ -139,8 +174,8 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   other messages.
 - **The people** are the store's own character in 3D (`people.js`, `character.glb`: the rigged Tripo model from the
   commercial's Blender scene, decimated to 16k triangles, exported by `drive/tools/export_character.py`), with its walk
-  and a run built from it at load time (`makeRunClip`). The run plays at the speed you actually cover ground (stride
-  measured off the clip), so the feet don't skate. The bully is the same model recoloured in the shader exactly as the
+  and a run built from it at load time (`makeRunClip`), plus a standing pose (`makeStandClip`); see "How you move on
+  foot" above for how they're played. The bully is the same model recoloured in the shader exactly as the
   store's sprite sheet is (white tee -> red, denim -> charcoal, red kicks -> black) and drawn taller.
 - **The race.** When you get in he runs for his own ride (1.6 s), then comes after you at 17 m/s, shown only on the bar
   at the top (`.drive-race`: your head, his head, the STORE flag; `heads.png`). If he gets within 4.5 m he's **on your
@@ -150,7 +185,9 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   least 2 s; a "HE'S COMING" pill counts it down), or 1.4 s in, with a burst, if he caught up. Skip the drive and the
   store plays as before (he starts somewhere in the store and your first pickup sets him off).
 - **QA:** `?qa&skipfoot` starts in the car with the old 3-2-1; `?qa&bot` runs to the car on its own, then the autopilot
-  drives. Hooks: `__drive.foot` (`me`, `him`, `homeS`, `doorS`, ...), `__drive.race`.
+  drives. Hooks: `__drive.foot` (`me`, `him`, `homeS`, `doorS`, `path` (`line(s, lane)`, `inner`, `outer`, `wall`),
+  `lane`, ...), `__drive.race`. `__drive.manual = true` stops the live loop and `__drive.tick(dt)` runs one frame at
+  exactly that dt without drawing, so a test can replay a phone's uneven frame times and measure every frame.
 
 ## Controls (mobile-first: the game is played on phones)
 

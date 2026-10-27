@@ -53,10 +53,34 @@ export function makeRunClip(walk) {
         q.multiplyQuaternions(mean, tmp); q.toArray(v, i * 4);
       }
     } else if (t.name.endsWith('.position') && /^Hip$/.test(bone)) {
-      const v = t.values, n = v.length / 3; let my = 0; for (let i = 0; i < n; i++) my += v[i * 3 + 1]; my /= n;
-      for (let i = 0; i < n; i++) v[i * 3 + 1] = my + (v[i * 3 + 1] - my) * 1.8;
+      // the hips bob more. Which component is "up" is the one the hip's height lives in (the rig is Z-up under a Root
+      // bone turned -90 deg about X, so it is z here). The first version scaled y, which in this rig is forward/back:
+      // the run surged the hips 0.2 m back and forth every stride instead of bobbing them.
+      const v = t.values, n = v.length / 3, mean = [0, 0, 0];
+      for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) mean[c] += v[i * 3 + c] / n;
+      const up = mean.reduce((b, m, c) => Math.abs(m) > Math.abs(mean[b]) ? c : b, 0);
+      for (let i = 0; i < n; i++) v[i * 3 + up] = mean[up] + (v[i * 3 + up] - mean[up]) * 1.8;
     }
     tracks.push(t);
   }
   return new THREE.AnimationClip('run', walk.duration, tracks);
+}
+
+/** Standing still: every joint at its average pose over the walk (arms down, legs under you), the same rig and the
+ *  same length as the walk, so it blends with the walk and the run by weight when you slow to a stop (instead of the
+ *  run freezing mid-stride). */
+export function makeStandClip(walk) {
+  const tracks = [];
+  for (const tr of walk.tracks) {
+    const isQ = tr.name.endsWith('.quaternion'), k = isQ ? 4 : tr.values.length / tr.times.length, v = tr.values, n = v.length / k;
+    const mean = new Array(k).fill(0);
+    for (let i = 0; i < n; i++) {
+      const sg = isQ && (v[i * 4] * v[0] + v[i * 4 + 1] * v[1] + v[i * 4 + 2] * v[2] + v[i * 4 + 3] * v[3]) < 0 ? -1 : 1;
+      for (let c = 0; c < k; c++) mean[c] += sg * v[i * k + c];
+    }
+    if (isQ) { const q = new THREE.Quaternion().fromArray(mean).normalize(); q.toArray(mean); } else for (let c = 0; c < k; c++) mean[c] /= n;
+    const Track = tr.constructor;
+    tracks.push(new Track(tr.name, [0, walk.duration], [...mean, ...mean]));
+  }
+  return new THREE.AnimationClip('stand', walk.duration, tracks);
 }
