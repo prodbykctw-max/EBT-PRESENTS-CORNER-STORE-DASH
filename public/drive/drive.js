@@ -762,6 +762,49 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     m.waitT = runs && Math.abs(m.v) < 0.6 && m.hitT > 0 ? (m.waitT || 0) + dt : 0;
     if (m.waitT > 1.5) { m.release = 1.0; m.waitT = 0; }
   }
+  // ---------- nothing solid is ever walked through ----------
+  // streetPath steers round cars, the streetcar, cones, barricades and the people working the street, and holdUp lets you try the
+  // other edge after a wait, but a steering target is only a wish: the follow lags it, a car can arrive in the same step, and a
+  // street full to both curbs has no free line at all. This is the guarantee behind it, run after ALL the steering of a step, for you
+  // and for the bully: every solid thing in the street is a box (its own length and width, widened by BODY, and swept to wherever it
+  // is now as well as where the traffic last saw it), and if the person ends the step inside one he is put back out of it along
+  // the shallowest way: sideways when that is nearly as short (a car coming along the street is gone round, never carried
+  // along in front of), along the street when it is shorter. Running into an end face stops you dead against it; a side is slid
+  // along. No step ends inside a box. A big correction (a car appearing on top of you) is eased on screen over a few frames
+  // (m.ofs) rather than snapped, but the person himself is already out.
+  function solidPass(m, dt) {
+    const obs = world.traffic.obs; m.ofs ||= { s: 0, d: 0 };
+    if (!obs || !obs.length) return;
+    const s0 = m.s, d0 = m.d;
+    for (let pass = 0; pass < 4; pass++) {
+      let moved = false;
+      for (const o of obs) {
+        if (o.runner || o.player || o.o === him || o.o === me || !o.L || !o.W || Math.abs(o.s - m.s) > 20) continue;
+        const ent = o.o, live = !o.cross && typeof ent.s === 'number' && typeof ent.d === 'number';
+        const os = live ? ent.s : o.s, od = live ? ent.d : o.d;
+        const sLo = Math.min(o.s, os) - o.L / 2 - BODY, sHi = Math.max(o.s, os) + o.L / 2 + BODY;
+        const dLo = Math.min(o.d, od) - o.W / 2 - BODY, dHi = Math.max(o.d, od) + o.W / 2 + BODY;
+        if (m.s <= sLo || m.s >= sHi || m.d <= dLo || m.d >= dHi) continue;
+        const [lo, hi] = sideRange(m.s), E = 0.003, moving = Math.abs(o.vs) > 2 ? 2.5 : 1;
+        // the four ways out: [cost, axis, target]. (a way sideways that ends up in the building or past the far curb is no way out)
+        const ways = [[(m.s - sLo), 's', sLo - E], [(sHi - m.s), 's', sHi + E]];
+        if (dLo - E >= lo - 0.05) ways.push([m.d - dLo, 'd', dLo - E]);
+        if (dHi + E <= hi + 0.05) ways.push([dHi - m.d, 'd', dHi + E]);
+        for (const w of ways) if (w[1] === 's') w[0] *= moving;
+        ways.sort((a, b) => a[0] - b[0]);
+        const [, axis, to] = ways[0];
+        if (axis === 's') { if ((to < m.s && m.v > 0) || (to > m.s && m.v < 0)) { m.v = 0; m.stopped = true; } m.s = to; }
+        else { if ((to < m.d && m.dv > 0) || (to > m.d && m.dv < 0)) m.dv = 0; m.d = to; }
+        moved = true; m.pushed = (m.pushed || 0) + 1;
+      }
+      if (!moved) break;
+    }
+    const ds = m.s - s0, dd = m.d - d0;
+    m.pushS = ds; m.pushD = dd;
+    // (the person is out; what is drawn eases to him over a few frames when the correction was big)
+    if (Math.abs(ds) > 0.15 || Math.abs(dd) > 0.15) { m.ofs.s -= ds; m.ofs.d -= dd; }
+    if (m.stopped) { m.stopped = false; m.blocked = true; }   // (an end face in the way: stand there, don't run on the spot)
+  }
   function getIn() {
     // (runnerOn off: the runner is in the car, so traffic stops treating the spot he got in at as a person standing in the road)
     state = 'driving'; world.runnerOn = false; gasLabel(false); me.o.visible = me.blob.visible = false; hazards.visible = false; markerSprite.visible = false;
@@ -801,6 +844,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const L0 = myLine(me.s), L1 = streetPath(me, L0, dt);
     me.tg = me.tg === undefined ? L1 : me.tg + (L1 - me.tg) * (1 - Math.exp(-dt * 9));
     steerTo(me, me.tg, (myLine(me.s + 0.2) - myLine(me.s - 0.2)) / 0.4 * me.v, dt);
+    solidPass(me, dt);
     // run into someone and you stumble (the bully just shoves through them); they get knocked aside, so you don't
     // run on through their body
     for (const q of crowd.people) {
@@ -838,6 +882,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const H1 = streetPath(him, hl(him.s), dt);
     him.tg = him.tg === undefined ? H1 : him.tg + (H1 - him.tg) * (1 - Math.exp(-dt * 9));
     steerTo(him, him.tg, (hl(him.s + 0.2) - hl(him.s - 0.2)) / 0.4 * him.v, dt);
+    solidPass(him, dt);
     if (go && gap < FOOT.reach && Math.abs(me.d - him.d) < 1 && me.stun <= 0) {
       // shoved from behind: you lurch forward, stagger and go down on one knee; he stops to gloat
       me.stun = FOOT.stun; me.v = Math.max(me.v, 0) + 1.2; him.pause = FOOT.pause; shake = 0.7;
@@ -868,7 +913,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   }
   /** draw a person between the last two movement steps (al = how far into the next one this frame is) */
   function posePerson(m, dt, al) {
-    const s = m.ps + (m.s - m.ps) * al, d = m.pd + (m.d - m.pd) * al;
+    // (m.ofs: a big correction from solidPass, eased out on screen)
+    if (m.ofs) { const k = Math.exp(-dt * 18); m.ofs.s *= k; m.ofs.d *= k; if (Math.abs(m.ofs.s) < 1e-3) m.ofs.s = 0; if (Math.abs(m.ofs.d) < 1e-3) m.ofs.d = 0; }
+    const s = m.ps + (m.s - m.ps) * al + (m.ofs ? m.ofs.s : 0), d = m.pd + (m.d - m.pd) * al + (m.ofs ? m.ofs.d : 0);
     m.ds = s; m.dd = d;
     // height: the higher of the ground under you and a step ahead, eased (a 0.32 m curb at s ~76 used to pop you up
     // in one frame, and the camera with you)
