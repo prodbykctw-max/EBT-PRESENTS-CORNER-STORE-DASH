@@ -611,7 +611,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // route d is negative on this (the right) side
     return { line: (s, lane) => -at(lanes[lane], s), inner: (s) => -at(I, s), outer: (s) => -at(O, s), left: (s) => -at(C, s), wall: (s) => -at(wall, s), lanes, props: footProps, s0, step };
   })();
-  const footLineD = (s, lane = 0) => PATH.line(s, lane);   // the line round the street furniture (the bully's, the autopilot's)
+  const footLineD = (s, lane = 0) => PATH.line(s, lane);
+  // the GAS pedal is the RUN button while you're on foot, and turns back into GAS when you get in
+  const gasBtn = root.querySelector('.dp.gas'), gasLabel = (onFoot) => { if (!gasBtn) return; gasBtn.querySelector('b').textContent = onFoot ? 'RUN' : 'GAS'; gasBtn.setAttribute('aria-label', onFoot ? 'Run' : 'Gas'); };
+  gasLabel(!SKIPFOOT);   // the line round the street furniture (the bully's, the autopilot's)
   // Where you run across the sidewalk is yours: ◀ ▶ step you over (a tap is a step of SIDE_STEP, holding keeps you
   // moving at SIDE_RATE) anywhere from just inside the curb to WALL_GAP off the buildings, and you stay there when you
   // let go. (It used to be two fixed lines, both 1.3 m+ in from the curb, and you started on the left one, so ◀ did
@@ -625,15 +628,18 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const avoidProps = (s, d, cur) => {
     const [lo, hi] = sideRange(s);
     for (const o of PATH.props) {
-      // R: your body (0.38 m) and a hand's width of air off the trunk; the ramp starts 2.4 m ahead so the sidestep
-      // round it is gentle at a full run (at 1.4 m the steering spring couldn't keep up and you clipped the trunk)
-      const ds = o.s - s, R = o.r + 0.5, od = -o.d;
-      if (ds < -R - 0.8 || ds > R + 2.4) continue;
-      const w = 1 - THREE.MathUtils.smoothstep(Math.abs(ds) - (o.r + 0.15), 0, ds > 0 ? 2.4 : 0.8);
-      if (w <= 0 || Math.abs(d - od) >= R) continue;
-      let side = cur >= od ? 1 : -1, to = od + side * R;
-      if (to > hi + 0.05 || to < lo - 0.05) { side = -side; to = od + side * R; }
-      d = THREE.MathUtils.lerp(d, THREE.MathUtils.clamp(to, lo, hi), w);
+      // R: your body (0.38 m) and a hand's width of air off the trunk. Ahead of it the clear zone grows from nothing
+      // (2.4 m before the part you could actually touch) to the full R, so when you have to go round on the OTHER side
+      // you cross over well before you reach it, never through it (a straight blend toward the far side ran you
+      // through the middle of the trunk at s 46)
+      const ds = o.s - s, R = o.r + 0.5, od = -o.d, core = o.r + 0.45, a = Math.abs(ds) - core;
+      const k = a <= 0 ? 1 : 1 - THREE.MathUtils.smoothstep(a, 0, ds > 0 ? 2.4 : 0.8);
+      if (k <= 0) continue;
+      const half = R * k;
+      if (Math.abs(d - od) >= half) continue;
+      let side = cur >= od ? 1 : -1;
+      if (od + side * R > hi + 0.05 || od + side * R < lo - 0.05) side = -side;   // no room on your side: the other one
+      d = THREE.MathUtils.clamp(od + side * half, lo, hi);
     }
     return d;
   };
@@ -672,7 +678,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // a stumble you can read: the body rocks (pitch, roll) and settles; amp in radians, the shove adds a sink
   const stagger = (m, pitch, roll, dur, sink = 0) => { m.hit = { t: 0, dur, pitch, roll, sink }; };
   function getIn() {
-    state = 'driving'; me.o.visible = me.blob.visible = false; hazards.visible = false; markerSprite.visible = false;
+    state = 'driving'; gasLabel(false); me.o.visible = me.blob.visible = false; hazards.visible = false; markerSprite.visible = false;
     // you peel out: the car swings straight into the travel lane (the parking lane ahead is full of parked cars)
     laneK = 1; followLane(); if (BOT) car.targetD = route.lane(car.s, 0);
     hud.pop.replaceChildren();   // a taunt still floating up would sit on top of GO! GO! GO!
@@ -718,7 +724,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       }
       if (Math.abs(q.s - him.s) < 0.7 && Math.abs(qd - him.d) < 0.6 && !q.shove) knock(q, him.d);
     }
-    if (!found && footT > 2.2 && footT < 2.4) setHint('Hold GAS — run to your car');
+    if (!found && footT > 2.2 && footT < 2.4) setHint('Hold RUN — get to your car');
     if (!found && doorS - me.s < 14) { found = true; audio.token(); setHint('That’s your ride — get in!'); }
     // the bully: a beat to clock you, then he runs you down; catching you is a shove, not the end
     him.pause = Math.max(0, him.pause - dt);

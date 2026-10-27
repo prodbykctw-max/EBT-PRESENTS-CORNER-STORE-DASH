@@ -17,7 +17,7 @@ A standalone game presented by EBT (Everything But Trapped), the Atlanta brand r
 
 ### 1. The chase and the drive (70 seconds)
 
-- On foot: the bully is right behind you. Hold GAS to run up the block to your car (its hazards are flashing) and use ◀ ▶ to dodge people on the sidewalk; run into someone and you stumble, and if he catches you he shoves you.
+- On foot: the bully is right behind you. Hold RUN to run up the block to your car (its hazards are flashing) and use ◀ ▶ to step left or right round people on the sidewalk; run into someone and you stumble, and if he catches you he shoves you.
 - Then race him to the store: the bar at the top shows your head, his head and the store. Your lead when you park is your head start in the store; if he catches up on the way, he follows you straight in.
 - Get to the corner store before the clock runs out and park in the spot out front.
 - Don't hit the police: hit a police car and you're BUSTED (drive again).

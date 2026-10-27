@@ -123,7 +123,7 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
 - **On foot.** You start on the right sidewalk of Luckie St (s = 14 m) with the bully 8 m behind you. Your car is parked
   at the right curb up the block with its **hazards flashing** and a yellow ▼ over it, in the first stretch of parking
   lane where it sits level (Luckie St is steep: on its cross-slope a car rolls ~10°, so the spot is picked by measuring
-  the car's roll and pitch with `standOn`). Hold GAS to run (5.6 m/s), BRAKE to back up, ◀ ▶ to step left or right
+  the car's roll and pitch with `standOn`). Hold RUN (the GAS pedal, labelled RUN while you are on foot) to run (5.6 m/s), BRAKE to back up, ◀ ▶ to step left or right
   anywhere across the sidewalk (see "Where you run" below). Run into someone from the crowd and you stumble ("WATCH IT!"); the bully
   shoves through people. He runs 5.3 m/s, so a clean run gets away and a sloppy one gets caught: a catch is a **shove**
   ("SHOVED!", 0.9 s down), never the end. Near the car you cut over to the driver's door yourself and jump in: "GO! GO!
