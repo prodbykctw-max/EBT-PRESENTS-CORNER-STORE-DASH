@@ -638,7 +638,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       const half = R * k;
       // which side: the one with room for you; if both have room, the side you're on (decided by room, not by where you
       // are this instant, so it can't flip-flop as you cross over)
-      const roomUp = od + R <= hi + 0.05, roomDown = od - R >= lo - 0.05;
+      // (room is judged where the trunk stands, not where you are: the sidewalk can narrow on the way to it, and judging
+      // it here switched sides only 1 m before the tree at s 46)
+      const [plo, phi] = sideRange(o.s), roomUp = od + R <= phi + 0.05, roomDown = od - R >= plo - 0.05;
       const side = roomUp && roomDown ? (cur >= od ? 1 : -1) : roomUp ? 1 : roomDown ? -1 : (cur >= od ? 1 : -1);
       // where you'd run is on the other side of it: drift over starting 4 m before it (continuously, from wherever
       // you are), so you're across its line long before you could touch it; then the clear zone holds you off it
