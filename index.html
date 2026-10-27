@@ -267,7 +267,11 @@ var SPAWN_P={x:415,y:1380}, SPAWN_B={x:650,y:320};
    opening: idle 35%->24% of player speed, base hunt 79%->55%, capped chase
    97%->68%. Raise B_CAP first if he ever needs teeth back; it is the term that
    decides how the last two pickups feel. */
-var PSPEED=260, B_IDLE=63, B_BASE=143, B_PER_ITEM=5.6, B_CAP=177;
+/* Store-motion pass: his path used to be a staircase of 16 px grid steps and he now cuts straight across the floor
+   (pathAim), which is up to ~40% shorter on a diagonal and made him arrive sooner at the same speed. The three hunt
+   terms are 0.90x what they were (143 / 5.6 / 177) so he closes in at about the old pace: in the same bot runs the
+   win rate went 16/100 (old), 7/60 (straight paths, old speeds), 14/120 (straight paths, these speeds). */
+var PSPEED=260, B_IDLE=63, B_BASE=129, B_PER_ITEM=5.0, B_CAP=153;
 // Scripted playtests (real BFS pathing, no cheating) kept ending 2-3 items
 // in, 6-13s in: grabbing item #1 flips S.active straight to full hunt speed
 // with zero warning, and a continue drops the player back in at the same
@@ -284,7 +288,23 @@ var AGGRO_RAMP=2.2, CONTINUE_GRACE=1.2;
      turn a corner during the wind-up and it misses ("CLOSE CALL!"); then he's winded (half speed for 0.45 s) and
      can't lunge again for LUNGE_CD s. */
 var B_PREDICT=0.5, B_SEARCH=1.4, B_BURST=1.22, B_SPOT_BURST=0.8;
-var LUNGE_R=165, LUNGE_WIND=0.38, LUNGE_T=0.42, LUNGE_V=330, LUNGE_CD=4.2;
+var LUNGE_R=165, LUNGE_WIND=0.46, LUNGE_T=0.42, LUNGE_V=330, LUNGE_CD=4.2;
+/* Smooth motion (docs/GAME_DESIGN.md, "Store motion: why it was choppy and what fixed it").
+   - The game moves everyone in fixed 1/120 s steps (STEP) and draws them in between two steps, so speed, collisions
+     and the bully's decisions are the same at 30, 60 or 120 fps, and an uneven frame can't make anyone hop or stall.
+     A frame longer than MAX_FRAME (a hitch) is only caught up to MAX_FRAME.
+   - Speed eases instead of snapping: the player reaches ~90% of the stick's speed in 0.09 s (P_ACCEL_T) and
+     stops in about 0.075 s, drifting ~6 px (P_STOP_T); the bully turns and changes speed over B_TURN_T.
+   - The drag: under STICK_DEAD px of thumb travel you stand still, then speed ramps up to full at STICK_FULL px.
+   - Facing only swaps between side-on and up/down when the new axis is clearly bigger (FACE_BIAS), so a diagonal
+     doesn't flicker the sprite between two directions every frame.
+   - Walls: you slide along a wall at the speed of the part of your push that runs along it, and pushing (nearly)
+     straight into a wall stands you still instead of shaking you side to side (SLIDE_MIN_SIN: within ~8 degrees of
+     straight on). From 30 degrees off straight-on the slide is full speed, as before (SLIDE_FULL_SIN). */
+var STEP=1/120, MAX_FRAME=0.1;
+var P_ACCEL_T=0.04, P_STOP_T=0.025, B_TURN_T=0.08;
+var STICK_DEAD=6, STICK_FULL=22;
+var FACE_BIAS=1.25, FACE_HOLD=0.18, SLIDE_MIN_SIN=0.14, SLIDE_FULL_SIN=0.5;
 /* The race to the store (the drive's chase): with a lead he comes in through the door that many seconds into the run;
    on your tail, right behind you. DOOR is the welcome mat, between the cart corrals. */
 var DOOR={x:415,y:1590}, BULLY_IN_MIN=2, BULLY_IN_MAX=30, BULLY_IN_TAIL=1.4;
@@ -658,17 +678,19 @@ function los(x0,y0,x1,y1){
 }
 
 /* ---------- movement ---------- */
-function nudgeY(nx,y){
+// Corner-assist probes. With `only` (-1/+1) they look on that side alone: moveEntity passes the side the push is
+// already heading, so the assist steps you around a lip the way you were going and never backs you off the wall.
+function nudgeY(nx,y,only){
   for(var k=3;k<=15;k+=3){
-    if(boxFree(nx,y-k)) return -1;
-    if(boxFree(nx,y+k)) return 1;
+    if(only!==1 && boxFree(nx,y-k)) return -1;
+    if(only!==-1 && boxFree(nx,y+k)) return 1;
   }
   return 0;
 }
-function nudgeX(x,ny){
+function nudgeX(x,ny,only){
   for(var k=3;k<=15;k+=3){
-    if(boxFree(x-k,ny)) return -1;
-    if(boxFree(x+k,ny)) return 1;
+    if(only!==1 && boxFree(x-k,ny)) return -1;
+    if(only!==-1 && boxFree(x+k,ny)) return 1;
   }
   return 0;
 }
@@ -679,8 +701,11 @@ function cornerSeek(e,sdx,sdy,mag){
   var mx = vert ? e.x : e.x+main*mag, my = vert ? e.y+main*mag : e.y;
   if(boxFree(mx,my)) return false;                      // main direction isn't the blocked one
   var lean = vert ? sdx : sdy;
+  // try the side the stick leans toward first; with no clear lean (a thumb wobbling either side of straight), keep
+  // going the way this push already started, so you aren't steered left, right, left
+  var pref = Math.abs(lean) > mag*SLIDE_MIN_SIN ? (lean<0?-1:1) : (e.seekSide || (lean<0?-1:1));
+  var order = pref<0 ? [-1,1] : [1,-1];
   for(var k=3;k<=36;k+=3){
-    var order = lean<0 ? [-1,1] : [1,-1];               // try the side the stick leans toward first
     for(var j=0;j<2;j++){
       var sgn=order[j], ox = vert ? e.x+sgn*k : e.x, oy = vert ? e.y : e.y+sgn*k;
       if(!boxFree(ox,oy)) continue;
@@ -690,18 +715,20 @@ function cornerSeek(e,sdx,sdy,mag){
       for(var s=3;s<k&&ok;s+=3){ if(!boxFree(vert?e.x+sgn*s:e.x, vert?e.y:e.y+sgn*s)) ok=false; }
       if(!ok) continue;
       if(vert) e.x+=sgn*Math.min(mag,k); else e.y+=sgn*Math.min(mag,k);
+      e.seekSide=sgn;
       return true;
     }
   }
   return false;
 }
 function moveEntity(e,dt){
-  var dx=e.vx*dt, dy=e.vy*dt;
+  var dx=e.vx*dt, dy=e.vy*dt, x0=e.x, y0=e.y;
+  if(e.faceHold>0) e.faceHold-=dt;
   var steps=Math.max(1,Math.ceil(Math.max(Math.abs(dx),Math.abs(dy))/3));
   var sdx=dx/steps, sdy=dy/steps;
   var mag=Math.sqrt(sdx*sdx+sdy*sdy);
   for(var i=0;i<steps;i++){
-    if(boxFree(e.x+sdx,e.y+sdy)){ e.x+=sdx; e.y+=sdy; continue; }
+    if(boxFree(e.x+sdx,e.y+sdy)){ e.x+=sdx; e.y+=sdy; e.seekSide=0; continue; }
     // Round the corner you clearly mean. Pushing mostly one way into a lip (the
     // EBT LIST sign juts ~20px past the left wall, so up-and-left in that lane
     // jammed you under it while the slide below bounced you back and forth):
@@ -710,44 +737,96 @@ function moveEntity(e,dt){
     // sideways lean says.
     var seek=cornerSeek(e,sdx,sdy,mag);
     if(seek){ continue; }
-    // full-speed wall slide: pour the whole step into whichever axis is free
+    // Wall slide. It used to pour the WHOLE step into whichever axis was free, so a push 85 degrees straight into a
+    // shelf still shot you sideways at full speed, and a thumb wobbling a few degrees either side of straight shook
+    // you left-right-left at full speed (measured: 29 direction flips in 1.5 s, net movement ~0). Now the slide
+    // speed follows how much of the push runs along the wall: nothing within ~8 degrees of straight on
+    // (SLIDE_MIN_SIN), rising to full speed at 30 degrees and beyond (SLIDE_FULL_SIN), as before.
     var tryY = Math.abs(sdy)>=Math.abs(sdx);
     var slid=false;
     for(var t2=0;t2<2 && !slid;t2++){
-      if(tryY && sdy){
-        var fy=e.y+(sdy>0?mag:-mag);
-        if(boxFree(e.x,fy)){ e.y=fy; slid=true; }
-      } else if(!tryY && sdx){
-        var fx=e.x+(sdx>0?mag:-mag);
-        if(boxFree(fx,e.y)){ e.x=fx; slid=true; }
+      var along = tryY ? Math.abs(sdy) : Math.abs(sdx), sk=mag? Math.min(1,Math.max(0,(along/mag-SLIDE_MIN_SIN)/(SLIDE_FULL_SIN-SLIDE_MIN_SIN))) : 0;
+      if(sk>0){
+        if(tryY && sdy){
+          var fy=e.y+(sdy>0?mag:-mag)*sk;
+          if(boxFree(e.x,fy)){ e.y=fy; slid=true; }
+        } else if(!tryY && sdx){
+          var fx=e.x+(sdx>0?mag:-mag)*sk;
+          if(boxFree(fx,e.y)){ e.x=fx; slid=true; }
+        }
       }
       tryY=!tryY;
     }
     if(slid) continue;
-    // both axes blocked: corner-assist nudges around the lip
+    // a (nearly) straight push into a wall with no opening near enough for cornerSeek: stand there. The nudges below
+    // would otherwise bounce you back off the wall a few px and let you walk into it again, every step (a shudder).
+    if(mag && Math.min(Math.abs(sdx),Math.abs(sdy))/mag < SLIDE_MIN_SIN) continue;
+    // both axes blocked: corner-assist nudges around the lip, only ever to the side the push already leans (in a
+    // pocket, nudging the other way stepped you back off the wall and the push walked you straight back in: measured
+    // as a 2-3 px up-down shudder, ~40 reversals a second)
     if(sdx){
-      var nx=e.x+sdx, ny1=nudgeY(nx,e.y);
+      var nx=e.x+sdx, ny1=nudgeY(nx,e.y,sdy>0?1:-1);
       if(ny1){
         var yy=e.y+ny1*(mag+1.2);
         if(boxFree(e.x,yy)){ e.y=yy; if(boxFree(nx,e.y)){ e.x=nx; } continue; }
       }
     }
     if(sdy){
-      var ny=e.y+sdy, nx1=nudgeX(e.x,ny);
+      var ny=e.y+sdy, nx1=nudgeX(e.x,ny,sdx>0?1:-1);
       if(nx1){
         var xx=e.x+nx1*(mag+1.2);
         if(boxFree(xx,e.y)){ e.x=xx; if(boxFree(e.x,ny)){ e.y=ny; } }
       }
     }
   }
-  if(dx||dy){
-    e.anim+=dt*(Math.abs(e.vx)+Math.abs(e.vy))/60;
-    if(Math.abs(e.vx)>Math.abs(e.vy)) e.face=e.vx>0?"R":"L";
-    else if(e.vy) e.face=e.vy>0?"D":"U";
-  }
+  // The walk cycle and facing follow where he actually went this step, not where the stick points: sliding along a
+  // shelf you face along it, and pushing into a wall you stand facing it instead of running on the spot. (The old
+  // cycle advanced by |vx|+|vy|, so diagonals ran the legs 41% fast and a blocked push walked in place.)
+  var mx=e.x-x0, my=e.y-y0, md=Math.sqrt(mx*mx+my*my);
+  e.moved=md;
+  if(md>0.02) e.anim+=md/60;
+  // facing: along the way he really went, unless that was only a creep along a wall he is pushing into, in which
+  // case he faces the push (so it doesn't swap every time the creep stops and starts)
+  // The way he went is averaged over ~0.1 s first: walking along a stepped wall goes right, down, right, down a few
+  // px at a time, and facing each step would flicker between two rows.
+  var want=Math.sqrt(dx*dx+dy*dy), fk=dt>0? 1-Math.exp(-dt/0.1) : 1;
+  if(dt>0){ e.fvx=(e.fvx||0)+(mx/dt-(e.fvx||0))*fk; e.fvy=(e.fvy||0)+(my/dt-(e.fvy||0))*fk; }
+  if(md>0.02 && md>0.35*want) faceToward(e,e.fvx,e.fvy);
+  else if(want) faceToward(e,e.vx,e.vy);
 }
-
+// Facing with a little hysteresis: switch between side-on and up/down only when the new axis is clearly the bigger
+// one, and flip left/right (or up/down) only on a real component that way. A diagonal used to swap the sprite
+// between two rows every frame (~10 swaps a second, measured).
+function faceToward(e,x,y,force){
+  var ax=Math.abs(x), ay=Math.abs(y);
+  if(ax<1e-6 && ay<1e-6) return;
+  var side = e.face==="L"||e.face==="R", nf=e.face;
+  if(side){ if(ay>ax*FACE_BIAS) nf=y>0?"D":"U"; else if(ax>0.3*ay) nf=x>0?"R":"L"; }
+  else { if(ax>ay*FACE_BIAS) nf=x>0?"R":"L"; else if(ay>0.3*ax) nf=y>0?"D":"U"; }
+  if(nf===e.face) return;
+  // a turn that just happened isn't undone straight away: creeping along a stepped wall or round a lip used to flip
+  // him between two rows several times a second (measured: up to 7 flips in 3 s on a wall push)
+  if(!force && e.faceHold>0) return;
+  e.face=nf; e.faceHold=FACE_HOLD;
+}
 /* ---------- bully AI ---------- */
+// Where to head next on his path (sets b.aimX/b.aimY; false once the path is used up). The path is a chain of 16 px
+// grid cells joined only up/down/left/right, so walking it cell by cell made every diagonal a staircase: up, right,
+// up, right, with his sprite flipping between facing up and facing right every 16 px. Now he looks ahead along the
+// path and heads straight for the farthest of the next few waypoints he can walk to in a line (string-pulling),
+// so he cuts across the floor on the same route.
+function pathAim(b){
+  var p=b.path, n=p.length;
+  if(b.pi>=n) return false;
+  var c=p[b.pi], cx=(c%GW)*GC+GC/2, cy=((c/GW)|0)*GC+GC/2;
+  if(Math.abs(cx-b.x)<12&&Math.abs(cy-b.y)<12){ b.pi++; if(b.pi>=n) return false; }
+  for(var j=Math.min(n-1,b.pi+6); j>b.pi; j--){
+    var cj=p[j], jx=(cj%GW)*GC+GC/2, jy=((cj/GW)|0)*GC+GC/2;
+    if(los(b.x,b.y,jx,jy)){ b.pi=j; break; }
+  }
+  c=p[b.pi]; b.aimX=(c%GW)*GC+GC/2; b.aimY=((c/GW)|0)*GC+GC/2;
+  return true;
+}
 function updateBully(dt){
   var b=bully;
   b.repath-=dt;
@@ -760,7 +839,7 @@ function updateBully(dt){
       S.aggroT-=dt;
     } else speed = huntSpeed;
   } else speed = B_IDLE;
-  var tx,ty, pd0=Math.hypot(player.x-b.x,player.y-b.y);
+  var tx,ty, pd0=Math.hypot(player.x-b.x,player.y-b.y), arrive=false, look=false;
   if(b.burst>0){ b.burst-=dt; speed*=B_BURST; }
   if(b.stagger>0){ b.stagger-=dt; speed*=0.5; }                 // catching his breath after a lunge
   if(b.lungeCD>0) b.lungeCD-=dt;
@@ -768,17 +847,22 @@ function updateBully(dt){
   if(b.lunge){
     var L=b.lunge; L.t-=dt;
     if(L.phase==="wind"){
-      b.vx=0; b.vy=0;
+      // he plants his feet (a quick stop, not a freeze-frame) and squares up to you
+      var wk=1-Math.exp(-dt/0.04); b.vx-=b.vx*wk; b.vy-=b.vy*wk; moveEntity(b,dt);
+      faceToward(b,player.x-b.x,player.y-b.y,true);
       if(L.t<=0){
         var lx=player.x+player.vx*0.12-b.x, ly=player.y+player.vy*0.12-b.y, lm=Math.hypot(lx,ly)||1;
         L.phase="dash"; L.t=LUNGE_T; L.dx=lx/lm; L.dy=ly/lm; L.closest=pd0;
         sfx.lunge(); shakeView(5);
       }
     } else {
-      b.vx=L.dx*LUNGE_V; b.vy=L.dy*LUNGE_V; moveEntity(b,dt);
+      // the dash: explosive, but it gets up to speed over a few hundredths of a second instead of in zero time
+      var dk=1-Math.exp(-dt/0.03); b.vx+=(L.dx*LUNGE_V-b.vx)*dk; b.vy+=(L.dy*LUNGE_V-b.vy)*dk; moveEntity(b,dt);
       L.closest=Math.min(L.closest, Math.hypot(player.x-b.x,player.y-b.y));
       if(L.t<=0){
-        b.lunge=null; b.lungeCD=LUNGE_CD; b.stagger=0.45;
+        // the dash ends where it ends: he pulls up (rather than coasting on at dash speed while his velocity eases
+        // down, which stretched the lunge ~25 px past its old reach)
+        b.lunge=null; b.lungeCD=LUNGE_CD; b.stagger=0.45; b.vx*=0.3; b.vy*=0.3;
         if(L.closest<70 && S.mode==="play"){ bubble(player.x,player.y-96,"CLOSE CALL!",1.1); haptic(HAP.near); shakeView(3); }
       }
     }
@@ -793,9 +877,8 @@ function updateBully(dt){
       for(var tries=0;tries<30&&!wp;tries++){ var wx=40+Math.random()*(IW-80), wy=120+Math.random()*1320; if(boxFree(wx,wy)&&Math.hypot(wx-b.x,wy-b.y)>280) wp={x:wx,y:wy}; }
       b.wander=wp||snapToField(b.x,b.y); b.path=findPath(b.x,b.y,b.wander.x,b.wander.y); b.pi=1;
     }
-    if(b.path&&b.pi<b.path.length){ var cw=b.path[b.pi]; tx=(cw%GW)*GC+GC/2; ty=((cw/GW)|0)*GC+GC/2; if(Math.abs(tx-b.x)<12&&Math.abs(ty-b.y)<12) b.pi++; }
-    else { b.vx=0; b.vy=0; return; }
-    speed=B_IDLE*1.15;
+    if(b.path&&pathAim(b)){ tx=b.aimX; ty=b.aimY; } else { tx=b.x; ty=b.y; }
+    speed=B_IDLE*1.15; arrive=true;
   } else {
     var see=!(b.noLos>0) && los(b.x,b.y,player.x,player.y);
     if(see){
@@ -807,9 +890,9 @@ function updateBully(dt){
       var ax=player.x+player.vx*B_PREDICT, ay=player.y+player.vy*B_PREDICT;
       if(pd0<110 || !boxFree(ax,ay) || !los(b.x,b.y,ax,ay)){ tx=player.x; ty=player.y; } else { tx=ax; ty=ay; }
       b.path=null;
-      // close and in the open: wind up a lunge
+      // close and in the open: wind up a lunge (he brakes into it: see the wind phase above)
       if(S.aggroT<=0 && !(b.lungeCD>0) && pd0<LUNGE_R && pd0>CATCH_R+8 && !(b.stagger>0)){
-        b.lunge={phase:"wind",t:LUNGE_WIND}; b.vx=0; b.vy=0; sfx.windup();
+        b.lunge={phase:"wind",t:LUNGE_WIND}; sfx.windup();
         return;
       }
     } else {
@@ -823,16 +906,22 @@ function updateBully(dt){
         b.repath=0.4; b.goal=hunch;
         b.path=findPath(b.x,b.y,gx2,gy2); b.pi=1;
       }
-      if(b.path&&b.pi<b.path.length){
-        var c=b.path[b.pi]; tx=(c%GW)*GC+GC/2; ty=((c/GW)|0)*GC+GC/2;
-        if(Math.abs(tx-b.x)<12&&Math.abs(ty-b.y)<12) b.pi++;
-      } else if(!hunch){ b.vx=0; b.vy=0; b.face=(Math.floor(S.t*2)%2)?"L":"R"; tx=b.x; ty=b.y; }   // at the spot: looking around
+      if(b.path&&pathAim(b)){ tx=b.aimX; ty=b.aimY; arrive=!hunch && b.pi>=b.path.length-1; }
+      else if(!hunch){ look=true; tx=b.x; ty=b.y; }   // at the spot: looking around
       else { tx=player.x; ty=player.y; }
     }
   }
-  var ddx=tx-b.x, ddy=ty-b.y, d=Math.sqrt(ddx*ddx+ddy*ddy)||1;
-  if(d<1){ b.vx=0; b.vy=0; } else { b.vx=ddx/d*speed; b.vy=ddy/d*speed; }
+  // Steering: he heads for (tx,ty) at `speed`, but his actual velocity eases toward that over B_TURN_T instead of
+  // snapping to it, so turns are arcs and speed changes (spotting you, the burst, catching his breath) ramp. Walking
+  // to a spot (a patrol point, where he last saw you) he slows into it rather than stopping dead.
+  var ddx=tx-b.x, ddy=ty-b.y, d=Math.sqrt(ddx*ddx+ddy*ddy), dvx=0, dvy=0;
+  if(d>=1){ var sp=arrive? Math.min(speed,d*5) : speed; dvx=ddx/d*sp; dvy=ddy/d*sp; }
+  var tk=1-Math.exp(-dt/B_TURN_T);
+  b.vx+=(dvx-b.vx)*tk; b.vy+=(dvy-b.vy)*tk;
+  if(!dvx && !dvy && b.vx*b.vx+b.vy*b.vy<4){ b.vx=0; b.vy=0; }
   moveEntity(b,dt);
+  b.wantMove = d>=1;
+  if(look) b.face=(Math.floor(S.t*2)%2)?"L":"R";
   // Stuck watchdog: wedged on a corner → skip waypoint + force repath.
   // This checks NET displacement over a rolling ~0.4s window, not the
   // per-frame delta the old version used — a per-frame check can be fooled
@@ -841,7 +930,9 @@ function updateBully(dt){
   // progress for many seconds straight, which is exactly the wedge this is
   // meant to catch. Escape probes now include diagonals since a purely
   // cardinal nudge can fail to find the one open corner of a tight pocket.
-  if(S.active){
+  // Only while he is trying to go somewhere: standing at the last-seen spot looking around used to count as "stuck",
+  // so every 0.4 s he was popped 10 px sideways and blinded for a second (a visible twitch, and he lost his search).
+  if(S.active && b.wantMove){
     if(b.stuckT===undefined || b.stuckT<=0){ b.stuckRefX=b.x; b.stuckRefY=b.y; b.stuckT=0.4; }
     else{
       b.stuckT-=dt;
@@ -1037,6 +1128,7 @@ var storeHidden=false;
 function storeView(on){
   storeHidden=!on; var v=on?"":"hidden";
   if(view) view.style.visibility=v;
+  if(actorCv) actorCv.style.visibility=v;   // the characters' layer sits beside the board canvas, so it hides with it
   var sb=document.querySelector(".sideBtns"); if(sb) sb.style.visibility=v;   // the store's pause / mute go with it
 }
 function startStoreRun(){
@@ -1100,6 +1192,8 @@ function startRun(){
 
 /* ---------- input ---------- */
 var keys={u:0,d:0,l:0,r:0}, drag=null;
+// thumb travel (px) -> share of full speed: 0 at STICK_DEAD, eased up to 1 at STICK_FULL
+function stickK(m){ var t=Math.max(0,Math.min(1,(m-STICK_DEAD)/(STICK_FULL-STICK_DEAD))); return t*(2-t); }
 function inputVec(){
   if(S.testVec) return S.testVec;
   var x=(keys.r?1:0)-(keys.l?1:0), y=(keys.d?1:0)-(keys.u?1:0);
@@ -1156,10 +1250,12 @@ function bindTouch(){
     drag.cx=t.clientX; drag.cy=t.clientY;
     var dx=drag.cx-drag.ax, dy=drag.cy-drag.ay, m=Math.hypot(dx,dy);
     if(m>44){ drag.ax=drag.cx-dx/m*44; drag.ay=drag.cy-dy/m*44; dx=drag.cx-drag.ax; dy=drag.cy-drag.ay; m=44; }
-    if(m>10){
+    // speed follows how far the thumb is from where it went down: nothing under STICK_DEAD px, full from STICK_FULL px
+    // (it used to be full speed the moment you passed 10 px, which made small corrections lurch)
+    if(m>STICK_DEAD){
       var q=(Math.abs(dx)>Math.abs(dy)) ? (dx>0?"R":"L") : (dy>0?"D":"U");
-      if(!drag.on || drag.q!==q){ drag.q=q; haptic(HAP.turn,60); }
-      drag.on=true; drag.x=dx/m; drag.y=dy/m;
+      if(m>10 && (!drag.on || drag.q!==q)){ drag.q=q; haptic(HAP.turn,60); }
+      var sk=stickK(m); drag.on=true; drag.x=dx/m*sk; drag.y=dy/m*sk;
     }
     else drag.on=false;
     showStick();
@@ -1180,7 +1276,7 @@ function bindTouch(){
     drag.cx=ev.clientX; drag.cy=ev.clientY;
     var dx=drag.cx-drag.ax, dy=drag.cy-drag.ay, m=Math.hypot(dx,dy);
     if(m>44){ drag.ax=drag.cx-dx/m*44; drag.ay=drag.cy-dy/m*44; dx=drag.cx-drag.ax; dy=drag.cy-drag.ay; m=44; }
-    if(m>10){ drag.on=true; drag.x=dx/m; drag.y=dy/m; } else drag.on=false;
+    if(m>STICK_DEAD){ var sk=stickK(m); drag.on=true; drag.x=dx/m*sk; drag.y=dy/m*sk; } else drag.on=false;
     showStick();
   });
   window.addEventListener("mouseup",function(){ if(drag&&drag.id==="mouse"){ drag=null; hideStick(); } });
@@ -1256,7 +1352,6 @@ var SP={
       "..s.rrrrrrrr.....","....rrrrrrrr.....","....pppppppp.....","....pppppppp.....",
       "....ppp..ppp.....","....ppp..ppp.....","....hhh..hhh....."]
 };
-function drawActor(g,e,isBully){ drawSheet(g,e,isBully); }
 // Both characters are the same rigged model walking its real walk cycle (standalone/tools/bake_characters.py):
 // 8 frames per direction, paced by distance walked so the feet don't skate (one full stride cycle every
 // STRIDE px). The bully is that model recoloured (red hoodie, black pants and kicks) and drawn bigger.
@@ -1265,19 +1360,24 @@ function drawSheet(g,e,isBully){
   var img=isBully?bullyImg:playerImg, ready=isBully?bullyReady:playerReady;
   var w=isBully?BULLY_DISPLAY:PLAYER_DISPLAY, h=w, CELL=isBully?BULLY_CELL:PLAYER_CELL;
   var ROWS=isBully?BULLY_ROWS:PLAYER_ROWS, COLS=isBully?BULLY_COLS:PLAYER_COLS;
-  var oy=Math.round(e.y-h+4);
-  g.fillStyle="rgba(20,16,20,0.25)";                       // shadow
-  g.fillRect(Math.round(e.x-w/2+6), Math.round(e.y-2), w-12, 6);
+  // drawn on the actor layer in its device pixels (see drawActors): same box as on the board, w x h board px with the
+  // feet 4 px above the bottom, placed between his last two steps (rpos) and snapped to whole device pixels
+  var r=rpos(e), k=DPR*scale, fx=toDevX(r.x), fy=toDevY(r.y);
+  g.fillStyle="rgba(20,16,20,0.25)";                       // shadow: (x - w/2 + 6, y - 2), w - 12 by 6 board px
+  var shx=Math.round(fx+(6-w/2)*k), shy=Math.round(fy-2*k), shw=Math.round((w-12)*k), shh=Math.round(6*k);
+  g.fillRect(shx,shy,shw,shh); markDirty(shx,shy,shw,shh);
   if(!ready) return;
   var row = e.face==="U" ? ROWS.U : (e.face==="D" ? ROWS.D : ROWS.R);
-  var moving=(e.vx||e.vy);
+  var moving=(e.moved||0)>0.05;                            // walking only while he actually covers ground
   var frame = moving ? Math.floor(e.anim*60/STRIDE*COLS)%COLS : 0;
   var sx=frame*CELL, sy=row*CELL;
+  var dw=Math.round(w*k), dh=Math.round(h*k), dx=Math.round(fx-dw/2), dy=Math.round(fy+(4-h)*k);
   if(e.face==="L"){
-    g.save(); g.translate(e.x,0); g.scale(-1,1);
-    g.drawImage(img, sx, sy, CELL, CELL, Math.round(-w/2), oy, w, h);
+    g.save(); g.translate(dx+dw,dy); g.scale(-1,1);
+    g.drawImage(img, sx, sy, CELL, CELL, 0, 0, dw, dh);
     g.restore();
-  } else g.drawImage(img, sx, sy, CELL, CELL, Math.round(e.x-w/2), oy, w, h);
+  } else g.drawImage(img, sx, sy, CELL, CELL, dx, dy, dw, dh);
+  markDirty(dx,dy,dw,dh);
 }
 var ICONS={
  APPLE:[".rrr.","rrrrr","rrrrr",".rrr.","..g.."],
@@ -1431,27 +1531,76 @@ function draw(){
     // actors: draw upper first for overlap.
     // the lunge's wind-up: a red ring flares and tightens under him, your cue to sidestep
     if(bully && bully.lunge && bully.lunge.phase==="wind" && !S.bullyOutside){
-      var wk=1-Math.max(0,bully.lunge.t)/LUNGE_WIND;
+      var wk=1-Math.max(0,bully.lunge.t)/LUNGE_WIND, rb=rpos(bully);
       g.save(); g.strokeStyle="rgba(230,30,40,"+(0.5+0.5*wk).toFixed(2)+")"; g.lineWidth=4+4*wk;
-      g.beginPath(); g.ellipse(bully.x,bully.y,46-18*wk,17-6*wk,0,0,6.2832); g.stroke(); g.restore();
+      g.beginPath(); g.ellipse(rb.x,rb.y,46-18*wk,17-6*wk,0,0,6.2832); g.stroke(); g.restore();
     }
-    var actors=(S.bullyOutside? [player] : [player,bully]).sort(function(a,b){return a.y-b.y;});
-    for(var a2=0;a2<actors.length;a2++) drawActor(g,actors[a2],actors[a2]===bully);
+    // the characters and the speech bubbles are drawn on the actor layer, over this board: see drawActors()
     // (the joystick is the #stick overlay, drawn by the page: see bindTouch)
-    // bubbles
-    for(var b2=0;b2<bubbles.length;b2++){
-      var bb=bubbles[b2], al=Math.min(1,bb.ttl/0.25);
-      g.globalAlpha=al;
-      g.font="bold 22px ui-monospace,monospace";
-      var w2=g.measureText(bb.text).width+16;
-      var bx=bb.x-w2/2, by=bb.y-((bb.rise>=0? bb.rise : 1-bb.ttl/bb.max)*14);
-      var bsc=bb.sc; if(bsc!==1){ g.save(); g.translate(bb.x,by-8); g.scale(bsc,bsc); g.translate(-bb.x,-(by-8)); }
-      g.fillStyle="#FFFFFF"; g.fillRect(bx,by-24,w2,32);
-      g.fillStyle=PAL.navy; g.fillText(bb.text,bx+8,by);
-      if(bsc!==1) g.restore();
-      g.globalAlpha=1;
-    }
   }
+}
+/* ---------- actor layer ----------
+   The board canvas is the store at its own 853 x 1844 pixels, scaled up by the page (about 2.4 phone pixels per
+   board pixel) and moved by the camera. Characters drawn on it could only stand on whole board pixels, so they
+   moved in 2-3 phone-pixel jumps that never lined up with the camera's. They are drawn here instead: a screen-sized
+   canvas at the phone's own resolution laid over the board, with the same camera, so they move one phone pixel at
+   a time. The sprites, shadows and bubbles are the same art at the same size and place as before: sprites are
+   sampled straight from the sheets (no smoothing, as before), and each bubble is drawn at board resolution once and
+   scaled up, so it keeps the same blocky look. */
+var actorCv=null, actx=null, DPR=1, VX=0, VY=0, actorDirty=[];
+function makeActorLayer(){
+  actorCv=document.createElement("canvas"); actorCv.id="actors"; actorCv.setAttribute("aria-hidden","true");
+  actorCv.style.cssText="position:fixed;left:0;top:0;z-index:1;pointer-events:none";
+  view.parentNode.insertBefore(actorCv, view.nextSibling);
+  if(storeHidden) actorCv.style.visibility="hidden";
+  actx=actorCv.getContext("2d");
+}
+function sizeActorLayer(){
+  if(!actorCv) return;
+  var vw=window.innerWidth||390, vh=window.innerHeight||780;
+  DPR=Math.min(3, window.devicePixelRatio||1);
+  actorCv.width=Math.round(vw*DPR); actorCv.height=Math.round(vh*DPR);
+  actorCv.style.width=vw+"px"; actorCv.style.height=vh+"px";
+  actorDirty.length=0;
+}
+function drawActors(){
+  if(!actx) return;
+  var g=actx;
+  // wipe only what was drawn last frame (cheaper than clearing the whole phone-resolution layer)
+  g.setTransform(1,0,0,1,0,0);
+  for(var i=0;i<actorDirty.length;i++){ var r=actorDirty[i]; g.clearRect(r[0]-2,r[1]-2,r[2]+4,r[3]+4); }
+  actorDirty.length=0;
+  if(!(S.mode==="play"||S.mode==="end") || !player) return;
+  g.imageSmoothingEnabled=false;
+  var two=!S.bullyOutside && bully, pFirst=!two || rpos(player).y<=rpos(bully).y;   // the one higher up the screen first
+  if(pFirst){ drawSheet(g,player,false); if(two) drawSheet(g,bully,true); }
+  else { drawSheet(g,bully,true); drawSheet(g,player,false); }
+  for(var b2=0;b2<bubbles.length;b2++) drawBubble(g,bubbles[b2]);
+}
+// board px -> this layer's device px
+function toDevX(x){ return DPR*(VX+x*scale); }
+function toDevY(y){ return DPR*(VY+y*scale); }
+function markDirty(x,y,w,h){ actorDirty.push([Math.floor(x),Math.floor(y),Math.ceil(w)+1,Math.ceil(h)+1]); }
+var bubbleCv=null;
+function drawBubble(g,bb){
+  var al=Math.min(1,bb.ttl/0.25);
+  if(!bb.img){
+    // rendered once at board resolution exactly as it used to be drawn on the board, then scaled up like the board is
+    if(!bubbleCv) bubbleCv=document.createElement("canvas").getContext("2d");
+    bubbleCv.font="bold 22px ui-monospace,monospace";
+    var tw=Math.ceil(bubbleCv.measureText(bb.text).width+16);
+    var c=document.createElement("canvas"); c.width=tw; c.height=32;
+    var cg=c.getContext("2d"); cg.font="bold 22px ui-monospace,monospace";
+    cg.fillStyle="#FFFFFF"; cg.fillRect(0,0,tw,32); cg.fillStyle=PAL.navy; cg.fillText(bb.text,8,24);
+    bb.img=c; bb.w=tw;
+  }
+  var by=bb.y-((bb.rise>=0? bb.rise : 1-bb.ttl/bb.max)*14), sc=bb.sc;
+  // same box as before: (bb.x - w/2, by - 24) to w x 32, scaled by sc about (bb.x, by - 8)
+  var x0=bb.x+(-bb.w/2)*sc, y0=(by-8)+(-16)*sc, k=DPR*scale;
+  var dx=Math.round(toDevX(x0)), dy=Math.round(toDevY(y0)), dw=Math.round(bb.w*sc*k), dh=Math.round(32*sc*k);
+  if(dw<1||dh<1) return;
+  g.globalAlpha=al; g.drawImage(bb.img,0,0,bb.w,32,dx,dy,dw,dh); g.globalAlpha=1;
+  markDirty(dx,dy,dw,dh);
 }
 
 /* ---------- audio ---------- */
@@ -1571,6 +1720,7 @@ function fit(){
   var vw=window.innerWidth||390, vh=window.innerHeight||780;
   fitScale=Math.min(vw/IW, vh/IH);
   zoomScale=Math.max(fitScale, Math.min(0.8, vw/480));
+  sizeActorLayer();
   cam.init=false; placeView(0);
 }
 function placeView(dt){
@@ -1584,20 +1734,32 @@ function placeView(dt){
   scale=fitScale+(zoomScale-fitScale)*z;
   if(Math.abs(scale-sizedAt)>1e-4){ sizedAt=scale; view.style.width=(IW*scale)+"px"; view.style.height=(IH*scale)+"px"; }
   var vw=window.innerWidth||390, vh=window.innerHeight||780, W=IW*scale, H=IH*scale;
-  var fx=player?player.x:IW/2, fy=player?player.y:IH/2;
+  // follows where the player is DRAWN this frame (between steps), so he sits still on screen while the store scrolls
+  var rp=player?rpos(player):null, fx=rp?rp.x:IW/2, fy=rp?rp.y:IH/2;
   // target: player centred (a touch below centre, so you see more of what's ahead), clamped to the board
   var tx=W<=vw ? (vw-W)/2 : Math.min(0, Math.max(vw-W, vw/2-fx*scale));
   var ty=H<=vh ? (vh-H)/2 : Math.min(0, Math.max(vh-H, vh*0.52-fy*scale));
   if(!cam.init||!dt||(S.intro||0)>0){ cam.x=tx; cam.y=ty; cam.init=true; }   // (the intro zoom is exact, no lag)
-  else { var k=Math.min(1,dt*8); cam.x+=(tx-cam.x)*k; cam.y+=(ty-cam.y)*k; }
+  else { var k=1-Math.exp(-8*dt); cam.x+=(tx-cam.x)*k; cam.y+=(ty-cam.y)*k; }   // same follow as before, any frame rate
+  // Shake: it used to jump to a new random offset every frame (a buzz, harsher the higher the frame rate). Now it
+  // sways on two quick mixed sine waves at the same size and the same fast fade.
   var sx=0, sy=0;
-  if(SHAKE.a>0.2 && S.mode==="play"){ sx=(Math.random()-0.5)*2*SHAKE.a; sy=(Math.random()-0.5)*2*SHAKE.a; }
+  SHAKE.t+=dt||0;
+  if(SHAKE.a>0.2 && S.mode==="play"){
+    var st=SHAKE.t;
+    sx=SHAKE.a*(0.6*Math.sin(st*57)+0.4*Math.sin(st*89+2.1)); sy=SHAKE.a*(0.6*Math.sin(st*63+1.2)+0.4*Math.sin(st*81+4.0));
+  }
   SHAKE.a=Math.max(0,SHAKE.a-(dt||0)*22);
-  view.style.transform="translate("+Math.round(cam.x+sx)+"px,"+Math.round(cam.y+sy)+"px)";
+  // moved in whole PHONE pixels (it was whole CSS pixels: 3 phone pixels a step on most phones), which keeps the
+  // board's pixels crisp and the scroll fine-grained; the actor layer uses the same numbers (VX/VY)
+  var dpr=DPR||1;
+  VX=Math.round((cam.x+sx)*dpr)/dpr; VY=Math.round((cam.y+sy)*dpr)/dpr;
+  var tr="translate("+VX+"px,"+VY+"px)";
+  if(tr!==view._tr){ view._tr=tr; view.style.transform=tr; }
   drawListHud(); drawThreat(dt||0);
 }
 // the screen kicks when he lunges or nearly gets you (px of shake, decays fast)
-var SHAKE={a:0};
+var SHAKE={a:0,t:0};
 function shakeView(px){ if(MOTION) SHAKE.a=Math.max(SHAKE.a,px); }
 /* Threat on screen: the edges glow red as he closes in on you (only while he's hunting and you're in his sight or
    within 200 px), and while he's still outside after the race, a pill at the top counts down to when he walks in. */
@@ -1634,12 +1796,13 @@ function drawThreat(dt){
     k=Math.max(0,Math.min(1,(230-d)/170));
     if(bully.lunge) k=1;
   }
-  threatK+=(k-threatK)*Math.min(1,dt*6);
-  threatEl.style.opacity=(threatK*(0.75+0.25*Math.sin(S.t*9))).toFixed(3);
+  threatK+=(k-threatK)*(1-Math.exp(-6*dt));
+  var top=threatK<0.002? "0" : (threatK*(0.75+0.25*Math.sin(S.t*9))).toFixed(3);
+  if(top!==threatEl._op){ threatEl._op=top; threatEl.style.opacity=top; }   // (no style write while it stays clear)
   // off screen while he's hunting you: a red arrow with his head on the edge of the screen, pointing at him
   var arrowOn=false;
   if(S.mode==="play" && bully && S.active && !S.bullyOutside && view){
-    var vw=window.innerWidth||390, vh=window.innerHeight||780, bx=cam.x+bully.x*scale, by=cam.y+(bully.y-48)*scale, m=34;
+    var rb=rpos(bully), vw=window.innerWidth||390, vh=window.innerHeight||780, bx=VX+rb.x*scale, by=VY+(rb.y-48)*scale, m=34;
     if(bx<-10||bx>vw+10||by<-10||by>vh+10){
       var cx=vw/2, cy=vh/2, dx=bx-cx, dy=by-cy, kx=dx? (vw/2-m)/Math.abs(dx) : 1e9, ky=dy? (vh/2-m-40)/Math.abs(dy) : 1e9, kk=Math.min(kx,ky);
       var ax=cx+dx*kk, ay=cy+dy*kk, ang=Math.atan2(dy,dx);
@@ -1649,9 +1812,9 @@ function drawThreat(dt){
       arrowOn=true;
     }
   }
-  arrowEl.style.display=arrowOn?"block":"none";
+  var ad=arrowOn?"block":"none"; if(arrowEl.style.display!==ad) arrowEl.style.display=ad;
   var out=S.mode==="play" && S.bullyOutside;
-  outsideEl.style.display=out?"flex":"none";
+  var od=out?"flex":"none"; if(outsideEl.style.display!==od) outsideEl.style.display=od;
   if(out){
     var left=Math.max(0,S.bullyIn-S.runT), txt=left>0? "HE’S COMING  "+Math.ceil(left)+"s" : "HE’S HERE!";
     var sp=outsideEl.lastElementChild; if(sp.textContent!==txt) sp.textContent=txt;
@@ -1666,8 +1829,12 @@ function drawListHud(){
   }
   var zoomed=scale>fitScale*1.05 && S.mode!=="boot";
   if(zoomed && listHud.style.display!=="block" && MOTION) GS.fromTo(listHud,{opacity:0,x:-14},{opacity:1,x:0,duration:0.35,ease:"power2.out"});   // slides in as the camera zooms in
-  listHud.style.display=zoomed?"block":"none";
-  if(!zoomed) return;
+  var disp=zoomed?"block":"none"; if(listHud.style.display!==disp) listHud.style.display=disp;
+  if(!zoomed){ listHud._key=""; return; }
+  // only repainted when what it shows changes (it was copied off the board every frame)
+  var key=shownScore()+"|"+S.activeIdx+"|"+S.nGot+"|"+(S.order?S.order.join(","):"");
+  if(key===listHud._key) return;
+  listHud._key=key;
   var g=listHud.getContext("2d"); g.imageSmoothingEnabled=false;
   g.fillStyle="#020204"; g.fillRect(0,0,104,280);
   g.font="bold 24px ui-monospace,Menlo,monospace"; g.fillStyle=PAL.gold; g.textAlign="center";
@@ -1675,12 +1842,25 @@ function drawListHud(){
   g.drawImage(view, 0,132,104,246, 0,34,104,246);   // the list panel, straight off the rendered board
 }
 var last=0;
+// One fixed simulation step (STEP s; the test hook may pass other sizes). Each actor's position before the step is
+// kept (ox/oy) so draw() can place him between the last two steps (see loop()).
 function update(dt){
+  if(player){ player.ox=player.x; player.oy=player.y; }
+  if(bully){ bully.ox=bully.x; bully.oy=bully.y; }
   if(S.mode==="play"&&S.intro>0){ S.intro=Math.max(0,S.intro-dt); S.t+=dt; return; }   // the store reveal: nobody moves yet
   if(S.mode==="play"){
     S.t+=dt; S.runT+=dt;
     var v=inputVec();
-    player.vx=v.x*PSPEED; player.vy=v.y*PSPEED;
+    // the stick sets the speed you're heading for; your actual speed eases to it (quicker to stop than to start)
+    // (a sharp change of direction, like a sidestep or a turn-back, takes half the time: dodging stays snappy)
+    var tvx=v.x*PSPEED, tvy=v.y*PSPEED, tau=(tvx||tvy)?P_ACCEL_T:P_STOP_T;
+    if((tvx||tvy) && (player.vx||player.vy)){
+      var cs=(tvx*player.vx+tvy*player.vy)/(Math.hypot(tvx,tvy)*Math.hypot(player.vx,player.vy));
+      if(cs<0.5) tau*=0.5;
+    }
+    var pk=1-Math.exp(-dt/tau);
+    player.vx+=(tvx-player.vx)*pk; player.vy+=(tvy-player.vy)*pk;
+    if(!tvx && !tvy && player.vx*player.vx+player.vy*player.vy<9){ player.vx=0; player.vy=0; }
     moveEntity(player,dt);
     var curIt=currentItem();
     if(curIt && S.curPos && Math.hypot(player.x-S.curPos.x,player.y-S.curPos.y)<PICK_R) collect(curIt);
@@ -1693,19 +1873,39 @@ function update(dt){
     for(var b4=bubbles.length-1;b4>=0;b4--){ bubbles[b4].ttl-=dt; if(bubbles[b4].ttl<=0) bubbles.splice(b4,1); }
   }
 }
+/* The game used to move everyone by however long the last frame took (capped at 0.05 s) and draw them rounded to
+   whole board pixels. On a phone, frame times wander (8, 16, 33 ms, the odd 50+), so each frame's step was a
+   different size, and rounding made a steady walk alternate 4 and 5 px moves: the judder. Now: fixed STEP updates
+   (catching up after a slow frame, up to MAX_FRAME), and the drawing places each actor ALPHA of the way between his
+   last two steps, at whole device pixels on the actor layer (drawActors), so motion is even at any frame rate. */
+var acc=0, ALPHA=1;
 function loop(ts){
   requestAnimationFrame(loop);
-  if(!last) last=ts;
-  var dt=Math.min(0.05,(ts-last)/1000); last=ts;
-  update(dt);
-  if(S.mode!=="boot" && !storeHidden) draw();
-  placeView(dt);
+  if(!last){ last=ts; acc=0; }
+  var fdt=Math.min(MAX_FRAME,(ts-last)/1000); last=ts;
+  acc+=fdt;
+  var n=0;
+  while(acc>=STEP && n<24){ update(STEP); acc-=STEP; n++; }
+  if(n>=24) acc=0;
+  ALPHA=Math.min(1,acc/STEP);
+  if(S.mode!=="boot" && !storeHidden) draw();   // hidden under the drive and its how-to-play: nothing to draw
+  placeView(fdt);
+  if(!storeHidden) drawActors();
 }
+// where an actor is drawn this frame: between his last two steps. (A big jump, like a continue putting you back at
+// the door, is drawn at once rather than slid across the store.)
+function rpos(e){
+  var x=e.x, y=e.y;
+  if(e.ox!==undefined && Math.abs(e.x-e.ox)<40 && Math.abs(e.y-e.oy)<40){ x=e.ox+(e.x-e.ox)*ALPHA; y=e.oy+(e.y-e.oy)*ALPHA; }
+  RP.x=x; RP.y=y; return RP;
+}
+var RP={x:0,y:0};
 function init(){
   // a held finger is gameplay: no long-press menu or text selection anywhere in the game (except text fields)
   ["contextmenu","selectstart"].forEach(function(ev){ document.addEventListener(ev,function(e){ if(!/^(INPUT|TEXTAREA)$/.test(e.target&&e.target.tagName)) e.preventDefault(); }); });
   view=el("view"); vctx=view.getContext("2d");
   view.width=IW; view.height=IH;
+  makeActorLayer();
   var img=new Image();
   var boardReady=false;
   function tryStart(){
@@ -1783,7 +1983,7 @@ function init(){
 window.__csd={ get S(){return S;}, get player(){return player;}, get bully(){return bully;}, get items(){return ITEMS;},
   fieldAt:function(x,y){return fieldAt(x,y);}, boxFree:function(x,y){return boxFree(x,y);},
   path:function(){ var p=findPath(bully.x,bully.y,player.x,player.y); return p?p.length:-1; },
-  step:function(dt,n){ n=n||1; for(var i=0;i<n;i++) update(dt); draw(); },
+  step:function(dt,n){ n=n||1; for(var i=0;i<n;i++) update(dt); ALPHA=1; draw(); placeView(0); drawActors(); },
   tp:function(x,y){ var s=snapToField(x,y); player.x=s.x; player.y=s.y; return [s.x,s.y]; },
   freeze:function(v){ S.freezeBully=!!v; },
   setInput:function(x,y){ S.testVec=(x===null)?null:{x:x,y:y}; },
