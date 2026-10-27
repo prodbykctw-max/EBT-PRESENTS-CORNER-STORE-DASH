@@ -123,8 +123,8 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
 - **On foot.** You start on the right sidewalk of Luckie St (s = 14 m) with the bully 8 m behind you. Your car is parked
   at the right curb up the block with its **hazards flashing** and a yellow ▼ over it, in the first stretch of parking
   lane where it sits level (Luckie St is steep: on its cross-slope a car rolls ~10°, so the spot is picked by measuring
-  the car's roll and pitch with `standOn`). Hold GAS to run (5.6 m/s), BRAKE to back up, ◀ ▶ to switch between the curb
-  side and the building side of the sidewalk. Run into someone from the crowd and you stumble ("WATCH IT!"); the bully
+  the car's roll and pitch with `standOn`). Hold GAS to run (5.6 m/s), BRAKE to back up, ◀ ▶ to step left or right
+  anywhere across the sidewalk (see "Where you run" below). Run into someone from the crowd and you stumble ("WATCH IT!"); the bully
   shoves through people. He runs 5.3 m/s, so a clean run gets away and a sloppy one gets caught: a catch is a **shove**
   ("SHOVED!", 0.9 s down), never the end. Near the car you cut over to the driver's door yourself and jump in: "GO! GO!
   GO!", no 3-2-1, and the car swings straight into the travel lane. The drive's clock only runs once you're driving.
@@ -135,7 +135,15 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   the way in 0.35 s, at most 5 m/s sideways); you turn a little toward where you're going and lean into it, so it reads
   as a cut, not a slide. The camera follows on a critically damped spring (no overshoot, the same at any frame rate)
   and follows a sidestep more gently than you make it.
-  - **Your two lines on the sidewalk** are built once from the street: the curb side of the sidewalk, the building
+  - **Where you run** is your choice: ◀ ▶ step you left or right (a tap is a 0.9 m step; holding keeps you moving
+    at 2.6 m/s after 0.2 s) anywhere from just inside the curb (`PATH.left`: where the street's road surface ends,
+    plus 0.57 m for your body) to 0.72 m off the buildings (`PATH.outer`), and you stay where you let go. Street
+    furniture is solid: you slip round a trunk or pole on the side you're already on (`avoidProps`). Before
+    (Oct 27 2026) there were only the two fixed lines below, both at least 1.35 m in from the curb, and you started on
+    the left one, so ◀ did nothing and you couldn't get out to the left round people; on the narrow stretch at
+    s 44-56 the two lines were 4 cm apart, right by the wall. The lines below are now only the bully's and the
+    autopilot's.
+  - **The two lines on the sidewalk** are built once from the street: the curb side of the sidewalk, the building
     line from the real building footprints (every 0.5 m along, 5 cm across), and the street furniture at body height
     (tree trunks 0.24 m, poles ~0.2 m, benches, bins, hydrants). Your body (with the bully's arms swinging: 0.42 m each
     side) keeps 0.3 m off the walls, the line never bends more than 0.35 m across per metre along, it moves in before a
