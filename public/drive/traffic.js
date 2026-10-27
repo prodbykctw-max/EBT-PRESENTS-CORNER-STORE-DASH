@@ -141,7 +141,7 @@ export class Traffic {
     const i0 = this.lowerBound(dir > 0 ? S - 4 : S - look - 15), i1 = this.lowerBound(dir > 0 ? S + look + 15 : S + 4);
     for (let i = i0; i < Math.min(i1 + 1, ob.length); i++) {
       const o = ob[i]; if (o.o === e || o.o === ignore) continue;
-      if (e.ghostUntil > this.clock && (o.o === e.ghostOf || (e.ghostAll && o.veh && !o.player))) continue;     // a standoff with this one car that was given up on (see standoff); while the two are still inside each other (see untangle) it goes through whatever else is in the way too, until it is out
+      if (e.ghostUntil > this.clock && o.o === e.ghostOf) continue;     // the one car it is allowed through (a standoff given up on out of sight, or a car it is already inside: see untangle). Never anything else
       const ds = dir * (o.s - S); if (ds <= 0.2) continue;
       let gap = ds - (o.L + e.L) / 2; if (gap > look) continue;
       const vlu = dir * o.vs, tau = clamp(Math.max(gap, 0) / Math.max(1, sp - vlu), 0.3, o.ped ? 2.6 : 1.8);
@@ -455,17 +455,25 @@ export class Traffic {
   }
   /** Two cars with their boxes inside each other (a pass that was cut off, a pull-out beside a parked car, a ghost that ran out or was
    *  cancelled with a third car in the way) must not stay that way, in sight or out of it. Not at once (a touch is fine): after 0.4 s the one
-   *  that cannot be seen is removed; if both can be seen, e goes on through the other, and through anything else in its way (`ghostAll`), until
-   *  they are clear of each other, and the ghosting is not cancelled by either coming into view while they still overlap. */
+   *  that cannot be seen is removed. If both can be seen, only ONE of the two moves, and only through that one car (never through a queue):
+   *  going the same way, the one behind backs off out of it when it has room (otherwise it simply waits: the one in front sees nothing of it
+   *  and pulls away as soon as it can); head on, or against a parked car, the one that is moving carries on through that car alone. */
   untangle(e, dt) {
     const o = this.overlapping(e);
-    if (!o) { e.ovT = 0; e.ghostAll = false; return; }
+    if (!o) { e.ovT = 0; return; }
     e.ovT = (e.ovT || 0) + dt;
     if (e.ovT < 0.4) return;
     const car = this.car, other = o.o, seen = (x) => this.onScreen(x) || (x.s > car.s - 12 && x.s < car.s + 40);
     if (!seen(e)) { e.alive = false; this.stats.despawned++; return; }
-    if (other.drv && !other.hold && !seen(other)) { other.alive = false; this.stats.despawned++; return; }
-    e.ghostOf = other; e.ghostUntil = this.clock + 1.2; e.ghostAll = true; e.stopT = 0; this.stats.ghosted++;
+    if (other.drv && !other.hold && !other.backup && !seen(other)) { other.alive = false; this.stats.despawned++; return; }
+    if (other.drv && other.dir === e.dir) {
+      // same way: the front one is left alone (it is not "ahead" of itself); the rear one backs out of it if it can
+      if (e.dir * (e.s - other.s) > 0) return;
+      if (!(e.revT > 0) && this.roomBehind(e)) { e.revT = 1.5; this.stats.reversed++; }
+      return;
+    }
+    // head on, or into a parked car / the streetcar: e goes through that one car only, and only while they overlap
+    e.ghostOf = other; e.ghostUntil = this.clock + 1.2; e.stopT = 0; this.stats.ghosted++;
   }
   /** is there room behind q (the way its tail points) to back a few metres? (only in a travel lane: the parking lane ends, and the car's line would jump) */
   roomBehind(q) { if ((q.ref !== 'l0' && q.ref !== 'l1') || q.prof) return false; const tg = this.refD(q.ref, q.s) + q.pers; const rb = this.ahead(q, -q.dir, 0, 3, Math.min(q.d, tg), Math.max(q.d, tg), 12); return !rb || rb.gap > 6; }

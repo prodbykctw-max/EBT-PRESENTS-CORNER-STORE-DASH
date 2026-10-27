@@ -817,7 +817,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       if (axis === 's') { if ((to < m.s && m.v > 0) || (to > m.s && m.v < 0)) { m.v = 0; m.stopped = true; } m.s = to; }
       else {
         if ((to < m.d && m.dv > 0) || (to > m.d && m.dv < 0)) m.dv = 0;
-        if (h.mv && m === me && Math.abs(to - m.d) > 0.12) runnerShove(h.ent);   // (a car at speed took him: knocked aside, checked, staggers)
+        if (h.mv && m === me && Math.abs(to - m.d) > 0.12) runnerShove({ d: (h.dLo + h.dHi) / 2, W: h.dHi - h.dLo - 2 * BODY });   // (the box's own centre and width: a cross-street car has no d of its own)   // (a car at speed took him: knocked aside, checked, staggers)
         m.d = to;
       }
     }
