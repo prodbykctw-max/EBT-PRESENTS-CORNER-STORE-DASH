@@ -712,7 +712,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       else me['hold' + k] = 0;
     }
     if (footSide !== null) { const [lo, hi] = sideRange(me.s); footSide = THREE.MathUtils.clamp(footSide, lo, hi); }
-    const myLine = (s) => { const L = meLine(s); return me.nudge ? Math.min(Math.max(L + me.nudge, Math.min(L, PATH.outer(s))), Math.max(L, PATH.left(s))) : L; };
+    // (the recoil is checked against the street furniture again: on its own it pushed you back across a trunk you were
+    // already going round, which is how you ran through the tree at s 46 after bumping someone at s 42)
+    const myLine = (s) => { const L = meLine(s); return me.nudge ? avoidProps(s, Math.min(Math.max(L + me.nudge, Math.min(L, PATH.outer(s))), Math.max(L, PATH.left(s))), me.d) : L; };
     steerTo(me, myLine(me.s), (myLine(me.s + 0.2) - myLine(me.s - 0.2)) / 0.4 * me.v, dt);
     // run into someone and you stumble (the bully just shoves through them); they get knocked aside, so you don't
     // run on through their body
