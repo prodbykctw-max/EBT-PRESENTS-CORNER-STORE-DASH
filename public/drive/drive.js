@@ -485,7 +485,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     blob.rotation.order = 'YXZ'; blob.renderOrder = 1; blob.scale.set(h * 0.42, h * 0.55, 1); scene.add(blob);
     const run = gait(clips.run, h), walk = gait(clips.walk, h), stand = gait(clips.stand, h);
     return { o, blob, mixer, act, run: act.run, plantRun: run.plant, plantWalk: walk.plant, sink: stand.low - run.low,
-      s: 0, d: 0, v: 0, dv: 0, acc: 0, z: 0, stun: 0, pause: 0, phase: 0, yaw: null, lean: 0, roll: 0, hit: null, ps: 0, pd: 0 };
+      s: 0, d: 0, v: 0, dv: 0, acc: 0, nudge: 0, z: 0, stun: 0, pause: 0, phase: 0, yaw: null, lean: 0, roll: 0, hit: null, ps: 0, pd: 0 };
   }
   const me = makePerson(false), him = makePerson(true);
 
@@ -608,7 +608,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     me.s += me.v * dt;
     // ◀ ▶ pick your line on the sidewalk (◀ the curb side, ▶ the building side) to get round people; near the car you
     // cut over to its door
-    steerTo(me, meLine(me.s), (meLine(me.s + 0.2) - meLine(me.s - 0.2)) / 0.4 * me.v, dt);
+    // (me.nudge: the recoil from a bump below, a sideways give away from whoever you hit that eases out over ~1 s, kept
+    // inside the sidewalk's edges)
+    me.nudge *= Math.exp(-dt * 1.6);
+    const myLine = (s) => { const L = meLine(s); return me.nudge ? Math.min(Math.max(L + me.nudge, Math.min(L, PATH.outer(s))), Math.max(L, PATH.inner(s))) : L; };
+    steerTo(me, myLine(me.s), (myLine(me.s + 0.2) - myLine(me.s - 0.2)) / 0.4 * me.v, dt);
     // run into someone and you stumble (the bully just shoves through them); they get knocked aside, so you don't
     // run on through their body
     for (const q of crowd.people) {
@@ -617,6 +621,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       if (Math.abs(q.s - me.s) < 0.55 && Math.abs(qd - me.d) < 0.5 && me.stun <= 0 && (q.bumped || 0) < footT) {
         q.bumped = footT + 2; me.v *= 0.45; me.stun = 0.35; shake = 0.35;
         knock(q, me.d);
+        // you bounce off them: a step away from them (as far as the sidewalk allows), so you slide past, not through
+        const away = qd < me.d ? 1 : -1, room = away > 0 ? PATH.inner(me.s) - me.d : me.d - PATH.outer(me.s);
+        me.nudge = away * Math.max(0, Math.min(0.55, room));
         stagger(me, -0.22, (qd > me.d ? 0.12 : -0.12), 0.45);
         pop('WATCH IT!'); audio.crash(0.15); haptic(HAP.bump); tauntK = Math.max(tauntK, 1);
       }
