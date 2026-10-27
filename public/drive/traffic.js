@@ -141,7 +141,7 @@ export class Traffic {
     const i0 = this.lowerBound(dir > 0 ? S - 4 : S - look - 15), i1 = this.lowerBound(dir > 0 ? S + look + 15 : S + 4);
     for (let i = i0; i < Math.min(i1 + 1, ob.length); i++) {
       const o = ob[i]; if (o.o === e || o.o === ignore) continue;
-      if (e.ghostUntil > this.clock && o.o === e.ghostOf) continue;     // a standoff with this one car that was given up on, out of sight (see standoff)
+      if (e.ghostUntil > this.clock && (o.o === e.ghostOf || (e.ghostAll && o.veh && !o.player))) continue;     // a standoff with this one car that was given up on (see standoff); while the two are still inside each other (see untangle) it goes through whatever else is in the way too, until it is out
       const ds = dir * (o.s - S); if (ds <= 0.2) continue;
       let gap = ds - (o.L + e.L) / 2; if (gap > look) continue;
       const vlu = dir * o.vs, tau = clamp(Math.max(gap, 0) / Math.max(1, sp - vlu), 0.3, o.ped ? 2.6 : 1.8);
@@ -215,7 +215,7 @@ export class Traffic {
   /** move every driving car one step. `car` = you; `runner` = the person on foot, if you're on foot */
   step(dt, car, hornT, runner, out) {
     const W = this.world, r = W.route, sig = W.signals;
-    this.clock += dt; this.honkT -= dt;
+    this.clock += dt; this.honkT -= dt; this.car = car;
     this.collect(car, runner);
     const drivers = [];
     for (const e of W.ents) {
@@ -295,8 +295,10 @@ export class Traffic {
     let sp = dir === -1 ? -e.v : e.v; if (sp < 0) sp = 0;
     e.sp = sp;
     const two = !r.oneway(e.s);
-    // a standoff given up on (see standoff) ends the moment either car could be seen
-    if (e.ghostUntil > this.clock && (this.onScreen(e) || !e.ghostOf?.alive || this.onScreen(e.ghostOf))) e.ghostUntil = 0;
+    // two cars inside each other are never left that way (see untangle)
+    this.untangle(e, dt);
+    // a standoff given up on (see standoff) ends the moment either car could be seen, unless the two are still inside each other: it is kept until they are not
+    if (e.ghostUntil > this.clock && !e.ovT && (this.onScreen(e) || !e.ghostOf?.alive || this.onScreen(e.ghostOf))) e.ghostUntil = 0;
     // desired speed: the driver's, less for a bend and when the street is full of people
     let v0 = Math.min(D.v0, this.curveV(e.s + (dir > 0 ? 8 : -8)));
     if ((W.workZones || []).some(([a, b]) => e.s > a - 8 && e.s < b + 8)) v0 = Math.min(v0, 8);
@@ -396,7 +398,7 @@ export class Traffic {
         // (a queue that has backed up from a red light beyond the section into it, with nobody able to see it and nobody near: it goes, a car at a
         // time, the way an unseen car stuck at a dead end does. In sight it waits for the light like anyone.)
         if (z.t2 >= 14 && (w.stopT || 0) >= 6 && !this.onScreen(w) && !(w.s > car.s - 15 && w.s < car.s + 140)) { w.alive = false; this.stats.despawned++; continue; }
-        this.help(w, Math.max(w.stopT || 0, z.t2), zones, car);
+        this.help(w, Math.max(w.stopT || 0, z.t2));
       }
     }
     for (const e of drivers) {
@@ -415,26 +417,25 @@ export class Traffic {
         if (h.dir === 1 && (z.turn === -1 || z.turn === -2)) { z.turn = 2; z.t = 0; this.stats.forced++; continue; }
         if (h.dir === -1 && (z.turn === 1 || z.turn === 2)) { z.turn = -2; z.t = 0; this.stats.forced++; continue; }
       }
-      this.help(h, h.stopT, zones, car);
+      this.help(h, h.stopT);
     }
   }
   /** one step up the ladder for a car that has been stuck for t seconds, no more than one step every few seconds */
-  help(h, t, zones, car) {
+  help(h, t) {
     if (this.clock < (h.helpAfter ?? 0)) return;
     const dir = h.dir, blocker = h.whyO && h.whyO.alive !== false ? h.whyO : null;
     h.helpAfter = this.clock + 3;
     // 1. into the parking lane, out of the way
     if (!h.prof && (h.ref === 'l0' || h.ref === 'l1') && this.pullAside(h, dir, 0, 1.9)) { h.evac = true; h.stopT = 0; this.stats.asides++; this.stats.helped++; return; }
     // 2. head on: back out, the one that has room behind it
-    const clearBehind = (q) => this.roomBehind(q);
     if (t > STUCK_T + 3) {
       // (the car it is nose to nose with: the one it says is in its way, else whatever is right ahead in the other direction, which is the case when the reason it
       // gives is the flagger's line and not the car itself)
       let other = blocker && blocker.drv && blocker.dir === -dir ? blocker : null;
       if (!other) other = this.noseTo(h);
       // (a few metres, and not again for a while: backing out is to let something by, not to leave)
-      if (this.clock > (h.revAfter ?? 0) && clearBehind(h)) { h.revT = 2.5; h.revAfter = this.clock + 25; this.stats.helped++; this.stats.reversed++; return; }
-      if (other && this.clock > (other.revAfter ?? 0) && clearBehind(other)) { other.revT = 2.5; other.revAfter = this.clock + 25; this.stats.helped++; this.stats.reversed++; return; }
+      if (this.clock > (h.revAfter ?? 0) && this.roomBehind(h)) { h.revT = 2.5; h.revAfter = this.clock + 25; this.stats.helped++; this.stats.reversed++; return; }
+      if (other && this.clock > (other.revAfter ?? 0) && this.roomBehind(other)) { other.revT = 2.5; other.revAfter = this.clock + 25; this.stats.helped++; this.stats.reversed++; return; }
     }
     // 3. out of sight, and only then, through it
     if (t > STUCK_T + 6 && !this.onScreen(h) && !(blocker && blocker.s !== undefined && this.onScreen(blocker))) {
@@ -442,6 +443,30 @@ export class Traffic {
     }
   }
 
+  /** the car or streetcar whose box e's box is inside (by more than a touch), or null */
+  overlapping(e) {
+    const ob = this.obs, S = e.s;
+    for (let i = this.lowerBound(S - 8), i1 = Math.min(ob.length, this.lowerBound(S + 8) + 1); i < i1; i++) {
+      const o = ob[i];
+      if (o.o === e || !o.veh || o.player || o.cross) continue;
+      if (Math.abs(o.s - S) < (o.L + e.L) / 2 - 0.3 && Math.abs(o.d - e.d) < (o.W + e.W) / 2 - 0.15) return o;
+    }
+    return null;
+  }
+  /** Two cars with their boxes inside each other (a pass that was cut off, a pull-out beside a parked car, a ghost that ran out or was
+   *  cancelled with a third car in the way) must not stay that way, in sight or out of it. Not at once (a touch is fine): after 0.4 s the one
+   *  that cannot be seen is removed; if both can be seen, e goes on through the other, and through anything else in its way (`ghostAll`), until
+   *  they are clear of each other, and the ghosting is not cancelled by either coming into view while they still overlap. */
+  untangle(e, dt) {
+    const o = this.overlapping(e);
+    if (!o) { e.ovT = 0; e.ghostAll = false; return; }
+    e.ovT = (e.ovT || 0) + dt;
+    if (e.ovT < 0.4) return;
+    const car = this.car, other = o.o, seen = (x) => this.onScreen(x) || (x.s > car.s - 12 && x.s < car.s + 40);
+    if (!seen(e)) { e.alive = false; this.stats.despawned++; return; }
+    if (other.drv && !other.hold && !seen(other)) { other.alive = false; this.stats.despawned++; return; }
+    e.ghostOf = other; e.ghostUntil = this.clock + 1.2; e.ghostAll = true; e.stopT = 0; this.stats.ghosted++;
+  }
   /** is there room behind q (the way its tail points) to back a few metres? (only in a travel lane: the parking lane ends, and the car's line would jump) */
   roomBehind(q) { if ((q.ref !== 'l0' && q.ref !== 'l1') || q.prof) return false; const tg = this.refD(q.ref, q.s) + q.pers; const rb = this.ahead(q, -q.dir, 0, 3, Math.min(q.d, tg), Math.max(q.d, tg), 12); return !rb || rb.gap > 6; }
   /** the nearest car of the other direction within a few metres of e's nose, in its way (or null) */
@@ -518,7 +543,8 @@ export class Traffic {
     e.s += e.v * dt;
     // lateral: reference lane + eased offset
     if (e.prof) {
-      e.prof.t += dt; const [x, v] = hermite(e.prof.x0, e.prof.v0, e.prof.T, e.prof.t);
+      // (a car that is hardly moving cannot slide sideways as fast as one at speed: the change takes up to 2.5 times as long when it is stopped)
+      e.prof.t += dt * clamp(0.4 + e.sp / 3, 0.4, 1); const [x, v] = hermite(e.prof.x0, e.prof.v0, e.prof.T, Math.min(e.prof.t, e.prof.T));
       e.off = x; if (e.prof.t >= e.prof.T) { e.prof = null; e.off = 0; }
     }
     const d0 = e.d, d1 = this.refD(e.ref, e.s) + e.pers + e.off + (e.room || 0);

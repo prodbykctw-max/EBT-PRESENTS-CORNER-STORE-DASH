@@ -357,6 +357,7 @@ export class World {
     const clearAt = (s1) => { for (let k = -8; k <= 8; k++) if (this.marks && this.marks[Math.round(s1) + k] === 0) return false; return true; };
     for (const side of [-1, 1]) for (let s1 = rnd(6, 12); s1 < r.length - 4; s1 += rnd(6.2, 7.2)) {
       const pd = r.parkD(s1, side); if (pd === null || !clearAt(s1) || Math.random() > 0.6) continue;
+      if (this.ents.some((o) => o.alive && o.parked && Math.abs(o.s - s1) < 5.6 && Math.abs(o.d - pd) < 2.2)) continue;   // (not on top of the car the 'pullout' event left at the curb)
       if (side < 0 && (this.workZones || []).some(([a, b]) => s1 > a && s1 < b)) continue;   // coned off
       if (side < 0 && s1 > sStop - 14 && s1 < sStop + 16) continue;                          // the store's P space (room to pull in)
       this.add(parkedType(), { s: s1, d: pd + side * rnd(-0.1, 0.15), color: pick(PAINT), dir: side > 0 ? -1 : 1, parked: true, curb: true, occupied: side < 0 && Math.abs(s1 - sStop) > 45 && Math.random() < 0.16 });

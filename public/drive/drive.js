@@ -441,8 +441,17 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // and vs (its real speed), not on v, so both are zeroed: with vd at 0 the loop's target speed is 0 and nothing sets it going again
     if (e.cross) { e.cross.v = e.cross.vd = e.cross.vs = 0; } else Object.assign(e, { v: 0, sp: 0, aF: 0, hold: true });
     lightsOn(poseOf(e));
-    const backup = world.add('police', { s: Math.max(-15, car.s - 60), d: car.d, v: 18, cruise: 18, dir: 1, color: 0xffffff, backup: true });
-    lightsOn(poseOf(backup)); busted.backup = backup;
+    // backup rolls in from behind: from 60 m back, or the nearest spot behind that is clear (not on top of a car, and no car that can be seen is
+    // ever removed to make room; one that can't be seen is)
+    const R = 4.75 / 2 + 0.6, spotCars = (s) => world.ents.filter((o) => o.alive && o !== e && !o.scenery && !o.flying && o.L && o.W && Math.abs(o.s - s) < o.L / 2 + R && Math.abs(o.d - car.d) < o.W / 2 + 1.5);
+    const seen = (o) => { const q = route.at(o.s, o.d); return world.visible(q.x, q.y, q.z + 0.8, Math.max(6, (o.L || 4.5) / 2 + 2)); };
+    let at = null;
+    for (let back = 60; back <= 200 && at === null; back += 10) { const s = Math.max(-15, car.s - back); if (!spotCars(s).length) at = s; }
+    for (let back = 60; back <= 200 && at === null; back += 10) { const s = Math.max(-15, car.s - back), cs = spotCars(s); if (!cs.some(seen)) { for (const o of cs) o.alive = false; at = s; } }
+    if (at !== null) {
+      const backup = world.add('police', { s: at, d: car.d, v: 18, cruise: 18, dir: 1, color: 0xffffff, backup: true });
+      lightsOn(poseOf(backup)); busted.backup = backup;
+    }
     audio.siren(); haptic(HAP.busted);
   }
   function showBusted() {
@@ -1116,7 +1125,15 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       if (b.officer) {
         const o = b.officer, ts = car.s - 0.4, td = car.d + 1.35, ds = ts - o.s, dd = td - o.d, L = Math.hypot(ds, dd);
         if (L > 0.1) { const k = Math.min(1, Math.min(3.4, Math.max(1.5, L / 4)) * dt / L);   // (a stroll up to the window, a jog if the cruiser was held up further back)
-          o.s += ds * k; o.d += dd * k; o.hd = Math.atan2(dd, ds); }
+          // (never through a car: the step is turned aside, up to 100 degrees either way, to the first direction that is clear, else he waits)
+          const cars = world.ents.filter((c) => c.alive && c !== o && c !== bk && !c.scenery && !c.flying && c.L && c.W && Math.abs(c.s - o.s) < 12);
+          const clear = (x, y) => !cars.some((c) => Math.abs(x - c.s) < c.L / 2 + 0.4 && Math.abs(y - c.d) < c.W / 2 + 0.4);
+          const ang = Math.atan2(dd, ds), stp = L * k;
+          for (const da of [0, 0.6, -0.6, 1.2, -1.2, 1.75, -1.75]) {
+            const ns = o.s + Math.cos(ang + da) * stp, nd = o.d + Math.sin(ang + da) * stp;
+            if (clear(ns, nd) || (da === 0 && L < 2.5)) { o.s = ns; o.d = nd; break; }
+          }
+          o.hd = ang; }
         else { o.hd = -Math.PI / 2; b.at = (b.at || 0) + dt; }   // at the driver's window
       }
       if (endT > 9 || b.at > 0.9) showBusted();
