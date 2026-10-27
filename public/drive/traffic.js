@@ -230,10 +230,12 @@ export class Traffic {
       // oncoming cars past their stop line. Cars of ours still in the right lane, held or stuck at the cones, are waiting.
       const inFwd = drivers.some((e) => e.dir === 1 && e.ref === 'l1' && e.s > z.a - 90 && e.s - e.L / 2 < z.c1 + 4);
       const inOnc = drivers.some((e) => e.dir === -1 && e.s - e.L / 2 < z.c1 + 1 && e.s + e.L / 2 > z.c0 - 4);
-      const waitFwd = drivers.some((e) => e.dir === 1 && e.ref !== 'l1' && e.s > z.a - 80 && e.s < z.c1 && e.sp < 5);
+      // (you are one of the cars of ours: waiting at the cones in the right lane, or coming up to them)
+      const youNear = car.s > z.a - 80 && car.s < z.c0 && car.d < -0.5, youWait = youNear && car.v < 5, youComing = youNear && car.s > z.a - 45 && car.v >= 5;
+      const waitFwd = youWait || drivers.some((e) => e.dir === 1 && e.ref !== 'l1' && e.s > z.a - 80 && e.s < z.c1 && e.sp < 5);
       const waitOnc = drivers.some((e) => e.dir === -1 && e.s - e.L / 2 >= z.c1 + 1 && e.s < z.c1 + 90 && e.sp < 5);
       // a platoon on its way keeps the turn a little longer, but never past 20 s
-      const comingFwd = drivers.some((e) => e.dir === 1 && e.ref !== 'l1' && e.s > z.a - 45 && e.s <= z.c0 && e.sp > 3);
+      const comingFwd = youComing || drivers.some((e) => e.dir === 1 && e.ref !== 'l1' && e.s > z.a - 45 && e.s <= z.c0 && e.sp > 3);
       const comingOnc = drivers.some((e) => e.dir === -1 && e.s > z.c1 && e.s < z.c1 + 60 && e.sp > 3);
       const playerIn = car.s > z.a - 30 && car.s < z.c1 + 5 && car.d > -0.5;
       z.inFwd = inFwd; z.inOnc = inOnc;
@@ -267,8 +269,10 @@ export class Traffic {
     else if (e.flee > this.clock) v0 = Math.max(v0, Math.min(sp + 4, D.v0 * 1.3, this.curveV(e.s + (dir > 0 ? 8 : -8))));
     if (e.backup) v0 = 20;
     e.v0now = v0;
-    const lo0 = Math.min(e.d, this.refD(e.ref, e.s)), hi0 = Math.max(e.d, this.refD(e.ref, e.s));
-    let lead = this.ahead(e, dir, sp, v0, lo0 + e.pers, hi0 + e.pers);
+    // the strip we occupy: from where we are to where we are heading (our lane's line plus our own habit of riding a little to one
+    // side: e.d already includes that habit, so it is added once, to the line only)
+    const tg0 = this.refD(e.ref, e.s) + e.pers + (e.room || 0);
+    let lead = this.ahead(e, dir, sp, v0, Math.min(e.d, tg0), Math.max(e.d, tg0));
     let a = lead ? lead.a : idmAccel(sp, v0, Infinity, 0, D);
     let why = lead ? lead.ob : null;
     // the stop line at a red light
@@ -378,7 +382,7 @@ export class Traffic {
     if (myLane === home || !two) {
       // something in the way that we'd be better off driving round? Only real obstructions: cones, wrecks, a car that has
       // broken down, something much slower: never a queue of cars that are simply waiting their turn
-      const lo = Math.min(e.d, this.refD(e.ref, S)) + e.pers, hi = Math.max(e.d, this.refD(e.ref, S)) + e.pers;
+      const tg0 = this.refD(e.ref, S) + e.pers, lo = Math.min(e.d, tg0), hi = Math.max(e.d, tg0);
       if (dir === 1 && (this.zones || []).some((z) => z.turn !== 1 && S > z.a - 90 && S < z.c1)) return;   // waiting for the flagger: in line like everyone else
       const bl = this.blocker(e, dir, sp, v0, lo, hi);
       if (!bl) return;
@@ -391,11 +395,11 @@ export class Traffic {
       this.changeRef(e, lane2 ? 'l1' : 'l0', 2.2); e.lane = lane2; e.passEnd = endS; this.stats.passes++; if (bl.kind === 'slow') this.stats.slowPasses++;
     } else {
       // back into our own lane once we're clear of what we passed, and it is safe
-      if (e.passEnd !== undefined && dir * (S - e.passEnd) < e.L / 2 + 1.2) { e.retWhy = 'passEnd'; return; }
+      if (e.passEnd !== undefined && dir * (S - e.passEnd) < e.L / 2 + 1.2) return;
       const c0 = this.refD(home ? 'l1' : 'l0', S);
-      if (!this.stripFree(e, c0 - e.W / 2, c0 + e.W / 2, S - e.L / 2 - 4, S + e.L / 2 + 9, 1.2)) { e.retWhy = 'strip'; return; }
+      if (!this.stripFree(e, c0 - e.W / 2, c0 + e.W / 2, S - e.L / 2 - 4, S + e.L / 2 + 9, 1.2)) return;
       const bh = this.behind(e, dir, c0 - 1, c0 + 1);
-      if (bh && bh.gap < Math.max(10, bh.ob.vs > sp ? (dir * bh.ob.vs - sp) * 3.5 + 10 : 8)) { e.retWhy = 'behind ' + bh.ob.o.type + ' gap ' + bh.gap.toFixed(1) + ' v ' + bh.ob.vs.toFixed(1); return; }
+      if (bh && bh.gap < Math.max(10, bh.ob.vs > sp ? (dir * bh.ob.vs - sp) * 3.5 + 10 : 8)) return;
       this.changeRef(e, home ? 'l1' : 'l0', 2.2); e.lane = home; e.passEnd = undefined;
     }
   }

@@ -227,8 +227,6 @@ const ON_FOOT = new Set(['panhandler', 'seller', 'dog']);   // hit one and they 
 /** the traffic mix: mostly private cars, about one in ten a driverless robotaxi, one in twenty a police cruiser */
 const carType = () => pickWeighted([['sedan', 5], ['suv', 3], ['robotaxi', 0.9], ['police', 0.5]]);
 const parkedType = () => pickWeighted([['sedan', 5], ['suv', 3], ['police', 0.25]]);
-/** does o block e's lane? vehicles by lane; people and dogs only if they're actually in e's path */
-const blocks = (o, e) => Math.abs(o.d - e.d) < (VEHICLE[o.type] ? 1.8 : (e.W || 1.8) / 2 + (o.W || 0.5) / 2 + 0.25);
 // obstacles drawn bigger than life and ringed with a warning halo while they're in the street ahead
 const HAZARD_SCALE = { cone: 1.45, barricade: 1.25, dog: 1.5, seller: 1.2, panhandler: 1.2 };
 const HALO = { cone: [0.75, 0xff7a1a], barricade: [1.3, 0xff7a1a], dog: [1.1, 0xffd400], seller: [1.0, 0xff3b3b], panhandler: [1.0, 0xff3b3b] };
