@@ -6,7 +6,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { GLTFLoader } from './vendor/GLTFLoader.js';
 import { MeshoptDecoder } from './vendor/meshopt_decoder.module.js';
-import { buildCity, makeGround, toV3 } from './city.js';
+import { buildCity, makeGround, toV3, rayTargets } from './city.js';
 import { LEVEL, standOn } from './levels.js';
 import { CUT } from './roads.js';
 import { TopSurface } from './surface.js';
@@ -86,7 +86,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
   // ---------- renderer / scene ----------
   root.insertAdjacentHTML('beforeend', HUD_HTML);
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  // antialias off on the CANVAS only: the scene is drawn (with MSAA) into the look pass's own target (look.js), and
+  // the canvas only ever receives one full-screen quad, which multisampling can't change by a single pixel. A
+  // multisampled canvas just cost a full-screen MSAA buffer and a resolve every frame.
+  const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   const MOBILE = matchMedia('(pointer: coarse)').matches;
   renderer.setPixelRatio(Math.min(devicePixelRatio, MOBILE ? 1.5 : 2)); // phones: fill-rate is the budget
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -135,6 +138,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const route = new RouteFrame(W, ground, 200); // road continues 200 m past the store: traffic drives on out of view
   const city = buildCity(W, tex, ground, route, props.scene, trees.scene);
   scene.add(city.group, hero.scene);
+  // the city and the storefront row never move: their matrices are worked out once here, instead of three.js
+  // recomposing every one of their hundreds of objects every frame (and again for the shadow pass)
+  scene.matrixAutoUpdate = false;
+  for (const g of [city.group, hero.scene]) { g.updateMatrixWorld(true); g.traverse((o) => { o.matrixAutoUpdate = false; }); }
 
   // lights: the sun follows the car so its shadow map stays sharp where you are
   const hemi = new THREE.HemisphereLight(0xcfe3ff, 0x7a6a55, 1.2);   // warm bounce: flat, sunny comic light
@@ -152,6 +159,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const spotS = route.project(SPOT.x, SPOT.y).s;
   const spot = { s: spotS, d: route.parkD(spotS, -1) ?? route.lane(spotS, 0) - 0.35 };
   const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks });
+  // the sun's shadow box, so the props that can't cast a shadow into it skip the shadow pass (World.render)
+  world.shadowBox = { dir: sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35), half: () => Math.max(sun.shadow.camera.right, sun.shadow.camera.top) };
   const car = new RunnerCar(route, 4);
   const signals = world.signals = new Signals({ route, nodes: city.signals, marks: city.streets.routeMarks, scene });
   const trams = world.trams = new Streetcars({ W, route, ground, surfAt, scene, props: props.scene, world, audio });
@@ -161,9 +170,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     onRoute: (x, y) => roadSurface.top(x, -y, ground(x, y) + 1.2)?.name === 'route_road',
     visible: (x, y, z, r) => world.visible(x, y, z, r),
   });
+  crowd.shadowBox = world.shadowBox;
   world.planCorners(signals);   // water sellers and panhandlers working the red lights
   // flocks fly over the roofs: height of whatever is under a point (roofs, freeway decks, landmarks), by a ray from above
-  const roofRay = new THREE.Raycaster(), roofHits = [city.group.getObjectByName('roofs'), city.freeway.group, hero.scene].filter(Boolean), down = new THREE.Vector3(0, -1, 0);
+  // (rayTargets: the same roofs, freeway and storefronts cut into small tiles, so a ray tests only what's under it)
+  const roofRay = new THREE.Raycaster(), roofHits = rayTargets([city.group.getObjectByName('roofs'), city.freeway.group, hero.scene].filter(Boolean)), down = new THREE.Vector3(0, -1, 0);
   const roofAt = (x, y) => { roofRay.set(toV3(x, y, 400), down); const h = roofRay.intersectObjects(roofHits, true)[0]; return h ? h.point.y : ground(x, y); };
   const groundAt = (x, y) => Math.max(surfAt(x, y, ground(x, y) + 1.2) ?? -Infinity, ground(x, y) + LEVEL.TERRAIN);
   const birds = world.birds = new Birds({ scene, props: props.scene, route, roofAt, groundAt, isFree: city.isFree, sEnd: spot.s,
@@ -276,6 +287,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
   // ---------- HUD ----------
   const $ = (s) => root.querySelector(s);
+  // a HUD line is only rewritten when its text changes: replacing an element's text, even with the same text, makes
+  // the browser redo style and layout for it, and the HUD used to do that ~8 times every frame
+  const setText = (el, txt) => { if (el.textContent !== txt) el.textContent = txt; };
   const hud = { light: $('.drive-light'), lightDist: $('.drive-light b'), time: $('.drive-time'), speed: $('.drive-speed'), dist: $('.drive-dist'), tokens: $('.drive-tokens'), msg: $('.drive-msg'), hint: $('.drive-hint'), pop: $('.drive-pop') };
   // the big centre message (3-2-1-GO!, CLEAN PARK!, −1s, TOO LATE, BUSTED) punches in big and settles, then fades
   const msgIn = () => { if (G) { G.killTweensOf(hud.msg); G.fromTo(hud.msg, { opacity: 0, scale: 1.7 }, { opacity: 1, scale: 1, duration: 0.34, ease: 'back.out(2.4)' }); } else hud.msg.classList.add('on'); };
@@ -307,6 +321,39 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     camera.updateProjectionMatrix();
   };
   addEventListener('resize', resize); resize();
+  // ---------- adaptive resolution (phones that can't keep up) ----------
+  // The picture is drawn at the sharpest pixel ratio set above. If frames keep coming slower than 60 a second (on
+  // average over ~10 frames, longer than 21.7 ms) for 1.5 s, a phone's GPU is falling behind (or throttling as it warms
+  // up): the resolution steps down a notch (never below 1 pixel per CSS pixel, so a screen that is already 1:1 never
+  // changes), and back up after a while once frames are fast again. It only keeps a step down that actually helps: if
+  // frames aren't at least 10% faster 2 s later (the phone is held back by something else, e.g. iOS Low Power Mode
+  // capping it at 30 fps), it goes straight back to full sharpness and waits before trying again (twice as long each
+  // time). Off in tests (?qa, or ?fixedres) so screenshots and measurements stay at one size.
+  const PR_MAX = renderer.getPixelRatio(), PR_MIN = Math.min(PR_MAX, 1), PR_STEP = 0.25, SLOW_MS = 1000 / 60 * 1.3, FAST_MS = 18;
+  const ADAPT = !QA && !new URLSearchParams(location.search).has('fixedres') && PR_MAX > PR_MIN;
+  const res = { on: ADAPT, last: 0, ema: 0, slow: 0, fast: 0, trial: null, lockDown: 0, lockUp: 0, upAt: -1e9, bounces: 0, fails: 0, clock: 0 };
+  const setPR = (pr) => { renderer.setPixelRatio(pr); sized = ''; resize(); };   // resize() re-sizes the look pass too
+  function adaptRes(now) {
+    const iv = now - res.last; res.last = now;
+    if (!res.on || paused || iv <= 0 || iv > 250) return;            // first frame, after a pause or a hidden tab: no signal
+    res.ema = res.ema ? res.ema + (iv - res.ema) * 0.1 : iv;
+    const sec = iv / 1000, pr = renderer.getPixelRatio();
+    res.clock += sec;
+    res.slow = res.ema > SLOW_MS ? res.slow + sec : 0;              // dropping frames
+    res.fast = res.ema < FAST_MS ? res.fast + sec : 0;              // keeping up
+    res.lockDown = Math.max(0, res.lockDown - sec); res.lockUp = Math.max(0, res.lockUp - sec);
+    if (res.trial) {
+      if ((res.trial.t -= sec) > 0) return;                         // judge the last step down after 2 s at it
+      if (res.ema > res.trial.ema * 0.9) { setPR(res.trial.from); res.lockDown = Math.min(300, 30 * 2 ** res.fails++); }   // didn't help: undo
+      else res.lockUp = Math.min(240, 30 * 2 ** res.bounces);       // it helped: stay there a while (longer each time it bounces)
+      res.trial = null; res.slow = res.fast = 0; return;
+    }
+    if (res.slow > 1.5 && !res.lockDown && pr > PR_MIN) {
+      if (res.clock - res.upAt < 10) res.bounces++;                  // the last step up didn't hold
+      res.trial = { from: pr, ema: res.ema, t: 2 }; setPR(Math.max(PR_MIN, pr - PR_STEP)); res.slow = 0; return;
+    }
+    if (res.fast > 6 && !res.lockUp && pr < PR_MAX) { setPR(Math.min(PR_MAX, pr + PR_STEP)); res.fast = 0; res.upAt = res.clock; }
+  }
   // phones rotate before they report the new size (iOS especially): also re-check on orientation / visual-viewport
   // changes, and every frame (cheap string compare), so the picture is never left squashed or stretched
   addEventListener('orientationchange', () => { setTimeout(resize, 60); setTimeout(resize, 400); });
@@ -562,10 +609,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (raceBar.hidden) return;
     const span = spot.s - raceFrom, at = (s) => THREE.MathUtils.clamp((s - raceFrom) / span, 0, 1) * 100 + '%';
     const youS = state === 'onfoot' ? me.s : car.s, himS = race ? race.s : him.s;
-    rYou.style.left = at(youS); rHim.style.left = at(himS);
+    const lx = at(youS), hx = at(himS);
+    if (rYou.style.left !== lx) rYou.style.left = lx;
+    if (rHim.style.left !== hx) rHim.style.left = hx;
     const gapS = race ? (race.tail ? 0 : (youS - himS) / Math.max(6, race.v || RACE.pace)) : (me.s - him.s) / FOOT.bully;
     raceBar.classList.toggle('hot', gapS < 2.5);
-    rGap.textContent = race && race.tail ? 'ON YOUR TAIL!' : state === 'onfoot' ? 'RUN!' : `+${gapS.toFixed(1)}s`;
+    setText(rGap, race && race.tail ? 'ON YOUR TAIL!' : state === 'onfoot' ? 'RUN!' : `+${gapS.toFixed(1)}s`);
   }
 
   // ---------- loop ----------
@@ -576,10 +625,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // a step behind on some frames and not others: a hitch, most visible in a quick lane change. The car (and the
   // camera following it) is drawn between the last two steps instead, acc / FIXED of the way.
   let prevS = car.s, prevD = car.d;
-  function frame() {
+  function frame(ts) {
     raf = nextFrame(frame);
     if (root.clientWidth + 'x' + root.clientHeight !== sized) resize();
-    const now = performance.now(), dt = Math.min((now - last) / 1000, 0.05); last = now;
+    // the time of THIS frame on screen (requestAnimationFrame's timestamp: the same for everything drawn in it), not
+    // whenever this callback happened to start: the start wanders by a few ms frame to frame on a busy phone, and
+    // stepping the world by that wandering amount made motion judder even at a steady frame rate
+    const now = typeof ts === 'number' ? ts : performance.now(), dt = Math.max(0, Math.min((now - last) / 1000, 0.05)); last = now;
+    adaptRes(now);
     if (paused || api.pause) { comic.render(); return; }   // paused (or QA freeze-frame): the world holds still   // QA: freeze-frame for look-dev
     hornT -= dt;
     if (state === 'countdown') {
@@ -597,7 +650,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     } else if (race) updateHimLeft(dt);
     if (race && state === 'driving') updateRace(dt);
     drawRaceBar();
-    hud.dist.previousElementSibling.textContent = state === 'onfoot' ? 'YOUR CAR' : 'STORE';
+    setText(hud.dist.previousElementSibling, state === 'onfoot' ? 'YOUR CAR' : 'STORE');
     const braking = keys.has('down');
     // Stiff lane steering: each press of ◀ ▶ moves the whole car exactly one lane (tapLane, the moment it's
     // pressed); holding does nothing further. The car never turns: runner.js pins yaw to zero on the lateral path,
@@ -766,16 +819,18 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // speed), so the much quicker lane change squeals the tyres no more than before, and not at all from a stop
     const sideSlip = Math.min(Math.abs(car.dv), 3 + Math.abs(car.v) * 0.6);
     audio.update(car.v, pedal, Math.min(1, sideSlip / 14 + (braking && car.v > 6 ? 0.6 : 0)), dt);
-    hud.time.textContent = t.toFixed(1);
+    setText(hud.time, t.toFixed(1));
     hud.time.classList.toggle('low', t < 10);
     if (t < 10 && state === 'driving') { const sec = Math.ceil(t); if (sec !== lowSec) { lowSec = sec; bump(timeBox, 1.14); } }   // last ten seconds: the clock pulses each second
-    hud.speed.textContent = Math.round(v * 2.237) + ' mph';
-    hud.dist.textContent = Math.max(0, Math.round(spot.s - car.s)) + ' m';
+    setText(hud.speed, Math.round(v * 2.237) + ' mph');
+    setText(hud.dist, Math.max(0, Math.round(spot.s - car.s)) + ' m');
     // the next traffic light, readable on a phone (the real lamps are small from up here)
     const nl = state === 'driving' ? signals.next(car.s + 2.5) : null;
-    hud.light.className = 'drive-light' + (nl ? ' on ' + nl.aspect : '');
-    if (nl) hud.lightDist.textContent = Math.round(nl.gap) + ' m';
-    hud.tokens.textContent = tokens;
+    const lightClass = 'drive-light' + (nl ? ' on ' + nl.aspect : '');
+    if (hud.light.className !== lightClass) hud.light.className = lightClass;
+    if (nl) setText(hud.lightDist, Math.round(nl.gap) + ' m');
+    setText(hud.tokens, String(tokens));
+    city.cull(camera, scene.fog);   // skip what can't show: sunk grass tiles, flat ground cover past the end of the fog
     comic.render();
   }
 
@@ -802,9 +857,18 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // leaving the app mid-drive pauses it (a call, a text, the home screen): nothing happens while you're away
   const onHide = () => { if (document.hidden && (state === 'driving' || state === 'countdown' || state === 'onfoot')) setPaused(true); };
   document.addEventListener('visibilitychange', onHide);
+  // build every shader the run can need now, while the level is appearing, instead of the first time each thing comes
+  // into view (the first EBT token, the first hazard ring, the first crash's sparks and debris): building a shader
+  // mid-drive freezes the frame it happens in. compile() covers every material in the scene, shown or not; with
+  // KHR_parallel_shader_compile the browser builds them in the background.
+  try { renderer.setRenderTarget(comic.target); renderer.compileAsync(scene, camera).catch(() => {}); } catch {} finally { renderer.setRenderTarget(null); }
+  // same for textures: each one is sent to the GPU the first time something using it is on screen (the lawn photos
+  // only when the first park comes into view), which stalls that frame; send them all now
+  const sent = new Set();
+  scene.traverse((o) => { for (const m of [].concat(o.material || [])) for (const v of Object.values(m)) if (v?.isTexture && !sent.has(v)) { sent.add(v); try { renderer.initTexture(v); } catch {} } });
   frame();
   // test hooks (drive QA + screenshots)
-  Object.assign(api, { car, world, route, spot, keys, result, audio, fx, city, comic, 
+  Object.assign(api, { car, world, route, spot, keys, result, audio, fx, city, comic, adaptRes: { res, step: adaptRes, PR_MIN, PR_MAX },
     three: { scene, camera, carRig, THREE, renderer },
     ui: { flash, pop, bump, setHint, showBusted, gsap: G },   // the HUD's motion, for tests
     snapshot: (q = 0.85) => { comic.render(); return renderer.domElement.toDataURL('image/jpeg', q); } });

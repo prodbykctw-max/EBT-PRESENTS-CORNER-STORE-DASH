@@ -251,7 +251,7 @@ export class World {
     for (const [t, cap] of Object.entries(CAP)) {
       const im = new THREE.InstancedMesh(bakedGeometry(props, GEO[t]), mat, cap);
       im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
-      im.castShadow = true; im.receiveShadow = true; im.count = 0; im.frustumCulled = false; im.name = 'inst_' + t;
+      im.castShadow = true; im.receiveShadow = true; im.count = 0; im.frustumCulled = false; im.name = 'inst_' + t; shadowSplit(im);
       this.meshes[t] = im; scene.add(im);
     }
     // EBT tokens: gold discs with an emissive rim, spinning
@@ -694,35 +694,63 @@ export class World {
 
   /** push every live entity into its InstancedMesh */
   render(car, t) {
-    const counts = {}; for (const k in this.meshes) counts[k] = 0;
+    // Shadow split: every instance is drawn for the camera, but only the ones inside the sun's shadow box (the 220 m
+    // square of shadow map that follows the car) can put a shadow anywhere, so those go first in each buffer and
+    // the shadow pass draws just that leading run (shadowSplit). Instances outside it used to go through the shadow
+    // pass too and were clipped away, the same ~2,700-triangle car up to ~100 times a frame. The test is generous
+    // (+25 m past the box: car size plus the car moving between here and the render), so nothing that could cast a
+    // shadow into the box is ever left out: the shadow map is exactly what it was.
+    const lo = {}, hi = {}; for (const k in this.meshes) { lo[k] = 0; hi[k] = 0; }
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e3 = new THREE.Euler(), c = new THREE.Color(), one = new THREE.Vector3(1, 1, 1), pos = new THREE.Vector3();
     const sc3 = new THREE.Vector3(); let halos = 0;
+    const SB = this.shadowBox, cp = this.route.at(car.s, car.d);
+    let ax, ay, lim;
+    if (SB) {
+      const zA = new THREE.Vector3().copy(SB.dir).normalize();          // the shadow camera's axes (its lookAt from the sun)
+      ax = new THREE.Vector3(0, 1, 0).cross(zA).normalize(); ay = zA.clone().cross(ax); lim = SB.half() + 25;
+    }
+    const inBox = (X, Y, Z) => {
+      if (!SB) return true;
+      const rx = X - cp.x, ry = Y - cp.z, rz = Z + cp.y;
+      return Math.abs(rx * ax.x + ry * ax.y + rz * ax.z) <= lim && Math.abs(rx * ay.x + ry * ay.y + rz * ay.z) <= lim;
+    };
     const put = (type, x, y, z, yaw, color, roll = 0, pitch = 0, sc = one) => {
-      const im = this.meshes[type], i = counts[type]; if (i >= im.instanceMatrix.count) return;
+      const im = this.meshes[type], cap = im.instanceMatrix.count; if (lo[type] + hi[type] >= cap) return;
+      const i = inBox(x, z, -y) ? lo[type]++ : cap - 1 - hi[type]++;    // shadow casters fill from the front, the rest from the back
       m4.compose(pos.set(x, z, -y), q.setFromEuler(e3.set(pitch, yaw - Math.PI / 2, roll, 'YXZ')), sc);
-      im.setMatrixAt(i, m4); im.setColorAt(i, c.set(color)); counts[type]++;
+      im.setMatrixAt(i, m4); im.setColorAt(i, c.set(color));
     };
     // drawn: everything near the car, plus anything farther that the camera can see (the margin grows with
     // distance, so a turning camera never sweeps an undrawn car into view)
     const win0 = car.s - 60, win1 = car.s + 280, cam = this.camera?.position;
+    // the rendered road height under a wheel, for things standing in the street (onRoute) or off it (onTerrain)
+    const g0 = this.route.ground, onRoute = (x, y) => this.surfAt(x, y, g0(x, y) + 1.2) ?? g0(x, y) + LEVEL.ROUTE;
+    const onTerrain = (x, y) => this.surfAt(x, y, g0(x, y) + 1.2) ?? g0(x, y) + LEVEL.TERRAIN;
     for (const e of this.ents) {
       if (e.type === 'tram' || e.s < car.s - 400 || e.s > car.s + 800) continue;   // (tram.js draws the streetcar)
       const p = this.route.at(e.s, e.d);
       if ((e.s < win0 || e.s > win1) && !(cam && this.visible(p.x, p.y, p.z + 0.8, 4 + Math.hypot(p.x - cam.x, p.z - cam.y, -p.y - cam.z) * 0.04))) continue;
       let yaw = p.a + (e.dir === -1 ? Math.PI : 0) + (e.yawOff || 0) + (e.v < 0 && e.scenery ? Math.PI : 0);
       const inStreet = Math.abs(e.d) < this.route.hw(e.s) + 0.2, lvl = inStreet ? LEVEL.ROUTE : LEVEL.TERRAIN;
+      // the road surface right under it (`surf`), read once, and only when something below uses it: a car or cone
+      // seated on its four corners replaces this height anyway
+      let surf;
+      const seated = !e.flying && (VEHICLE[e.type] || (inStreet && (e.type === 'cone' || e.type === 'barricade')));
       // anything standing IN the street (cones, barricades, a panhandler) stands on the rendered road surface
-      let z = inStreet ? (this.surfAt(p.x, p.y, p.z + 1.2) ?? p.z + lvl) : p.z + lvl, roll = 0, pitch = 0;
+      let z = seated ? 0 : inStreet ? ((surf = this.surfAt(p.x, p.y, p.z + 1.2)) ?? p.z + lvl) : p.z + lvl, roll = 0, pitch = 0;
       const afoot = ON_FOOT.has(e.type) || e.type === 'cooler';
-      if (afoot && !inStreet) z = Math.max(this.surfAt(p.x, p.y, p.z + 1.2) ?? -Infinity, p.z + LEVEL.TERRAIN);   // sidewalk / curb top
-      if (inStreet && (e.type === 'cone' || e.type === 'barricade') && !e.flying) { // sit flat on the slope
-        const g = this.route.ground, on = (x, y) => this.surfAt(x, y, g(x, y) + 1.2) ?? g(x, y) + lvl;
-        const st = standOn(on, p.x, p.y, yaw, 0.2, 0.2); z = st.z; pitch = st.pitch; roll = st.roll;
-      }
-      if (VEHICLE[e.type] && !e.flying) { // all four wheels on the rendered road surface, whatever the slope
-        const g = this.route.ground, on = (x, y) => this.surfAt(x, y, g(x, y) + 1.2) ?? g(x, y) + lvl;
-        const st = standOn(on, p.x, p.y, yaw, VEHICLE[e.type][0], VEHICLE[e.type][1]);
-        z = st.z; pitch = st.pitch; roll = st.roll;
+      if (afoot && !inStreet) z = Math.max((surf = this.surfAt(p.x, p.y, p.z + 1.2)) ?? -Infinity, p.z + LEVEL.TERRAIN);   // sidewalk / curb top
+      if (seated) {
+        // cones and barricades sit flat on the slope; vehicles put all four wheels on the rendered road surface.
+        // Seating something reads the road under its corners (4 surface queries). Most of what is drawn stands still
+        // (cars parked along both curbs, cones, barricades), so the answer is kept on the entity and reused while it is
+        // in the same place with the same heading: the same inputs, so exactly the same pose, without the queries.
+        const V = VEHICLE[e.type], hl = V ? V[0] : 0.2, hw = V ? V[1] : 0.2;
+        if (!(e._seatS === e.s && e._seatD === e.d && e._seatYaw === yaw && e._seatHl === hl && e._seatLvl === lvl)) {
+          e._seatS = e.s; e._seatD = e.d; e._seatYaw = yaw; e._seatHl = hl; e._seatLvl = lvl;
+          e._seat = standOn(inStreet ? onRoute : onTerrain, p.x, p.y, yaw, hl, hw);
+        }
+        z = e._seat.z; pitch = e._seat.pitch; roll = e._seat.roll;
       }
       if (e.hd !== undefined) yaw = p.a + e.hd;                 // people and dogs face where they're going
       else if (e.type === 'panhandler') yaw = p.a + Math.PI;
@@ -732,7 +760,8 @@ export class World {
       put(e.type === 'dog' ? (Math.sin(e.gait) > 0 ? 'dog_a' : 'dog_b') : e.type, p.x, p.y, z, yaw, e.color, roll, pitch, big ? sc3.setScalar(big) : one);
       if (HALO[e.type] && !e.flying && !e.hitDone && Math.abs(e.d) < this.route.hw(e.s) + 0.3 && e.s > car.s - 4 && e.s - car.s < 110 && halos < 200) {
         const [rad, col] = HALO[e.type], pulse = 1 + 0.12 * Math.sin(t * 7 + e.s);
-        m4.compose(pos.set(p.x, (inStreet ? (this.surfAt(p.x, p.y, p.z + 1.2) ?? z) : z) + 0.14, -p.y), q.identity(), sc3.set(rad * pulse, 1, rad * pulse));
+        if (inStreet && surf === undefined) surf = this.surfAt(p.x, p.y, p.z + 1.2);
+        m4.compose(pos.set(p.x, (inStreet ? (surf ?? z) : z) + 0.14, -p.y), q.identity(), sc3.set(rad * pulse, 1, rad * pulse));
         this.halo.setMatrixAt(halos, m4); this.halo.setColorAt(halos, c.set(col)); halos++;
       }
     }
@@ -746,8 +775,17 @@ export class World {
       const st = standOn(on, x, y, a.h, hl, hw);
       put(a.type, x, y, st.z, a.h, a.color, st.roll, st.pitch);
     }
-    for (const k in this.meshes) { const im = this.meshes[k]; im.count = counts[k]; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
-    this.halo.count = halos; this.halo.instanceMatrix.needsUpdate = true; this.halo.instanceColor.needsUpdate = true;
+    for (const k in this.meshes) {
+      const im = this.meshes[k], cap = im.instanceMatrix.count, nIn = lo[k], nOut = hi[k];
+      // close the gap: the non-casters (filled from the back) move up to follow the casters
+      if (nOut) {
+        im.instanceMatrix.array.copyWithin(nIn * 16, (cap - nOut) * 16, cap * 16);
+        if (im.instanceColor) im.instanceColor.array.copyWithin(nIn * 3, (cap - nOut) * 3, cap * 3);
+      }
+      im.count = nIn + nOut; im.userData.shadowCount = nIn;
+      uploadUsed(im.instanceMatrix, im.count); if (im.instanceColor) uploadUsed(im.instanceColor, im.count);
+    }
+    this.halo.count = halos; uploadUsed(this.halo.instanceMatrix, halos); uploadUsed(this.halo.instanceColor, halos);
     // tokens
     let n = 0; const spin = t * 4;
     for (const tk of this.tokens) {
@@ -756,8 +794,24 @@ export class World {
       m4.compose(pos.set(p.x, p.z + LEVEL.ROUTE + 1.0 + Math.sin(t * 3 + tk.s) * 0.12, -p.y), q.setFromEuler(e3.set(0, spin + tk.s, 0)), one);
       this.tokenMesh.setMatrixAt(n++, m4);
     }
-    this.tokenMesh.count = n; this.tokenMesh.instanceMatrix.needsUpdate = true;
+    this.tokenMesh.count = n; uploadUsed(this.tokenMesh.instanceMatrix, n);
   }
+}
+
+/** The shadow pass draws only an instanced mesh's first `userData.shadowCount` instances (the ones that can cast a
+ *  shadow into the shadow map: see World.render); the camera still draws all `count`. */
+export function shadowSplit(im) {
+  im.onBeforeShadow = function () { this.userData.fullCount = this.count; if (this.userData.shadowCount !== undefined) this.count = Math.min(this.count, this.userData.shadowCount); };
+  im.onAfterShadow = function () { this.count = this.userData.fullCount; };
+}
+
+/** Upload only the first n instances of a per-instance buffer (the ones drawn this frame). Setting needsUpdate on
+ *  its own re-sends the WHOLE buffer, every frame: sized for the most instances there could ever be (150 sedans,
+ *  the entire route's crowd), most of it unused. Nothing drawn: nothing to send (instances past `count` are never
+ *  read, so whatever is left in them doesn't matter). */
+export function uploadUsed(attr, n) {
+  if (!n) return;
+  attr.clearUpdateRanges(); attr.addUpdateRange(0, n * attr.itemSize); attr.needsUpdate = true;
 }
 
 /** Mesh geometry in true metres. meshopt quantisation stores positions as normalised int16 and puts the
