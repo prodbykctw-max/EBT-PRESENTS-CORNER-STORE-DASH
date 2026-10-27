@@ -498,7 +498,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // street trees (s 18, 32, 46) and the bully copied YOUR sideways position at HIS spot on the street, which a few
   // metres back can be inside the wall (he was, for 35 frames at s ~55).
   const BODY = 0.42;   // half the width of the bully with his arms swinging (measured off the run; you are 0.38)
-  const WALL_GAP = BODY + 0.3, PROP_GAP = 0.4, SLOPE = 0.35, DETOUR = 0.55;
+  const WALL_GAP = BODY + 0.3, PROP_GAP = 0.4, SLOPE = 0.35, DETOUR = 0.4;
   // street furniture at body height (radius of the actual models between knee and shoulder, measured off the meshes;
   // the crowd's own radii are bigger, they keep a polite distance): tree trunks 0.24 m x the tree's scale, poles ~0.2
   const PROP_R = { tree_round: 0.24, tree_upright: 0.17, lamp: 0.2, signal: 0.17, bench: 0.9, bin: 0.33, hydrant: 0.21, shelter: 1.8 };
@@ -543,8 +543,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         }
       }
       const P = Float32Array.from(push);
-      for (let i = 0; i < n; i++) for (let j = Math.max(0, i - 10); j <= Math.min(n - 1, i + 10); j++) {
-        const fall = DETOUR * step * Math.abs(i - j), v = Math.max(0, Math.abs(push[j]) - fall) * Math.sign(push[j]);
+      // the step-off eases out along a half cosine (no kink where it starts or ends: the old straight ramp changed the
+      // line's sideways speed by 3 m/s in one step, which hit the steering's acceleration limit at every tree), as long
+      // as it takes to keep its steepest part at DETOUR
+      for (let i = 0; i < n; i++) for (let j = Math.max(0, i - 14); j <= Math.min(n - 1, i + 14); j++) {
+        const a = Math.abs(push[j]); if (!a) continue;
+        const W = a * Math.PI / (2 * DETOUR), u = Math.min(1, Math.abs(i - j) * step / W), v = a * 0.5 * (1 + Math.cos(Math.PI * u)) * Math.sign(push[j]);
         if (Math.abs(v) > Math.abs(P[i])) P[i] = v;
       }
       for (let i = 0; i < n; i++) L[i] = THREE.MathUtils.clamp(L[i] + P[i], I[i], Math.max(I[i], O[i]));
