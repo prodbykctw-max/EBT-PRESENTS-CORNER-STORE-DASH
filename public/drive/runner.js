@@ -94,8 +94,19 @@ export class RouteFrame {
   oneway(s) { return this.ONEWAY[Math.round(this.i(s))]; }
   /** project a world point to route space (nearest sample) */
   project(x, y) {
-    let bi = 0, bd = 1e9;
-    for (let i = 0; i < this.n; i += 2) { const d = (this.X[i] - x) ** 2 + (this.Y[i] - y) ** 2; if (d < bd) { bd = d; bi = i; } }
+    // the nearest sample (even indices). Near the route (the only place this is asked in play) the spatial grid names the
+    // neighbourhood and only a few samples either side of its best are checked; the whole-route scan is the fallback far away.
+    // (This was a scan of every other sample of the route per call, per cross-street vehicle, every frame.)
+    let bi = -1, bd = 1e9;
+    const gx = Math.floor(x / 20), gy = Math.floor(y / 20);
+    let gi = -1, gd = 1e9;
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const i of this.grid.get((gx + a) + ',' + (gy + b)) || []) { const d = (this.X[i] - x) ** 2 + (this.Y[i] - y) ** 2; if (d < gd) { gd = d; gi = i; } }
+    if (gi >= 0) {
+      for (let i = Math.max(0, (gi - 4) & ~1), e = Math.min(this.n - 1, gi + 4); i <= e; i += 2) { const d = (this.X[i] - x) ** 2 + (this.Y[i] - y) ** 2; if (d < bd) { bd = d; bi = i; } }
+    } else {
+      bi = 0;
+      for (let i = 0; i < this.n; i += 2) { const d = (this.X[i] - x) ** 2 + (this.Y[i] - y) ** 2; if (d < bd) { bd = d; bi = i; } }
+    }
     const a = this.A[bi];
     return { s: bi, d: -(x - this.X[bi]) * Math.sin(a) + (y - this.Y[bi]) * Math.cos(a) };
   }

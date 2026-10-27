@@ -135,7 +135,7 @@ cross streets) and calls `traffic.step()` every frame. Cars used to be steered b
   and distance and moves into the parking lane when there is room all along it (and it is a lane next to its own), or
   brakes early. A horn tap makes it clear out faster. Oncoming cars that see you in their lane brake or swerve early. Nobody pulls
   out in front of you (`maybePullOut` checks your speed and where you will be).
-- **Runner on foot.** Cars see the runner (and the bully) as a person in the street: they brake hard with a horn (and a skid
+- **Runner on foot.** Cars see the runner (and the bully, for as long as he is on screen, which includes the moments after you get in the car) as a person in the street: they brake hard with a horn (and a skid
   when they have to stand on it), or swerve. A car that physically cannot stop in time gives a soft bump (below); it is never game
   over.
 - **Red lights, cross traffic, trams.** Unchanged in what they do; cars now queue behind each other properly, the streetcar stops
@@ -145,9 +145,16 @@ cross streets) and calls `traffic.step()` every frame. Cars used to be steered b
   then oncoming goes, then oncoming stops while theirs clear. A turn lasts at least 8 s and at most 20 s (a platoon that is
   arriving extends it), and you waiting in the right lane at the cones counts as a car waiting. Held cars stop at hold lines 6 m
   outside the cones.
-- **Gridlock safety.** If two cars end up nose to nose (a pass that met the other direction), the one in the wrong lane backs
-  into its own lane when it is free; after 7 s both are allowed to drive through each other so nothing sits there for the run
-  (counted in `traffic.stats.standoffs`, rare).
+- **Gridlock safety.** If two cars end up nose to nose (a pass that met the other direction), the one in the wrong lane goes back
+  into its own lane when it is free. If it cannot, after 7 s the one in its own lane pulls into its free parking lane and lets
+  the other by (`traffic.stats.asides`), then comes back. With no parking lane they wait. Only when neither car can be seen (outside the camera's
+  view) and neither is within 15 m behind to 140 m ahead of you do the two drive through each other, for 4 s, and only through
+  each other (`ghostOf`, `traffic.stats.standoffs`); it stops the moment either could be seen. You never see a car drive through a car.
+- **Cost.** Every obstacle lookup (`ahead`, `behind`, `stripFree`, `laneClear`, `blockEnd`, `room`) looks only at the stretch of the
+  sorted obstacle list that can matter (`lowerBound`), not the whole street; the route projection of cross-street vehicles uses the
+  route's spatial grid. Measured on one page with the old and new code interleaved, `world.update` under a 4x CPU throttle: mean 1.30 to 1.20 ms,
+  95th percentile 2.9 to 2.6 ms, 99th 4.2 to 3.8 ms. Simulating the drivers more than 400 m from you in a shorter form was tried and made no measurable difference, so every driver gets the full model.
+- **Horns and skids** are heard from where you are (the runner on foot, else the car), also while you drive (quieter, within 45 m).
 - **Diagnostics.** Every car records why it is slow (`whyK`: `light`, `zone`, `parked`, the type of the car in front, `free`)
   and what is limiting it (`whyO`); `traffic.stats` counts passes, lane changes, evacuations, honks and runner brakes.
 
@@ -189,7 +196,7 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   across the whole street to the far curb (`PATH.far`; before, ◀ stopped at the centre line of the sidewalk). Parked cars, moving cars,
   the streetcar, cones and barricades are solid: each is checked where it will be over the next 1.8 s as well as where it is, and your
   line is moved to the nearest free side, preferring the side you are already leaning to; with no gap at all you stop and wait
-  (`me.blocked`) instead of running into it. The bully follows you into the street. The traffic keeps running while you are on foot and
+  (`me.blocked`) instead of running into it, but never for ever: standing still with something in the way for 1.5 s lets you (and the bully) go along the nearer edge for a second (`holdUp`, `release`). The bully follows you into the street. The traffic keeps running while you are on foot and
   reacts to you (honks, skids). If a car really cannot stop you get a **soft bump**: you stagger to the side out of its way, lose
   speed for 0.55 s, "WATCH IT!" and the crash sound, at most once every 1.2 s, never game over. The camera follows a sidestep gently
   (`camD`) and keeps you framed anywhere in the street. Standing still next to a parked car, ◀ does nothing until a gap
@@ -496,7 +503,7 @@ Everything is modelled in `blender_props.py` (no logos, lettering or insignia on
   pods) and 1 in 20 is a black-and-white police cruiser (light bar, push bar). Both drive, park and queue like any
   other car, and you can hit them like any other car.
 - **BUSTED:** drive into a police car (above a crawl; a scrape while you're stopped is just a crash) and the run
-  ends. The cruiser lights up, backup pulls in behind you with its siren going, an officer walks to your window,
+  ends. The cruiser lights up (a cruiser coming across a side street stops dead: its pace `vd` and speed `vs` are zeroed), backup pulls in behind you with its siren going (it stops behind any traffic queued up behind you, never through it), an officer walks to your window (he starts out from up to 60 m back and jogs if it is far),
   and the card reads "BUSTED: you're going to jail". *Drive again* restarts the drive (the full game never drops
   you into the store after a bust). The result has `busted: true`.
 - **Stray dogs** amble along the sidewalks with sniffing stops. Now and then one trots across the street in front

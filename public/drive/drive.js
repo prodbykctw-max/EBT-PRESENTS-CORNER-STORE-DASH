@@ -437,7 +437,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     state = 'busted'; endT = 0;
     Object.assign(result, { hits, tokens, nearMisses, busted: true, bonus: 0 });
     hud.msg.classList.add('busted'); flash('BUSTED', 600000); setHint('');
-    if (e.cross) e.cross.v = 0; else Object.assign(e, { v: 0, sp: 0, aF: 0, hold: true });   // the cruiser you hit stops and stays (traffic.js leaves it alone)
+    // the cruiser you hit stops and stays (traffic.js leaves it alone). A cross-street cruiser is moved by runner.js's ambient loop on vd (its pace)
+    // and vs (its real speed), not on v, so both are zeroed: with vd at 0 the loop's target speed is 0 and nothing sets it going again
+    if (e.cross) { e.cross.v = e.cross.vd = e.cross.vs = 0; } else Object.assign(e, { v: 0, sp: 0, aF: 0, hold: true });
     lightsOn(poseOf(e));
     const backup = world.add('police', { s: Math.max(-15, car.s - 60), d: car.d, v: 18, cruise: 18, dir: 1, color: 0xffffff, backup: true });
     lightsOn(poseOf(backup)); busted.backup = backup;
@@ -712,8 +714,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // to the nearest free lateral position, preferring the side you're already leaning to. With no gap at all you stop and wait
   // (m.blocked) instead of running into it. (The traffic does its part: traffic.js sees you and brakes or leans away early.)
   const SP_T = [0, 0.25, 0.5, 0.8, 1.2, 1.8], AIR = 0.28;
-  function streetPath(m, want) {
+  function streetPath(m, want, dt = 0) {
     const obs = world.traffic.obs; m.blocked = false;
+    m.hitT = Math.max(0, (m.hitT || 0) - dt); m.release = Math.max(0, (m.release || 0) - dt);
     if (!obs || !obs.length) { m.avoidSide = undefined; return want; }
     const rad = BODY + AIR, iv = [];
     for (const o of obs) {
@@ -731,10 +734,16 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     for (let k = 1; k < iv.length; k++) { const l = mg[mg.length - 1]; if (iv[k][0] <= l[1]) l[1] = Math.max(l[1], iv[k][1]); else mg.push(iv[k].slice()); }
     const hit = mg.find((b) => want > b[0] && want < b[1]);
     if (!hit) { m.avoidSide = undefined; return want; }
+    m.hitT = 0.4;   // (something solid is in the way, as of the last 0.4 s: see holdUp)
     const [lo, hi] = sideRange(m.s), opts = [];
     if (hit[0] - 0.02 >= lo) opts.push(hit[0] - 0.02);
     if (hit[1] + 0.02 <= hi) opts.push(hit[1] + 0.02);
-    if (!opts.length) { m.blocked = true; return want; }
+    if (!opts.length) {
+      // no way round at all: wait for it to clear (m.blocked), but not for ever: holdUp lets you go after 1.5 s, along whichever
+      // edge is nearer, as far inside the street as it allows
+      if (m.release > 0) return THREE.MathUtils.clamp(Math.abs(want - hit[0]) < Math.abs(hit[1] - want) ? hit[0] - 0.02 : hit[1] + 0.02, lo, hi);
+      m.blocked = true; return want;
+    }
     // the side you're already leaning to (or last chose), unless the other side is much nearer
     const mid = (hit[0] + hit[1]) / 2;
     let pick = opts[0];
@@ -744,6 +753,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     }
     m.avoidSide = pick < mid ? -1 : 1;
     return pick;
+  }
+  // Something solid across the way that does not move (a car broken down across a street already full of cars, a queue that is not
+  // going anywhere) must not hold you or the bully for the rest of the run: a person who wants to run, is at a standstill and has
+  // had something in the way for 1.5 s is let through (m.release, for 1 s: streetPath then takes the nearer edge instead of waiting).
+  // (m.blocked flickers on and off at a wall, since a stopped person is no longer inside its reach, so it is the standstill that is timed)
+  function holdUp(m, runs, dt) {
+    m.waitT = runs && Math.abs(m.v) < 0.6 && m.hitT > 0 ? (m.waitT || 0) + dt : 0;
+    if (m.waitT > 1.5) { m.release = 1.0; m.waitT = 0; }
   }
   function getIn() {
     // (runnerOn off: the runner is in the car, so traffic stops treating the spot he got in at as a person standing in the road)
@@ -780,7 +797,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const myLine = (s) => { const L = meLine(s); return me.nudge ? avoidProps(s, Math.min(Math.max(L + me.nudge, Math.min(L, PATH.outer(s))), Math.max(L, PATH.far(s))), me.d) : L; };
     // ...then round whatever is solid in the street, eased (a first-order follow, 0.11 s) so a car appearing in the way is a
     // quick lean to the free side, not a jump
-    const L0 = myLine(me.s), L1 = streetPath(me, L0);
+    holdUp(me, me.stun <= 0 && (keys.has('gas') || BOT), dt);
+    const L0 = myLine(me.s), L1 = streetPath(me, L0, dt);
     me.tg = me.tg === undefined ? L1 : me.tg + (L1 - me.tg) * (1 - Math.exp(-dt * 9));
     steerTo(me, me.tg, (myLine(me.s + 0.2) - myLine(me.s - 0.2)) / 0.4 * me.v, dt);
     // run into someone and you stumble (the bully just shoves through them); they get knocked aside, so you don't
@@ -816,7 +834,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // (once you're out in the street he comes out after you from further back, not only in the last few metres)
     const outK = THREE.MathUtils.smoothstep(me.d - PATH.left(me.s), 0.3, 1.5), pull = Math.max(close, outK);
     const hl = (s) => avoidProps(s, THREE.MathUtils.clamp(THREE.MathUtils.lerp(footLineD(s), me.d, pull), PATH.outer(s), PATH.far(s)), him.d);
-    const H1 = streetPath(him, hl(him.s));
+    holdUp(him, go, dt);
+    const H1 = streetPath(him, hl(him.s), dt);
     him.tg = him.tg === undefined ? H1 : him.tg + (H1 - him.tg) * (1 - Math.exp(-dt * 9));
     steerTo(him, him.tg, (hl(him.s + 0.2) - hl(him.s - 0.2)) / 0.4 * him.v, dt);
     if (go && gap < FOOT.reach && Math.abs(me.d - him.d) < 1 && me.stun <= 0) {
@@ -1002,6 +1021,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         }
         if (h.busted) { bust(h.e); break; }
       }
+      // other drivers leaning on the horn / standing on the brakes for a person in the road: heard from the street while you
+      // drive too, but quieter than on foot (you are inside a car) and with a nearer cut-off, so it is a touch of life, not noise
+      for (const h of ev.honks || []) { const g = Math.max(0, 1 - h.d / 45) * 0.45; if (g > 0.05) { audio.honkAt(g); if (h.skid) audio.skid(g); } }
       if (ev.nearMiss) { nearMisses += ev.nearMiss; pop('NEAR MISS +50'); audio.whoosh(); haptic(HAP.nearMiss); }
       if (ev.tokens) { tokens += ev.tokens; pop('+' + ev.tokens * 25); audio.token(); haptic(HAP.token, 60); bump(tokBox); }
       if (approaching) setHint(Math.abs(car.d - spot.d) < 0.8 ? 'Nice — hold the curb' : 'Pull right to the curb ▸');
@@ -1012,10 +1034,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       endT += dt;
       // once backup has pulled up, an officer gets out and walks up to your door
       const b = busted, bk = b.backup;
-      if (!b.officer && bk && bk.v < 0.3 && car.s - bk.s < 16) b.officer = world.add('officer', { s: bk.s + 1.2, d: bk.d + 1.2, scenery: true, color: 0x1c2740, hd: 0 });
+      if (!b.officer && bk && bk.v < 0.3 && car.s - bk.s < 60) b.officer = world.add('officer', { s: bk.s + 1.2, d: bk.d + 1.2, scenery: true, color: 0x1c2740, hd: 0 });
       if (b.officer) {
         const o = b.officer, ts = car.s - 0.4, td = car.d + 1.35, ds = ts - o.s, dd = td - o.d, L = Math.hypot(ds, dd);
-        if (L > 0.1) { const k = Math.min(1, 1.5 * dt / L); o.s += ds * k; o.d += dd * k; o.hd = Math.atan2(dd, ds); }
+        if (L > 0.1) { const k = Math.min(1, Math.min(3.4, Math.max(1.5, L / 4)) * dt / L);   // (a stroll up to the window, a jog if the cruiser was held up further back)
+          o.s += ds * k; o.d += dd * k; o.hd = Math.atan2(dd, ds); }
         else { o.hd = -Math.PI / 2; b.at = (b.at || 0) + dt; }   // at the driver's window
       }
       if (endT > 9 || b.at > 0.9) showBusted();
