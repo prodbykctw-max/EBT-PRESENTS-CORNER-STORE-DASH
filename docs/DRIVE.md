@@ -319,8 +319,16 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
     a person keeps to that side (no flip-flopping as you swerve round a tree); two people heading for the same side
     spread out instead of stacking (`spread`); a pair you run between part to either side; everyone **closes back up**
     about half a second after you (and the bully) have gone by. **One in five is distracted** (`late` in `traits`: notices
-    at 0.2 to 0.34 s, about 1.5 m out), so running into someone is rare, not impossible; those few still get `knock`
-    and you still stumble. The bully barges as before (he still `knock`s whoever is in his way and shoves through); the
+    at 0.62 to 0.9 s, about 3.5 to 5 m out; it used to be 0.2 to 0.34 s, 1.5 m out, which is closer than you can
+    sidestep from, so every distracted person on the wall side was a hit for someone running along the building),
+    so running into someone is rare, not impossible; those few still get `knock` and you still stumble.
+    **The tight stretch** (the chase runs past a tree and a lamp where the pavement is under `ROOM` = 1.7 m wide, about
+    s 42 to 58): there is no room for you and someone in your way to pass each other, and the closest you can run to the
+    wall (0.3 m inside the band) is within bump distance of the wall edge people step to. So nobody stands on a
+    stretch that narrow along the way to the car (`clearNarrow`, once at the start: a group standing there is moved to the
+    nearest wider pavement, so the street is a few groups different on the chase stretch only; density elsewhere is
+    unchanged), and a walking group that would step into one while you are within 70 m waits at its mouth until you
+    have gone by (`hold` in `update`). The bully barges as before (he still `knock`s whoever is in his way and shoves through); the
     difference is that people in his path now scatter first, a little later than they do for you.
   - **A smoother, livelier crowd** (same models, colours, density): every person moves on critically damped springs
     (exact for any frame time) instead of a lerp that snapped when a group went single file; they turn at a limited

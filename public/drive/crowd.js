@@ -21,6 +21,9 @@ const ACCENT = [0x121212, 0x2a1a12, 0x3d2616, 0x7a1f1f, 0x1d3f8a, 0xe6e6e6, 0xd4
 const ACC = { cap: 1, long: 2, bag: 4, hood: 8 };
 const SIM = [-130, 380];   // route-space window around the car that is always simulated (plus anyone on screen)   // accessory bits (vertex attr aAcc, instance mask)
 // radius each street-furniture type blocks on the sidewalk (m)
+// a stretch of pavement with less than this much band (m, see bandAt) is too narrow for a runner and someone in his way to pass
+// each other, so on the stretch the chase runs along nobody stands in it and nobody walks into it while he's coming (clearNarrow, update)
+const ROOM = 1.7;
 const FURNITURE = { tree_round: 0.45, tree_upright: 0.35, lamp: 0.2, signal: 0.25, bench: 0.85, bin: 0.3, hydrant: 0.25, shelter: 1.6 };
 
 // ------------------------------------------------------------------ the person (faces +Z, feet at y = 0)
@@ -177,6 +180,23 @@ export class Crowd {
     const i = Math.max(0, Math.min(this.band[side][0].length - 1, Math.round(s / 2)));
     return [this.band[side][0][i], this.band[side][1][i]];
   }
+  narrow(side, s) { const [lo, hi] = this.bandAt(side, s); return hi - lo < ROOM; }
+  /** Once, before anything has been drawn: the groups standing on the stretch the chase runs along (from the start to the car) where
+   *  the pavement is too narrow to step aside on are moved to the nearest stretch that isn't (jittered, so they don't pile up on its
+   *  edge). Everyone else, and the rest of the route, is as it was. */
+  clearNarrow(carS) {
+    for (const g of this.groups) {
+      if (g.anchored || g.s > carS + 10 || !this.narrow(g.side, g.s)) continue;
+      let to = null;
+      for (let k = 2; k <= 60 && to === null; k += 2) for (const x of [g.s + k, g.s - k]) if (x > 2 && x < this.route.length - 2 && !this.narrow(g.side, x)) { to = x; break; }
+      if (to === null) continue;
+      const out = Math.sign(to - g.s); let j = rnd(0, 4);
+      while (j > 0 && !this.narrow(g.side, to + out * j) && to + out * j > 2) { to += out * 1; j -= 1; }
+      const [lo, hi] = this.bandAt(g.side, to);
+      g.s = to; g.cd = lo + g.lane * (hi - lo);
+      for (const p of g.members) { p.s = g.s + p.ds; p.d = g.cd + p.dd; }
+    }
+  }
   randomGroup(s) {
     const r = Math.random();
     const kind = r < 0.7 ? 'walk' : r < 0.9 ? 'talk' : 'solo';
@@ -208,7 +228,7 @@ export class Crowd {
 
   update(dt, car, hornT) {
     this.t += dt;
-    if (!this._init) { this._init = true; for (const m of this.people) this.traits(m); }
+    if (!this._init) { this._init = true; this.clearNarrow(car.s); for (const m of this.people) this.traits(m); }
     const r = this.route, sim0 = car.s + SIM[0], sim1 = car.s + SIM[1];
     this.watch(dt);
     // simulate what's near the car or on screen; everyone else is out of sight and simply waits
@@ -220,7 +240,10 @@ export class Crowd {
       let target = g.anchored ? g.cd : Math.min(Math.max(lo + g.lane * (hi - lo), lo + half), Math.max(lo + half, hi - half));
       let single = false;
       if (g.kind === 'walk') {
-        g.s += g.dir * g.v * dt;
+        // (the runner on foot: a group about to step into a stretch with no room to pass waits at its mouth until he has gone by)
+        const run = this.thr.length && this.thr[0].who === 'runner' ? this.thr[0] : null;
+        g.hold = !!run && Math.abs(run.s - g.s) < 70 && !this.narrow(g.side, g.s) && this.narrow(g.side, g.s + g.dir * 3);
+        if (!g.hold) g.s += g.dir * g.v * dt;
         if (g.s < 3 || g.s > r.length - 3) { g.dir = g.s < 3 ? 1 : -1; g.s = Math.max(3, Math.min(r.length - 3, g.s)); }
         // street furniture a few steps ahead: pass on the roomier side, or go single file
         // (the list is sorted by s: start a little before the first one that can be within 3.5 m and stop a little past it, instead of
@@ -268,7 +291,7 @@ export class Crowd {
         // move: critically damped springs (no overshoot, no snapping, the same at any frame rate). Along the walk they ride
         // the group's own speed; across they ease to where they'd stand, or to the gap they've picked to let you by
         const evading = m.ev !== null;
-        const vt = g.kind === 'walk' ? g.dir * g.v : 0;
+        const vt = g.kind === 'walk' && !g.hold ? g.dir * g.v : 0;
         const dT = evading ? Math.min(m.hi + 0.1, Math.max(m.lo - 0.25, m.ev + (m.shove || 0))) : m.dT;
         const w = evading ? m.wEv : 6.5;
         this.spring(m, 's', 'vs', m.sT, vt, 6, dt);
@@ -301,8 +324,8 @@ export class Crowd {
     const late = Math.random() < 0.2;
     Object.assign(m, {
       late, flinchy: Math.random() < 0.5,
-      tl: late ? rnd(0.2, 0.34) : rnd(1.6, 2.1),     // seconds before you'd reach them that they notice you (the bully: shorter)
-      dl: late ? rnd(0.1, 0.18) : rnd(0.14, 0.34),   // …and how long they take to start moving once they have
+      tl: late ? rnd(0.62, 0.9) : rnd(1.6, 2.1),     // seconds before you'd reach them that they notice you (the bully: shorter)
+      dl: late ? rnd(0.08, 0.14) : rnd(0.14, 0.34),  // …and how long they take to start moving once they have
       wEv: late ? 9 : rnd(7, 10.5),                  // how brisk the step aside is (spring rate)
       vs: m.g.kind === 'walk' ? m.g.dir * m.g.v : 0, vd: 0, sp: 0, sT: m.s, dT: m.d, lo: 0, hi: 0,
       ev: null, evSide: 0, nt: -1, rl: 0, lkT: 0, lkS: 0, lkD: 0, fl: 0, hop: -1, yawT: m.yaw, yi: 1,
