@@ -108,7 +108,10 @@ export class Streetcars {
   trackD(s) { const k = Math.round(s); return this.D[k] ?? this.D[Math.max(0, Math.min(this.D.length - 1, k))] ?? this.route.lane(s, 1); }
 
   spawn(s) {
-    const e = this.world.add('tram', { s, d: this.trackD(s), v: 0, dir: -1, color: 0xffffff, tram: { speed: 0, dwell: 0, served: new Set(), bellT: 0 } });
+    // (a work zone is one lane, taken in turns: a streetcar put down inside one would meet, head-on in that lane, the cars of ours already in it,
+    // and neither can back out. It starts clear of any zone instead, further on, and arrives at the flagger's line like everything else.)
+    for (let k = 0; k < 3; k++) for (const [a, b] of this.world.workZones || []) if (s + LEN / 2 > a - 10 && s - LEN / 2 < b + 10) s = b + 10 + LEN / 2 + 2;
+    const e =this.world.add('tram', { s, d: this.trackD(s), v: 0, dir: -1, color: 0xffffff, tram: { speed: 0, dwell: 0, served: new Set(), bellT: 0 } });
     // nothing else may already be standing in the car's footprint
     for (const o of this.world.ents) if (o !== e && o.dir === -1 && !o.curb && Math.abs(o.s - s) < LEN / 2 + 5 && Math.abs(o.d - e.d) < 2) o.alive = false;
     this.cars.push(e);
@@ -156,6 +159,8 @@ export class Streetcars {
       // a flagger at a work zone the player is coming through holds it short of the zone
       const zone = (W.workZones || []).find(([a, b]) => car.s > a - 70 && car.s < b + 5);
       if (zone && front > zone[1] + 4 && front < zone[1] + 70) want = Math.min(want, Math.max(0, (front - zone[1] - 6) * 0.8));
+      // and it takes its turn like the cars coming the same way: held short of a work zone's one lane while the other direction has it
+      for (const z of W.traffic?.zones || []) if (z.turn !== -1 && front > z.c1 + 1 && front < z.c1 + 90) want = Math.min(want, Math.max(0, (front - (z.c1 + 6)) * 0.8));
       // the end of its run along our road: it turns away there; wait out of sight
       if (front - 2 < this.s0 - LEN / 2) want = 0;
       T.speed += Math.max(-DEC * 1.6 * dt, Math.min(ACC * dt, want - T.speed));

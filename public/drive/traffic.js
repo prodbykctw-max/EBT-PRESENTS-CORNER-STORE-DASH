@@ -52,11 +52,16 @@ export function newDriver(type) {
 
 /** the driver of the BUSTED backup cruiser: brisk, brakes late and firmly, keeps a short gap */
 const BACKUP = { a: 3, b: 4.5, T: 0.5, s0: 2, bmax: 9 };
+/** a work zone's flagger: a direction keeps the one lane for at most TURN_MAX s when the other is waiting (TURN_SOFT s when nobody of its own is
+ *  about to arrive), so nobody waits much more than that and the time it takes the section to clear */
+const TURN_MAX = 10, TURN_SOFT = 4;
+/** the watchdog: a car that has not moved for STUCK_T s (and is not waiting for a red light or a person) gets helped, one step at a time */
+const STUCK_T = 8;
 
 export class Traffic {
   constructor(world, { PLAYER, CARS, ON_FOOT }) {
     Object.assign(this, { world, PLAYER, CARS, ON_FOOT, clock: 0, honkT: 0, curv: null });
-    this.stats = { evacuated: 0, evacFailed: 0, pulledOut: 0, passes: 0, unstuck: 0, honks: 0, runnerBrakes: 0, runnerHits: 0, lanechanges: 0, standoffs: 0, asides: 0, slowPasses: 0 };
+    this.stats = { evacuated: 0, evacFailed: 0, pulledOut: 0, passes: 0, unstuck: 0, honks: 0, runnerBrakes: 0, runnerHits: 0, lanechanges: 0, standoffs: 0, asides: 0, slowPasses: 0, forced: 0, helped: 0, reversed: 0, ghosted: 0 };
   }
 
   // ------------------------------------------------------------------ the road ahead
@@ -88,7 +93,7 @@ export class Traffic {
   /** swing e onto another reference line, easing the offset out with zero speed at the end */
   changeRef(e, ref, T) {
     const c = this.refD(ref, e.s);
-    e.ref = ref; e.prof = { t: 0, T, x0: e.d - c - e.pers, v0: e.dd };
+    e.ref = ref; e.prof = { t: 0, T, x0: e.d - c - e.pers - (e.room || 0), v0: e.dd };   // (e.d already includes the lean away from people (room): left in, the car jumped sideways by it the moment it changed lane)
     e.refT = this.clock; this.stats.lanechanges++;
   }
 
@@ -102,7 +107,8 @@ export class Traffic {
       if (!(o.solid >= 0.35) && !o.worker) continue;
       if (o.type === 'cone' && o.hitDone) continue;
       const ped = this.ON_FOOT.has(o.type) || !!o.worker;
-      obs.push({ o, s: o.s, d: o.d, L: o.L || 4.5, W: o.W || 1.8, vs: o.parked ? 0 : o.v || 0, vd: o.dd || 0, ped, veh: !ped && o.solid >= 0.7 && !!this.CARS.has(o.type) });
+      obs.push({ o, s: o.s, d: o.d, L: o.L || 4.5, W: o.W || 1.8, vs: o.parked ? 0 : o.v || 0, vd: o.dd || 0, ped, veh: !ped && o.solid >= 0.7 && !!this.CARS.has(o.type),
+        tg: o.prof && o.ref ? this.refD(o.ref, o.s) + (o.pers || 0) + (o.room || 0) : undefined });   // (tg: where a car that is changing lane is heading: two cars must not both decide to move into the same lane)
     }
     // cross-street traffic that is on (or about to be on) our road is an obstacle too
     for (const a of W.ambient) {
@@ -179,7 +185,7 @@ export class Traffic {
       const o = ob[i]; if (o.o === e || !o.veh || o.ped || (ignoreParked && o.o.parked)) continue;
       const ds = dir * (S - o.s); if (ds <= -0.5) continue;
       const vlu = dir * o.vs; if (vlu < -2) continue;                      // going the other way
-      const half = o.W / 2 + 0.1 + (o.player ? 0.45 : 0), tg = o.player ? o.tgt : undefined;
+      const half = o.W / 2 + 0.1 + (o.player ? 0.45 : 0), tg = o.player ? o.tgt : o.tg;
       const odLo = Math.min(o.d, tg ?? o.d) - half, odHi = Math.max(o.d, tg ?? o.d) + half;
       if (odHi <= lo - e.W / 2 || odLo >= hi + e.W / 2) continue;
       const gap = ds - (o.L + e.L) / 2;
@@ -199,7 +205,8 @@ export class Traffic {
       if (o.o === e) continue;
       const a = o.s - o.L / 2 + Math.min(0, o.vs * T), b = o.s + o.L / 2 + Math.max(0, o.vs * T);
       if (b < s0 || a > s1) continue;
-      if (o.d + o.W / 2 + 0.2 > lo && o.d - o.W / 2 - 0.2 < hi) return false;
+      const dl = Math.min(o.d, o.tg ?? o.d), dh = Math.max(o.d, o.tg ?? o.d);   // (a car on its way into this strip counts as being in it)
+      if (dh + o.W / 2 + 0.2 > lo && dl - o.W / 2 - 0.2 < hi) return false;
     }
     return true;
   }
@@ -218,11 +225,12 @@ export class Traffic {
     }
     // work zones: the right lane is closed, so cars in our direction use the left lane; oncoming cars wait at the far
     // end while someone is on their way through (the flagger), a car already inside finishes
-    const zones = (W.workZones || []).map(([a, b], i) => { const z = ((this.zst ||= [])[i] ||= { turn: 1, t: 0 }); z.a = a; z.b = b; z.c0 = a + 32; z.c1 = b - 2; return z; });
+    const zones = (W.workZones || []).map(([a, b], i) => { const z = ((this.zst ||= [])[i] ||= { turn: 1, t: 0, t2: 0, was: 1 }); z.a = a; z.b = b; z.c0 = a + 32; z.c1 = b - 2; return z; });
     this.zoneTurns(zones, drivers, car, dt);
     this.zones = zones;
     for (const e of drivers) this.plan(e, dt, car, hornT, runner, zones, sig, out);
     for (const e of drivers) this.move(e, dt);
+    this.unstick(drivers, zones, car, runner, dt);
     // the streetcar can't swerve: if the runner is still under it when it arrives, that is a shove too
     if (runner) for (const tr of W.ents) if (tr.alive && tr.type === 'tram' && Math.abs(tr.s - runner.s) < (tr.L || 24.8) / 2 + 0.4 && Math.abs(tr.d - runner.d) < (tr.W || 2.65) / 2 + 0.4 && Math.abs(tr.v) > 0.3) {
       (out.runnerHits ||= []).push({ e: tr, sp: Math.abs(tr.v) }); this.stats.runnerHits++; if (tr.tram) tr.tram.speed *= 0.4;
@@ -241,24 +249,27 @@ export class Traffic {
       // "in": cars of ours that are out in the left lane (committed: the other direction must not be let in under them), and
       // oncoming cars past their stop line. Cars of ours still in the right lane, held or stuck at the cones, are waiting.
       const inFwd = drivers.some((e) => e.dir === 1 && e.ref === 'l1' && e.s > z.a - 90 && e.s - e.L / 2 < z.c1 + 4);
-      const inOnc = drivers.some((e) => e.dir === -1 && e.s - e.L / 2 < z.c1 + 1 && e.s + e.L / 2 > z.c0 - 4);
+      // (the streetcar runs in the left lane too, towards us: for the flagger it is oncoming traffic, and it holds short of the section like the cars do: see tram.js)
+      const trams = this.world.ents.filter((t) => t.alive && t.type === 'tram' && t.s - (t.L || 24.8) / 2 < z.c1 + 90 && t.s + (t.L || 24.8) / 2 > z.c0 - 4);
+      const inOnc = drivers.some((e) => e.dir === -1 && e.s - e.L / 2 < z.c1 + 1 && e.s + e.L / 2 > z.c0 - 4) || trams.some((t) => t.s - (t.L || 24.8) / 2 < z.c1 + 1);
       // (you are one of the cars of ours: waiting at the cones in the right lane, or coming up to them)
       const youNear = car.s > z.a - 80 && car.s < z.c1 && car.d < -0.5, youWait = youNear && car.v < 5, youComing = youNear && car.s > z.a - 45 && car.v >= 5;
       const waitFwd = youWait || drivers.some((e) => e.dir === 1 && e.ref !== 'l1' && e.s > z.a - 80 && e.s < z.c1 && e.sp < 5);
-      const waitOnc = drivers.some((e) => e.dir === -1 && e.s - e.L / 2 >= z.c1 + 1 && e.s < z.c1 + 90 && e.sp < 5);
-      // a platoon on its way keeps the turn a little longer, but never past 20 s
+      const waitOnc = drivers.some((e) => e.dir === -1 && e.s - e.L / 2 >= z.c1 + 1 && e.s < z.c1 + 90 && e.sp < 5) || trams.some((t) => t.s - (t.L || 24.8) / 2 >= z.c1 + 1 && Math.abs(t.v) < 3);
+      // a platoon on its way keeps the turn a little longer, but never past TURN_MAX
       const comingFwd = youComing || drivers.some((e) => e.dir === 1 && e.ref !== 'l1' && e.s > z.a - 45 && e.s <= z.c0 && e.sp > 3);
       const comingOnc = drivers.some((e) => e.dir === -1 && e.s > z.c1 && e.s < z.c1 + 60 && e.sp > 3);
       const playerIn = car.s > z.a - 30 && car.s < z.c1 + 5 && car.d > -0.5;
       z.inFwd = inFwd; z.inOnc = inOnc;
       if (z.turn === 1) {
         if (inOnc && !inFwd) { z.turn = -1; z.t = 0; }                        // they are already in there: let them through
-        else if (!playerIn && waitOnc && (z.t > 20 || (z.t > 8 && !comingFwd) || !waitFwd && !comingFwd)) z.turn = -2;
-      } else if (z.turn === -2) { if (!inFwd) { z.turn = -1; z.t = 0; } }
+        else if (!playerIn && waitOnc && (z.t > TURN_MAX || (z.t > TURN_SOFT && !comingFwd) || !waitFwd && !comingFwd)) z.turn = -2;
+      } else if (z.turn === -2) { if (!inFwd) { z.turn = -1; z.t = 0; } }                      // (cars that cannot get out of the section are the watchdog's: see unstick; letting the other direction in over them would be a head-on in one lane)
       else if (z.turn === -1) {
         if (inFwd && !inOnc) { z.turn = 1; z.t = 0; }
-        else if (playerIn || (waitFwd && (z.t > 20 || (z.t > 8 && !comingOnc) || !waitOnc && !comingOnc))) z.turn = 2;
+        else if (playerIn || (waitFwd && (z.t > TURN_MAX || (z.t > TURN_SOFT && !comingOnc) || !waitOnc && !comingOnc))) z.turn = 2;
       } else if (z.turn === 2) { if (!inOnc) { z.turn = 1; z.t = 0; } }
+      if (z.turn !== z.was) { z.was = z.turn; z.t2 = 0; } else z.t2 += dt;      // (how long it has been in this state: a state that is stuck is the watchdog's business, see unstick)
     }
   }
 
@@ -272,6 +283,13 @@ export class Traffic {
 
   plan(e, dt, car, hornT, runner, zones, sig, out) {
     const W = this.world, r = W.route, D = e.drv, dir = e.dir;
+    // backing out of a head-on that nobody else can solve (see unstick): a few metres straight back at walking pace, only while it is clear behind
+    if (e.revT > 0) {
+      e.revT -= dt;
+      const tg0 = this.refD(e.ref, e.s) + e.pers, rb = this.ahead(e, -dir, 0, 3, Math.min(e.d, tg0), Math.max(e.d, tg0), 12);
+      if (!rb || rb.gap > 1.5) { e.aF = 0; e.sp = 0; e.v = -dir * 2.2; e.stopT = 0; e.stillT = 0; e.faceT = 0; return; }
+      e.revT = 0;
+    }
     let sp = dir === -1 ? -e.v : e.v; if (sp < 0) sp = 0;
     e.sp = sp;
     const two = !r.oneway(e.s);
@@ -304,7 +322,18 @@ export class Traffic {
       const as = idmAccel(sp, v0, Math.max(gap, 0.05), 0, D);
       if (as < a) { a = as; why = 'zone'; }
     }
-    e.whyK = a > idmAccel(sp, v0, Infinity, 0, D) - 0.15 ? null : why === 'light' || why === 'zone' ? why : why ? (why.o.parked ? 'parked' : why.o.type) + (why.player ? '(player)' : '') : 'free';
+    // the parking lane we have pulled into ends somewhere: the line it is drawn along does not (it would jump two metres sideways, into
+    // whatever is beside us), so we stop short of its end unless we are on our way back to the travel lane by then
+    if (e.ref === 'pR' || e.ref === 'pL') {
+      const side = e.ref === 'pR' ? -1 : 1;
+      for (let k = 0; k <= 60; k += 2) {
+        if (r.parkD(front + dir * k, side) !== null) continue;
+        const as = idmAccel(sp, v0, Math.max(k - 1.5, 0.05), 0, D);
+        if (as < a) { a = as; why = 'parkend'; }
+        break;
+      }
+    }
+    e.whyK = a > idmAccel(sp, v0, Infinity, 0, D) - 0.15 ? null : typeof why === 'string' ? why : why ? (why.o.parked ? 'parked' : why.o.type) + (why.player ? '(player)' : '') : 'free';
     e.whyO = e.whyK && typeof why === 'object' && why ? why.o : null;
     if (e.backup) {   // BUSTED: the backup cruiser pulls up behind you
       const gap = car.s - 6.5 - e.s; e.ref = 'l0';
@@ -343,6 +372,60 @@ export class Traffic {
       if (ds < 0 && dd < 0 && sp > 0.5) { (out.runnerHits ||= []).push({ e, sp }); this.stats.runnerHits++; a = Math.min(a, -D.bmax); e.sp = sp = sp * 0.7; }
     }
     this.finish(e, dt, a, sp);
+  }
+
+  /** The guarantee behind all of the above: no car stays stopped for ever. A car that has not moved for STUCK_T s (not for a red light, a tram
+   *  at its platform, or a person in the road, which end by themselves) is followed to the head of its queue, and the head is helped in
+   *  the mildest way that works: the flagger gives its direction the section, then it swings into the free parking lane, then (head on
+   *  with something) whichever of the two has room behind backs out, and only out of sight does it drive through what is in its way
+   *  (the same few seconds of ghosting as a standoff, and cancelled the moment anyone could see it). The same goes for a work zone
+   *  stuck in the state where one direction is clearing the section and a car in it cannot get out. */
+  unstick(drivers, zones, car, runner, dt) {
+    this.unstickT = (this.unstickT || 0) + dt; if (this.unstickT < 0.5) return; this.unstickT = 0;
+    for (const z of zones) {
+      if ((z.turn !== -2 && z.turn !== 2) || z.t2 < STUCK_T) continue;
+      // the section is being cleared for the other direction and has not cleared: the slowest car still in it is the one that is stuck
+      const dir = z.turn === -2 ? 1 : -1;
+      let w = null;
+      for (const e of drivers) if (e.dir === dir && e.sp < 2 && (dir === 1 ? e.ref === 'l1' && e.s > z.a - 90 && e.s - e.L / 2 < z.c1 + 4 : e.s - e.L / 2 < z.c1 + 1 && e.s + e.L / 2 > z.c0 - 4) && (!w || e.sp < w.sp)) w = e;
+      if (w && (w.stopT || 0) >= 4) this.help(w, Math.max(w.stopT || 0, z.t2), zones, car);
+    }
+    for (const e of drivers) {
+      if ((e.stopT || 0) < STUCK_T || e.backup || e.revT > 0) continue;
+      let h = e;
+      for (let n = 0; n < 14 && h.whyK && h.whyO && h.whyO.drv && h.whyO !== h && h.whyO.alive; n++) h = h.whyO;
+      const z = zones.find((q) => h.s > q.a - 100 && h.s < q.c1 + 100);
+      // (waits that end by themselves: a red light, a tram at its platform or on the move, people in the road, you waiting. The one exception: in a work zone an
+      // oncoming car held up by you standing still in the one lane has to give way, you cannot be made to)
+      if (h.whyK === 'light' || (h.whyO && (h.whyO.worker || (h.whyO.type === 'tram' && (h.whyO.tram?.dwell > 0 || Math.abs(h.whyO.v || 0) > 0.5)) || this.ON_FOOT.has(h.whyO.type) || h.whyO === runner || (h.whyO === car && !(z && h.dir === -1 && Math.abs(car.v) < 0.5))))) continue;
+      if ((h.stopT || 0) < STUCK_T) continue;
+      // the flagger: the direction that has been held longest is given the section
+      if (z && h.whyK === 'zone') {
+        if (h.dir === 1 && (z.turn === -1 || z.turn === -2)) { z.turn = 2; z.t = 0; this.stats.forced++; continue; }
+        if (h.dir === -1 && (z.turn === 1 || z.turn === 2)) { z.turn = -2; z.t = 0; this.stats.forced++; continue; }
+      }
+      this.help(h, h.stopT, zones, car);
+    }
+  }
+  /** one step up the ladder for a car that has been stuck for t seconds, no more than one step every few seconds */
+  help(h, t, zones, car) {
+    if (this.clock < (h.helpAfter ?? 0)) return;
+    const dir = h.dir, blocker = h.whyO && h.whyO.alive !== false ? h.whyO : null;
+    h.helpAfter = this.clock + 3;
+    // 1. into the parking lane, out of the way
+    if (!h.prof && (h.ref === 'l0' || h.ref === 'l1') && this.pullAside(h, dir, 0, 1.9)) { h.evac = true; h.stopT = 0; this.stats.asides++; this.stats.helped++; return; }
+    // 2. head on: back out, the one that has room behind it
+    const clearBehind = (q) => { const tg = this.refD(q.ref, q.s) + q.pers; const rb = this.ahead(q, -q.dir, 0, 3, Math.min(q.d, tg), Math.max(q.d, tg), 12); return !rb || rb.gap > 6; };
+    if (t > STUCK_T + 3) {
+      const other = blocker && blocker.drv && blocker.dir === -dir ? blocker : null;
+      // (a few metres, and not again for a while: backing out is to let something by, not to leave)
+      if (this.clock > (h.revAfter ?? 0) && clearBehind(h)) { h.revT = 2.5; h.revAfter = this.clock + 25; this.stats.helped++; this.stats.reversed++; return; }
+      if (other && this.clock > (other.revAfter ?? 0) && clearBehind(other)) { other.revT = 2.5; other.revAfter = this.clock + 25; this.stats.helped++; this.stats.reversed++; return; }
+    }
+    // 3. out of sight, and only then, through it
+    if (t > STUCK_T + 6 && !this.onScreen(h) && !(blocker && blocker.s !== undefined && this.onScreen(blocker))) {
+      h.ghostOf = blocker; h.ghostUntil = this.clock + 6; h.stopT = 0; this.stats.helped++; this.stats.ghosted++;
+    }
   }
 
   /** two cars nose to nose that neither can get out of by going home. Nobody is ever seen driving through anybody: with a free
@@ -434,7 +517,8 @@ export class Traffic {
       // back into our own lane once we're clear of what we passed, and it is safe
       if (e.passEnd !== undefined && dir * (S - e.passEnd) < e.L / 2 + 1.2) return;
       const c0 = this.refD(home ? 'l1' : 'l0', S);
-      if (!this.stripFree(e, c0 - e.W / 2, c0 + e.W / 2, S - e.L / 2 - 4, S + e.L / 2 + 9, 1.2)) return;
+      // (the room it needs in front of its nose grows with its speed: a car creeping in a queue can slot in behind a stopped one)
+      if (!this.stripFree(e, c0 - e.W / 2, c0 + e.W / 2, S - e.L / 2 - 4, S + e.L / 2 + Math.min(9, 3 + Math.max(0, sp) * 0.8), 1.2)) return;
       const bh = this.behind(e, dir, c0 - 1, c0 + 1);
       if (bh && bh.gap < Math.max(10, bh.ob.vs > sp ? (dir * bh.ob.vs - sp) * 3.5 + 10 : 8)) return;
       this.changeRef(e, home ? 'l1' : 'l0', 2.2); e.lane = home; e.passEnd = undefined;
@@ -493,7 +577,8 @@ export class Traffic {
       const o = ob[i];
       if (o.o === e) continue;
       if (zn && o.veh && o.o.dir === -dir && o.s > zn.c1 + 2) continue;      // (waiting at the flagger's line for us to get through)
-      if (Math.abs(o.d - c) > o.W / 2 + half + 0.35 && !(o.player && Math.abs(o.tgt - c) < o.W / 2 + half)) continue;
+      const dl = Math.min(o.d, o.tg ?? o.d), dh = Math.max(o.d, o.tg ?? o.d), dist = c < dl ? dl - c : c > dh ? c - dh : 0;
+      if (dist > o.W / 2 + half + 0.35 && !(o.player && Math.abs(o.tgt - c) < o.W / 2 + half)) continue;
       const vl = dir * o.vs;
       if (vl < -1) {
         // (a work zone's flagger holds oncoming cars beyond its far end while we go through: they can stop in time)
@@ -617,6 +702,8 @@ export class Traffic {
     o.pullAfter = this.clock + 0.6;
     if (Math.random() > 0.25) return;
     const dir = 1, c = r.lane(S, 0), L = o.L || 4.5;
+    // a car that is touching another one, even a parked one, stays where it is: a space it cannot clear is not a space it pulls out of
+    if (this.touching(o)) return;
     // in front: the space to drive off into, and a car-length of room to swing out
     if (!this.stripFree(o, o.d - 1.0, o.d + 1.0, S + L / 2 + 0.2, S + L / 2 + 9, 0.1)) return;
     // the lane: free for the whole manoeuvre, and nobody (you!) close behind in it. Behind it: far enough that nobody brakes
@@ -625,6 +712,15 @@ export class Traffic {
     if (bh) { const closing = Math.max(0, bh.vlu - 1); if (bh.gap < 40 + closing * 6) return; }
     if (car.s < S && car.s > S - 100 && Math.abs(car.d - c) < 3 && car.v > 1) return;
     this.unpark(o, 'l0');
+  }
+  /** is any other solid vehicle's box overlapping o's (or within a hand's width of it)? */
+  touching(o) {
+    const ob = this.obs, L = o.L || 4.5, W = o.W || 1.8;
+    for (let i = this.lowerBound(o.s - L - 8); i < ob.length && ob[i].s < o.s + L + 8; i++) {
+      const q = ob[i]; if (q.o === o || q.ped || !q.veh) continue;
+      if (Math.abs(q.s - o.s) < (q.L + L) / 2 + 0.15 && Math.abs(q.d - o.d) < (q.W + W) / 2 + 0.1) return true;
+    }
+    return false;
   }
   unpark(o, ref) {
     Object.assign(o, { parked: false, curb: false, dir: 1, drv: newDriver(o.type), occupied: false, lane: 0, sp: 0, v: 0, aF: 0, stillT: 0, pers: rnd(-0.15, 0.15), off: 0, dd: 0, prof: null, lcT: -9 });

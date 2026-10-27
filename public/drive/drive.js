@@ -774,28 +774,40 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // (m.ofs) rather than snapped, but the person himself is already out.
   function solidPass(m, dt) {
     const obs = world.traffic.obs; m.ofs ||= { s: 0, d: 0 };
-    if (!obs || !obs.length) return;
-    const s0 = m.s, d0 = m.d;
+    const s0 = m.s, d0 = m.d, E = 0.003;
+    // out of one thing along the shallowest of its four ways: [cost, axis, target]. (a way sideways that ends up in the building or past
+    // the far curb is no way out; one along the street is always open)
+    const out = (sLo, sHi, dLo, dHi, moving) => {
+      const [lo, hi] = sideRange(m.s), ways = [[(m.s - sLo) * moving, 's', sLo - E], [(sHi - m.s) * moving, 's', sHi + E]];
+      if (dLo - E >= lo - 0.05) ways.push([m.d - dLo, 'd', dLo - E]);
+      if (dHi + E <= hi + 0.05) ways.push([dHi - m.d, 'd', dHi + E]);
+      ways.sort((a, b) => a[0] - b[0]);
+      const [, axis, to] = ways[0];
+      if (axis === 's') { if ((to < m.s && m.v > 0) || (to > m.s && m.v < 0)) { m.v = 0; m.stopped = true; } m.s = to; }
+      else { if ((to < m.d && m.dv > 0) || (to > m.d && m.dv < 0)) m.dv = 0; m.d = to; }
+      m.pushed = (m.pushed || 0) + 1;
+    };
     for (let pass = 0; pass < 4; pass++) {
       let moved = false;
-      for (const o of obs) {
+      for (const o of obs || []) {
         if (o.runner || o.player || o.o === him || o.o === me || !o.L || !o.W || Math.abs(o.s - m.s) > 20) continue;
         const ent = o.o, live = !o.cross && typeof ent.s === 'number' && typeof ent.d === 'number';
         const os = live ? ent.s : o.s, od = live ? ent.d : o.d;
         const sLo = Math.min(o.s, os) - o.L / 2 - BODY, sHi = Math.max(o.s, os) + o.L / 2 + BODY;
         const dLo = Math.min(o.d, od) - o.W / 2 - BODY, dHi = Math.max(o.d, od) + o.W / 2 + BODY;
         if (m.s <= sLo || m.s >= sHi || m.d <= dLo || m.d >= dHi) continue;
-        const [lo, hi] = sideRange(m.s), E = 0.003, moving = Math.abs(o.vs) > 2 ? 2.5 : 1;
-        // the four ways out: [cost, axis, target]. (a way sideways that ends up in the building or past the far curb is no way out)
-        const ways = [[(m.s - sLo), 's', sLo - E], [(sHi - m.s), 's', sHi + E]];
-        if (dLo - E >= lo - 0.05) ways.push([m.d - dLo, 'd', dLo - E]);
-        if (dHi + E <= hi + 0.05) ways.push([dHi - m.d, 'd', dHi + E]);
-        for (const w of ways) if (w[1] === 's') w[0] *= moving;
-        ways.sort((a, b) => a[0] - b[0]);
-        const [, axis, to] = ways[0];
-        if (axis === 's') { if ((to < m.s && m.v > 0) || (to > m.s && m.v < 0)) { m.v = 0; m.stopped = true; } m.s = to; }
-        else { if ((to < m.d && m.dv > 0) || (to > m.d && m.dv < 0)) m.dv = 0; m.d = to; }
-        moved = true; m.pushed = (m.pushed || 0) + 1;
+        out(sLo, sHi, dLo, dHi, Math.abs(o.vs) > 2 ? 2.5 : 1);   // (a car coming along the street is gone round, not carried along in front of)
+        moved = true;
+      }
+      // street furniture is solid too (steering round it is avoidProps's job, but streetPath moving the line off a car or a dog can move it
+      // onto a trunk): a circle of its radius and your body
+      for (const o of PATH.props) {
+        if (Math.abs(o.s - m.s) > 3) continue;
+        const od = -o.d, R = o.r + BODY, ds = m.s - o.s, dd = m.d - od;
+        if (ds * ds + dd * dd >= R * R) continue;
+        const cs = Math.sqrt(Math.max(0, R * R - dd * dd)), cd = Math.sqrt(Math.max(0, R * R - ds * ds));
+        out(o.s - cs, o.s + cs, od - cd, od + cd, 1);
+        moved = true;
       }
       if (!moved) break;
     }
@@ -899,6 +911,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   function updateHimLeft(dt) {
     speedTo(him, FOOT.bully * 0.7, dt, 0.2, 12); him.s += him.v * dt;
     steerTo(him, footLineD(him.s), 0, dt);
+    solidPass(him, dt);
     if (car.s - him.s > 25) him.o.visible = him.blob.visible = false;
   }
   // smooth follow that never overshoots, the same at any frame rate (Game Programming Gems 4, "critically damped
@@ -1095,6 +1108,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       world.runner = me; world.runnerOn = state === 'onfoot';
       trams.update(dt, car);
       streetEvents(world.update(dt, car, drove + footT, 0));
+      // (the traffic has moved since the last steering step, and a car can drive onto a person who is standing still: once more, with where everything is now, so a frame never ends with anyone inside anything)
+      if (state === 'onfoot') { solidPass(me, dt); solidPass(him, dt); }
     }
     if (state === 'parked' || state === 'late') {
       endT += dt; setHint('');

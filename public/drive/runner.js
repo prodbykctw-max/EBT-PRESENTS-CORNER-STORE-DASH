@@ -309,7 +309,9 @@ export class World {
         if (pd !== null) this.add(parkedType(), { s, d: pd, color: pick(PAINT), dir: 1, parked: true, curb: true, occupied: true });
         else this.add(carType(), { s, d: right, v: LIMIT * rnd(1.0, 1.2), color: pick(PAINT), dir: 1, flow: true });
       }
-      if (ev === 'construction') {
+      // (a work zone is one lane, taken in turns: a signal in the middle of it would hold the cars in the section at a red light while the
+      // other direction waited for the section to clear, so none is laid out across a junction or crosswalk)
+      if (ev === 'construction' && !(() => { for (let k = Math.round(s) - 46; k <= Math.round(s) + 44; k++) if (this.marks && this.marks[k] === 0) return true; return false; })()) {
         // taper the cones from the right curb to the centre line, then run them for 22 m; barricade at the head
         this.add('worksign', { s: s - 38, d: -(hw + 1.6), yawOff: Math.PI });
         // taper from the right edge line to the lane line, then cones along the lane line: the right lane is closed
