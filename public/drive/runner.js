@@ -4,6 +4,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { LEVEL, standOn, deckTop } from './levels.js';
 import { Traffic, LIMIT } from './traffic.js';
+import { hooks } from './mode.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
@@ -858,6 +859,7 @@ export function bakedGeometry(root, name) {
   if (node.geometry.index) g.setIndex(node.geometry.index.clone());
   g.applyMatrix4(node.matrixWorld);
   g.computeBoundingSphere();
+  if (hooks.propGeo) hooks.propGeo(g, name);   // the realistic look tags each vertex with its part and its baked occlusion
   return g;
 }
 
@@ -876,6 +878,7 @@ function pickWeighted(list) {
 
 /** One material for every prop: vertex colours, and pure-white vertices take the per-instance tint. */
 export function propMaterial() {
+  if (hooks.propMaterial) return hooks.propMaterial();   // the realistic look (real.js) builds its own
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.15 });
   m.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader.replace('#include <color_vertex>', `

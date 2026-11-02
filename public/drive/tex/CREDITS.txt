@@ -1,0 +1,13 @@
+Textures for the "real" look (?look=real). Everything here is CC0 (public domain dedication, no credit required; credited anyway).
+They are built by drive/tools/build_real_tex.mjs (1K sources, downsized, packed into two WebP images per set) into public/drive/tex/real/.
+
+brick_d.webp, brick_n.webp   Poly Haven "Brick 4" (brick_4)                 https://polyhaven.com/a/brick_4                 CC0 1.0
+conc_d.webp,  conc_n.webp    Poly Haven "Concrete Wall 008"                  https://polyhaven.com/a/concrete_wall_008       CC0 1.0
+pave_d.webp,  pave_n.webp    Poly Haven "Concrete Pavement"                  https://polyhaven.com/a/concrete_pavement       CC0 1.0
+asph_r.webp                  Poly Haven "Asphalt 02" (roughness + AO only)   https://polyhaven.com/a/asphalt_02              CC0 1.0
+curt_d.webp,  curt_n.webp    ambientCG "Facade001" (glass curtain wall)      https://ambientcg.com/view?id=Facade001         CC0 1.0
+peel.webp                    generated in this repo by build_real_tex.mjs (tileable value noise), no outside source
+
+Licence text: https://creativecommons.org/publicdomain/zero/1.0/
+Packing: *_d = albedo with the scan's ambient occlusion baked in; *_n = R,G tangent-space normal (OpenGL), B roughness.
+Nothing here is CC-BY or otherwise needs attribution. No model files were added.
