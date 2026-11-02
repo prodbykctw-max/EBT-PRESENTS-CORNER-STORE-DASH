@@ -22,6 +22,9 @@
 //
 // Constants are SI (m, s). The 25 mph downtown limit is 11.2 m/s; drivers want 5-30 % over it, like Atlanta drivers.
 export const LIMIT = 11.2;
+/** How much of the old traffic there is, 0..1. The owner asked for 75 % less, so 0.25. Every source of moving vehicles is scaled by it (runner.js plan(), the
+ *  oncoming feed, the cross streets' cap; feed() below) and nothing else is: parked cars, the streetcar and the BUSTED backup are not traffic in this sense. */
+export const TRAFFIC = 0.25;
 const SPEED_OVER = [1.05, 1.3];
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -61,7 +64,7 @@ const STUCK_T = 8;
 export class Traffic {
   constructor(world, { PLAYER, CARS, ON_FOOT }) {
     Object.assign(this, { world, PLAYER, CARS, ON_FOOT, clock: 0, honkT: 0, curv: null });
-    this.stats = { evacuated: 0, evacFailed: 0, pulledOut: 0, passes: 0, unstuck: 0, honks: 0, runnerBrakes: 0, runnerHits: 0, lanechanges: 0, standoffs: 0, asides: 0, slowPasses: 0, forced: 0, helped: 0, reversed: 0, ghosted: 0, despawned: 0 };
+    this.stats = { evacuated: 0, evacFailed: 0, pulledOut: 0, passes: 0, unstuck: 0, honks: 0, runnerBrakes: 0, runnerHits: 0, lanechanges: 0, standoffs: 0, asides: 0, slowPasses: 0, forced: 0, helped: 0, reversed: 0, ghosted: 0, despawned: 0, fed: 0 };
   }
 
   // ------------------------------------------------------------------ the road ahead
@@ -755,6 +758,7 @@ export class Traffic {
     this.feedT = (this.feedT ?? 1) - dt;
     if (this.feedT > 0) return;
     this.feedT = rnd(1.2, 2.6);
+    if (Math.random() >= TRAFFIC) return;   // (less traffic: most of the chances to join the street pass)
     // same direction: join near the start of the mapped street while the player is well past it; later behind the player
     const base = runner ? runner.s : car.s;
     const at = clamp(base - 110, 6, r.length - 40);
@@ -762,7 +766,7 @@ export class Traffic {
       const near = W.ents.some((o) => o.alive && !o.scenery && o.dir === 1 && !o.curb && Math.abs(o.s - at) < 55 && o.d < 0.5 + r.lane(o.s, 1));
       if (!near && !W.visible(...this.pt(at, r.lane(at, 0)), 5)) {
         const d = r.lane(at, 0);
-        W.add(W.carType(), { s: at, d, v: LIMIT * rnd(0.9, 1.1), color: W.paint(), dir: 1, flow: true });
+        W.add(W.carType(), { s: at, d, v: LIMIT * rnd(0.9, 1.1), color: W.paint(), dir: 1, flow: true, src: 'feed' }); this.stats.fed++;
       }
     }
   }
@@ -799,7 +803,7 @@ export class Traffic {
     return false;
   }
   unpark(o, ref) {
-    Object.assign(o, { parked: false, curb: false, dir: 1, drv: newDriver(o.type), occupied: false, lane: 0, sp: 0, v: 0, aF: 0, stillT: 0, pers: rnd(-0.15, 0.15), off: 0, dd: 0, prof: null, lcT: -9 });
+    Object.assign(o, { src: 'unpark', parked: false, curb: false, dir: 1, drv: newDriver(o.type), occupied: false, lane: 0, sp: 0, v: 0, aF: 0, stillT: 0, pers: rnd(-0.15, 0.15), off: 0, dd: 0, prof: null, lcT: -9 });
     o.cruise = o.drv.v0;
     const T = 2.4;
     // the offset from the parking-lane line eases into the lane

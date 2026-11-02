@@ -3,11 +3,17 @@
 // d = metres left(+)/right(-) of the centre line. That makes lanes, dodging and collision trivial and exact.
 import * as THREE from './vendor/three.module.min.js';
 import { LEVEL, standOn, deckTop } from './levels.js';
-import { Traffic, LIMIT } from './traffic.js';
+import { Traffic, LIMIT, TRAFFIC } from './traffic.js';
+export { TRAFFIC };
 import { hooks } from './mode.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
+/** how many cars in a platoon of oncoming traffic (1-3). At TRAFFIC = 1 it is the old mix (60 % singles, 30 % pairs, 10 % threes); with less traffic the
+ *  extra cars thin out in step with it, so a quarter of the traffic is not a quarter of the platoons but singles that are spread out, not bunched */
+const platoonSize = () => 1 + (Math.random() < 0.4 * TRAFFIC ? (Math.random() < 0.75 ? 1 : 2) : 0);
+/** the most cross-street vehicles (cars, buses, freeway-deck traffic) alive at once */
+const AMBIENT_CAP = Math.max(1, Math.round(14 * TRAFFIC));
 
 // ---------------------------------------------------------------- route frame
 export class RouteFrame {
@@ -287,10 +293,10 @@ export class World {
   add(type, props) { const e = { type, ...TYPES[type], v: 0, dv: 0, yaw: 0, alive: true, color: 0xffffff, ...props }; this.ents.push(e); return e; }
   /** 1–3 oncoming cars (a platoon) from s on, moving toward the player; returns where the platoon ends */
   oncomingPlatoon(s) {
-    const r = this.route, v0 = -LIMIT * rnd(1.0, 1.2), n = Math.random() < 0.6 ? 1 : Math.random() < 0.75 ? 2 : 3;
+    const r = this.route, v0 = -LIMIT * rnd(1.0, 1.2), n = platoonSize();
     for (let k = 0; k < n; k++, s += rnd(18, 28)) {
       if (r.oneway(s)) continue;
-      this.add(carType(), { s, d: r.lane(s, 1), v: v0, color: pick(PAINT), dir: -1 });
+      this.add(carType(), { s, d: r.lane(s, 1), v: v0, color: pick(PAINT), dir: -1, src: 'onc0' });
       this.stats.oncoming++;
     }
     return s;
@@ -307,8 +313,8 @@ export class World {
         // used to be a car parked in the middle of your lane for no reason. Now it's a car at the curb with a driver in it that
         // pulls out when the street is clear (traffic.js maybePullOut); with no parking lane here, a car already driving
         const pd = r.parkD(s, -1);
-        if (pd !== null) this.add(parkedType(), { s, d: pd, color: pick(PAINT), dir: 1, parked: true, curb: true, occupied: true });
-        else this.add(carType(), { s, d: right, v: LIMIT * rnd(1.0, 1.2), color: pick(PAINT), dir: 1, flow: true });
+        if (pd !== null) this.add(parkedType(), { s, d: pd, color: pick(PAINT), dir: 1, parked: true, curb: true, occupied: Math.random() < TRAFFIC });
+        else if (Math.random() < TRAFFIC) this.add(carType(), { s, d: right, v: LIMIT * rnd(1.0, 1.2), color: pick(PAINT), dir: 1, flow: true, src: 'pull' });
       }
       // (a work zone is one lane, taken in turns: a signal in the middle of it would hold the cars in the section at a red light while the
       // other direction waited for the section to clear, so none is laid out across a junction or crosswalk. Where this spot has one, the zone
@@ -346,14 +352,14 @@ export class World {
     }
     // the traffic going our way: a car every 55-110 m all down the street, already up to speed (traffic.js keeps it going,
     // and feeds more in from behind). Not inside a work zone, not on top of anything.
-    for (let s1 = 62; s1 < sStop + 70; s1 += rnd(55, 110)) {
+    for (let s1 = 62; s1 < sStop + 70; s1 += rnd(55, 110) / TRAFFIC) {
       if ((this.workZones || []).some(([a, b]) => s1 > a - 25 && s1 < b + 25)) continue;
       const d1 = r.lane(s1, 0);
       if (this.ents.some((o) => o.alive && !o.scenery && o.solid && Math.abs(o.s - s1) < 18 && Math.abs(o.d - d1) < 2.4)) continue;
-      this.add(carType(), { s: s1, d: d1, v: LIMIT * rnd(1.0, 1.2), color: pick(PAINT), dir: 1, flow: true });
+      this.add(carType(), { s: s1, d: d1, v: LIMIT * rnd(1.0, 1.2), color: pick(PAINT), dir: 1, flow: true, src: 'plan' });
     }
     // oncoming traffic already on the road, all the way down the far lane (fed from the far end in update)
-    for (let s1 = 60; s1 < r.length - 10; s1 += rnd(50, 130)) s1 = this.oncomingPlatoon(s1);
+    for (let s1 = 60; s1 < r.length - 10; s1 += rnd(50, 130) / TRAFFIC) s1 = this.oncomingPlatoon(s1);
     // cars parked along both curbs wherever there's a parking lane (~60 % full), clear of junctions and crosswalks
     const clearAt = (s1) => { for (let k = -8; k <= 8; k++) if (this.marks && this.marks[Math.round(s1) + k] === 0) return false; return true; };
     for (const side of [-1, 1]) for (let s1 = rnd(6, 12); s1 < r.length - 4; s1 += rnd(6.2, 7.2)) {
@@ -361,7 +367,7 @@ export class World {
       if (this.ents.some((o) => o.alive && o.parked && Math.abs(o.s - s1) < 5.6 && Math.abs(o.d - pd) < 2.2)) continue;   // (not on top of the car the 'pullout' event left at the curb)
       if (side < 0 && (this.workZones || []).some(([a, b]) => s1 > a && s1 < b)) continue;   // coned off
       if (side < 0 && s1 > sStop - 14 && s1 < sStop + 16) continue;                          // the store's P space (room to pull in)
-      this.add(parkedType(), { s: s1, d: pd + side * rnd(-0.1, 0.15), color: pick(PAINT), dir: side > 0 ? -1 : 1, parked: true, curb: true, occupied: side < 0 && Math.abs(s1 - sStop) > 45 && Math.random() < 0.16 });
+      this.add(parkedType(), { s: s1, d: pd + side * rnd(-0.1, 0.15), color: pick(PAINT), dir: side > 0 ? -1 : 1, parked: true, curb: true, occupied: side < 0 && Math.abs(s1 - sStop) > 45 && Math.random() < 0.16 * TRAFFIC });
     }
     // a couple of cyclists in the bike lane (people on foot are the crowd: crowd.js)
     for (let q = 0; q < 5; q++) { const s0 = rnd(40, sStop - 60); this.add('cyclist', { s: s0, d: -(r.hw(s0) + 0.55), v: rnd(4.5, 6.5), color: pick(SHIRTS), dir: 1, scenery: true }); }
@@ -436,7 +442,7 @@ export class World {
       return dm > 14 && along < 0.3 && rd.pts.some((p) => r.distTo(p[0], p[1]) < 10);
     });
     this.driveRoads = roads;
-    for (let q = 0; q < 14; q++) this.spawnAmbient(true);
+    for (let q = 0; q < AMBIENT_CAP; q++) this.spawnAmbient(true);
   }
   updateFrustum() {
     if (this.camera) { this._pm.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse); this.frustum.setFromProjectionMatrix(this._pm); }
@@ -512,11 +518,11 @@ export class World {
         return gap < 3 + vm * 1.3 + Math.max(0, vm * vm - vl * vl) / 10;     // room to brake behind it, like the cars that follow
       });
       if (!jammed && !seen({ s: src, d: r.lane(src, 1) }, 4)) {   // one car at a time: platoon spacing, then a real gap
-        if (!this.srcLeft) { this.srcLeft = Math.random() < 0.6 ? 1 : Math.random() < 0.75 ? 2 : 3; this.srcV = -LIMIT * rnd(1.0, 1.2); }
+        if (!this.srcLeft) { this.srcLeft = platoonSize(); this.srcV = -LIMIT * rnd(1.0, 1.2); }
         const v0 = this.srcV;                                   // a platoon shares one speed
-        this.add(carType(), { s: src, d: r.lane(src, 1), v: v0, color: pick(PAINT), dir: -1 });
+        this.add(carType(), { s: src, d: r.lane(src, 1), v: v0, color: pick(PAINT), dir: -1, src: 'onc' });
         this.stats.oncoming++;
-        this.nextOncoming = (--this.srcLeft ? rnd(18, 28) : rnd(50, 130)) / -v0;
+        this.nextOncoming = (--this.srcLeft ? rnd(18, 28) : rnd(50, 130) / TRAFFIC) / -v0;
       } else this.nextOncoming = 0.5;
     }
     // every car in the street (ours and oncoming) drives itself: traffic.js (IDM car-following, MOBIL lane changes, giving way to
@@ -669,7 +675,7 @@ export class World {
       if (a.hitT) a.hitT = Math.max(0, a.hitT - dt);
     }
     this.ambient = this.ambient.filter((a) => !a.dead);
-    for (let k = 0; k < 2 && this.ambient.length < 14; k++) this.spawnAmbient(false);
+    for (let k = 0; k < 2 && this.ambient.length < AMBIENT_CAP; k++) this.spawnAmbient(false);
     return out;
   }
 
