@@ -38,10 +38,14 @@ const hermite = (x0, v0, T, t) => {   // from (x0, v0) at t = 0 to (0, 0) at t =
 /** IDM acceleration. v own speed, v0 desired speed, gap bumper-to-bumper to the leader (Infinity: none), vl leader
  *  speed along our direction (negative for head-on), p {a, b, T, s0, bmax} */
 export function idmAccel(v, v0, gap, vl, p) {
-  const free = 1 - Math.pow(Math.max(0, v) / Math.max(v0, 0.5), 4);
-  if (gap === Infinity) return p.a * free;
+  const vv = Math.max(0, v), vd = Math.max(v0, 0.5);
+  // The free-road term. Below the desired speed it is the classic one. ABOVE it (the desired speed has just dropped: a bend, a work zone,
+  // the end of a flee) the classic term is a*(1 - (v/v0)^4), which is unbounded: 12 m/s against 5.5 m/s asked for -54 m/s^2 on a free road.
+  // The bounded rule of the improved IDM (Treiber & Kesting 2013) eases off at about the comfortable braking b instead.
+  const aFree = vv <= vd ? p.a * (1 - Math.pow(vv / vd, 4)) : -p.b * (1 - Math.pow(vd / vv, 4 * p.a / p.b));
+  if (gap === Infinity) return aFree;
   const sStar = p.s0 + Math.max(0, v * p.T + v * (v - vl) / (2 * Math.sqrt(p.a * p.b)));
-  return Math.max(-p.bmax, p.a * (free - (sStar / Math.max(gap, 0.05)) ** 2));
+  return Math.max(-p.bmax, aFree - p.a * (sStar / Math.max(gap, 0.05)) ** 2);
 }
 
 /** a driver: desired speed over the limit, how brisk, how big a gap they keep */
@@ -60,6 +64,8 @@ const BACKUP = { a: 3, b: 4.5, T: 0.5, s0: 2, bmax: 9 };
 const TURN_MAX = 10, TURN_SOFT = 4;
 /** the watchdog: a car that has not moved for STUCK_T s (and is not waiting for a red light or a person) gets helped, one step at a time */
 const STUCK_T = 8;
+/** the speed through a work zone's coned-off lane */
+const WORKZONE_V = 8;
 
 export class Traffic {
   constructor(world, { PLAYER, CARS, ON_FOOT }) {
@@ -79,6 +85,22 @@ export class Traffic {
     let kmax = 0; const i0 = clamp(Math.round(s), 0, r.n - 1);
     for (let i = Math.max(0, i0 - 6); i <= Math.min(r.n - 1, i0 + 14); i += 2) kmax = Math.max(kmax, this.curv[i]);
     return kmax < 0.004 ? 99 : Math.max(5.5, Math.sqrt(2.3 / kmax));
+  }
+  /** The speed e may carry here, counting what is coming: a bend's speed (and a work zone's 8 m/s) is a TARGET to be reached by the time the car
+   *  gets there, braking at its own comfortable b, not a limit that applies the moment it is within a few metres (which asked for -54 m/s^2).
+   *  v_allow = the lowest of sqrt(v_there^2 + 2 b distance) over the next 60 m. */
+  vAllow(e, dir, b) {
+    const s0 = e.s + dir * ((e.L || 4.5) / 2);
+    let v = Infinity;
+    for (let k = 0; k <= 60; k += 5) {
+      const lim = this.curveV(s0 + dir * (k + 8));
+      if (lim < 90) v = Math.min(v, Math.sqrt(lim * lim + 2 * b * k));
+    }
+    for (const [a, c] of this.world.workZones || []) {
+      const entry = dir > 0 ? a - 8 : c + 8, dist = dir * (entry - s0);   // (the zone's first metre for a car going this way)
+      if (dist > 0 && dist < 60) v = Math.min(v, Math.sqrt(WORKZONE_V * WORKZONE_V + 2 * b * dist));
+    }
+    return v;
   }
 
   refD(ref, s) {
@@ -303,9 +325,10 @@ export class Traffic {
     // a standoff given up on (see standoff) ends the moment either car could be seen, unless the two are still inside each other: it is kept until they are not
     if (e.ghostUntil > this.clock && !e.ovT && (this.onScreen(e) || !e.ghostOf?.alive || this.onScreen(e.ghostOf))) e.ghostUntil = 0;
     // desired speed: the driver's, less for a bend and when the street is full of people
-    let v0 = Math.min(D.v0, this.curveV(e.s + (dir > 0 ? 8 : -8)));
-    if ((W.workZones || []).some(([a, b]) => e.s > a - 8 && e.s < b + 8)) v0 = Math.min(v0, 8);
-    else if (e.flee > this.clock) v0 = Math.max(v0, Math.min(sp + 4, D.v0 * 1.3, this.curveV(e.s + (dir > 0 ? 8 : -8))));
+    const va = this.vAllow(e, dir, D.b);
+    let v0 = Math.min(D.v0, va);
+    if ((W.workZones || []).some(([a, b]) => e.s > a - 8 && e.s < b + 8)) v0 = Math.min(v0, WORKZONE_V);
+    else if (e.flee > this.clock) v0 = Math.max(v0, Math.min(sp + 4, D.v0 * 1.3, va));
     if (e.backup) v0 = 20;
     e.v0now = v0;
     // the strip we occupy: from where we are to where we are heading (our lane's line plus our own habit of riding a little to one
