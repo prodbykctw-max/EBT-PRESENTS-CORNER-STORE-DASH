@@ -4,22 +4,50 @@
 import * as THREE from './vendor/three.module.min.js';
 
 export class TopSurface {
-  constructor(meshes, cell = 8) {
+  /** `keep(minX, minZ, maxX, maxZ)` (optional): only the triangles whose x/z bounds it accepts are kept (the crowd's ground: just the
+   *  ones near the route; a triangle is judged by all three corners, so a park's few huge triangles are not missed) */
+  constructor(meshes, cell = 8, keep = null) {
     this.cell = cell; this.names = [];
-    let n = 0;
-    for (const m of meshes) n += (m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count) / 3;
-    this.tri = new Float32Array(n * 9); this.who = new Uint8Array(n);
-    const lists = new Map(), v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+    let n = 0; const kept = keep ? [] : null;
+    meshes.forEach((m, mi) => {
+      const P = m.geometry.attributes.position, I = m.geometry.index ? m.geometry.index.array : null, cnt = I ? I.length : P.count;
+      if (!keep) { n += cnt / 3; return; }
+      m.updateMatrixWorld(true); const e = m.matrixWorld.elements, ok = new Uint8Array(cnt / 3);
+      const ident = e[0] === 1 && e[5] === 1 && e[10] === 1 && e[12] === 0 && e[13] === 0 && e[14] === 0 && e[1] === 0 && e[2] === 0 && e[4] === 0 && e[6] === 0 && e[8] === 0 && e[9] === 0;
+      // (plain float arrays read directly: this pass looks at every triangle of the meshes it is given)
+      const A = P.isInterleavedBufferAttribute ? null : P.array;
+      for (let k = 0, t = 0; k < cnt; k += 3, t++) {
+        let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+        for (let q = 0; q < 3; q++) {
+          const i = I ? I[k + q] : k + q;
+          const x = A ? A[i * 3] : P.getX(i), y = A ? A[i * 3 + 1] : P.getY(i), z = A ? A[i * 3 + 2] : P.getZ(i);
+          const wx = ident ? x : e[0] * x + e[4] * y + e[8] * z + e[12], wz = ident ? z : e[2] * x + e[6] * y + e[10] * z + e[14];
+          if (wx < x0) x0 = wx; if (wx > x1) x1 = wx; if (wz < z0) z0 = wz; if (wz > z1) z1 = wz;
+        }
+        if (keep(x0, z0, x1, z1)) { ok[t] = 1; n++; }
+      }
+      kept[mi] = ok;
+    });
+    this.tri = new Float32Array(n * 9); this.who = new Uint16Array(n);
+    const lists = new Map(), W = new Float64Array(9), T0 = this.tri;
     let t = 0;
     meshes.forEach((m, mi) => {
       m.updateMatrixWorld(true); this.names[mi] = m.name;
       const P = m.geometry.attributes.position, I = m.geometry.index ? m.geometry.index.array : null, cnt = I ? I.length : P.count;
-      for (let k = 0; k < cnt; k += 3, t++) {
-        for (let q = 0; q < 3; q++) { v[q].fromBufferAttribute(P, I ? I[k + q] : k + q).applyMatrix4(m.matrixWorld); this.tri.set([v[q].x, v[q].y, v[q].z], t * 9 + q * 3); }
+      const e = m.matrixWorld.elements, A = P.isInterleavedBufferAttribute ? null : P.array, ok = kept ? kept[mi] : null;
+      for (let k = 0, ti = 0; k < cnt; k += 3, ti++) {
+        if (ok && !ok[ti]) continue;
+        for (let q = 0; q < 3; q++) {
+          const i = I ? I[k + q] : k + q;
+          const x = A ? A[i * 3] : P.getX(i), y = A ? A[i * 3 + 1] : P.getY(i), z = A ? A[i * 3 + 2] : P.getZ(i);
+          W[q * 3] = e[0] * x + e[4] * y + e[8] * z + e[12]; W[q * 3 + 1] = e[1] * x + e[5] * y + e[9] * z + e[13]; W[q * 3 + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+        }
+        for (let q = 0; q < 9; q++) T0[t * 9 + q] = W[q];
         this.who[t] = mi;
-        const x0 = Math.floor(Math.min(v[0].x, v[1].x, v[2].x) / cell), x1 = Math.floor(Math.max(v[0].x, v[1].x, v[2].x) / cell);
-        const z0 = Math.floor(Math.min(v[0].z, v[1].z, v[2].z) / cell), z1 = Math.floor(Math.max(v[0].z, v[1].z, v[2].z) / cell);
+        const x0 = Math.floor(Math.min(W[0], W[3], W[6]) / cell), x1 = Math.floor(Math.max(W[0], W[3], W[6]) / cell);
+        const z0 = Math.floor(Math.min(W[2], W[5], W[8]) / cell), z1 = Math.floor(Math.max(W[2], W[5], W[8]) / cell);
         for (let gx = x0; gx <= x1; gx++) for (let gz = z0; gz <= z1; gz++) { const key = gx * 65536 + gz; let l = lists.get(key); if (!l) lists.set(key, (l = [])); l.push(t); }
+        t++;
       }
     });
     this.grid = new Map(); for (const [k, l] of lists) this.grid.set(k, Int32Array.from(l));

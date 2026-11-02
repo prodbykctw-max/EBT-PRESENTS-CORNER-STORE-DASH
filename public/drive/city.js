@@ -193,6 +193,19 @@ function buildBuildings(W, tex, ground) {
 }
 
 
+/** the walls people must keep off: every drawn building's footprint edges (ax, ay, bx, by). The hero row's lots are not built
+ *  (the hand-built row replaces them, see inHero), so their footprints are not walls; canopies are overhead, not walls. */
+export function wallSegments(W) {
+  const out = [];
+  for (const b of W.buildings) {
+    if (b.canopy || b.pts.length < 3) continue;
+    let cx = 0, cy = 0; for (const [x, y] of b.pts) { cx += x; cy += y; } cx /= b.pts.length; cy /= b.pts.length;
+    if (inHero(cx, cy)) continue;
+    for (let i = 0; i < b.pts.length; i++) { const [ax, ay] = b.pts[i], [bx, by] = b.pts[(i + 1) % b.pts.length]; if (Math.hypot(bx - ax, by - ay) >= 0.05) out.push(ax, ay, bx, by); }
+  }
+  return Float32Array.from(out);
+}
+
 /** footprint grid: "is this spot inside a building?" (for placing trees, lamps, benches) */
 function footprintIndex(W) {
   const cell = 40, g = new Map();
@@ -241,7 +254,7 @@ export function buildCity(W, tex, ground, route, props, trees) {
     const far = fog.far / Math.max(0.2, minCos) + 5, far2 = far * far, p = camera.position;
     for (const o of flatOnly) o.visible = o.userData.wbox.distanceToPoint(p) ** 2 < far2;
   };
-  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces, isFree, furniture: streetscape.userData.placed, signals: streetscape.userData.signals, cull };
+  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces, isFree, walls: wallSegments(W), furniture: streetscape.userData.placed, signals: streetscape.userData.signals, cull };
 }
 const FLAT = /^(cover_.*|roads|roads_tile|route_road|route_road_tile|curbs|curbs_tile|junctions|junctions_tile|crosswalks|crosswalks_tile|contact_shadows|contact_shadows_tile)$/;
 
