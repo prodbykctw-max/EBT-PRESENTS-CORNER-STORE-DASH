@@ -98,6 +98,15 @@ obstacles and collisions line up exactly with what's painted on the road.
     the corner store. Some check their phones.
   - **Sidewalk band:** they keep between the curb or roadway and the building line, step round
     trees, lamps, benches and shelters (single file if they must), and keep right for oncoming groups.
+  - **The corral** (`corral.js`, built once at load, read through `crowd.bandAt` / `limits` / `reach` / `pin`): for every 0.5 m of
+    each side, `[lo, hi]` = where a body may be. `hi` is the real distance to the nearest wall (the buildings' wall segments, and
+    the hand-built row's meshes sliced at body height), minus 0.45 m (arms reach ~0.38). Where another road runs along the
+    pavement the cells it covers are cut out (a street that merely crosses it is a *mouth*: people cross it straight, nobody stands
+    or waits there). Where a wall leaves no room for a body, groups (and dogs, `World.relocateDogs`) placed there are moved along the route to the nearest place that
+    has room (never removed) and walking groups turn back at its mouth; a body that still ends up in such a column is held on the street's own edge (`hw - 0.25`), never in the wall. The hero row's standing room starts at the curb's inner edge (its slab lies under the road up to `hw`). A walking group waits at the edge of a side street's mouth, 6 s at most, while a moving vehicle is driving through it (`crowd.mouthBusy`); the cars themselves are untouched. Cyclists ride the bike lane 0.55 m past the curb line and turn back where the walls leave no room for that (`World.bikeRoom`), never into the parking lane; one that starts in such a stretch is moved out at load (`relocateDogs`). After the springs, `pin` puts anyone who still ended up
+    outside back (`crowd.clamps` counts how often it had to; it should stay near 0). Heights: people, dogs, sellers and bikes also
+    stand on the curbs, crosswalk paint, lawns and the hero row's slab along the route (`footAt` in `drive.js`: a second height field from only the triangles within ~20 m of the route, about 36k, built in ~50 ms; the player's and the bully's feet, and wheels, do not read it). A group that turns round at a dead end starts in the lane its look-ahead would give it (`settle`).
+    The old 2 m band (`crowd.band`) is still built, unchanged, because the player's and the bully's run lines read it.
   - **Reactions:** they flinch back and put their hands up when you run close to their curb or honk. On foot they see
     you and the bully coming and step out of the way (see "The street sees you coming" under The chase).
   - **Cost:** only people near the car or on camera are simulated. Only those the camera can see
@@ -621,6 +630,7 @@ into `drive/art/foliage/`; photo-scanned tree models run 0.3–17 M triangles, f
 | `levels.js`, `surface.js` | the height stack, `standOn`, `deckTop`, and triangle height queries |
 | `sky.js` | sky dome and generated environment lighting |
 | `crowd.js` | procedural sidewalk crowd: parametric person, GPU walk cycle, group behaviour |
+| `corral.js` | where pedestrians may stand: exact wall clearance every 0.5 m, other roads cut out, the hero row's real walls |
 | `signals.js` | the route's traffic signals: green-wave timing, stop lines, lamp overlays, cross-traffic gates, HUD light |
 | `birds.js` | pigeons, crows and grackles: pecking flocks that take off as you pass, flocks crossing over the roofs |
 | `tram.js` | Atlanta Streetcar: embedded rails from OSM, the westbound car on its real track, platform dwells, bell |

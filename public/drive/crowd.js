@@ -10,6 +10,7 @@ import * as THREE from './vendor/three.module.min.js';
 import { mergeGeometries } from './vendor/BufferGeometryUtils.js';
 import { LEVEL } from './levels.js';
 import { uploadUsed, shadowSplit } from './runner.js';
+import { buildCorral, COL, F_CLOSED, F_MOUTH, F_HERO } from './corral.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 // palettes (sRGB); skin weighted to the neighbourhood
@@ -19,6 +20,7 @@ const TOPS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2b2b30, 0xeeeeea, 0x3d9a5b, 0x8e44
 const BOTTOMS = [0x1f2a44, 0x2b2b30, 0x3c4b63, 0x5a5048, 0x151518, 0x6e7b8b, 0xb8a98a, 0x4a3b2f, 0x273b2a];
 const ACCENT = [0x121212, 0x2a1a12, 0x3d2616, 0x7a1f1f, 0x1d3f8a, 0xe6e6e6, 0xd4a017, 0x2e7d32];
 const ACC = { cap: 1, long: 2, bag: 4, hood: 8 };
+const AHEAD = 3.5;         // m a walking group looks ahead along the corral
 const SIM = [-130, 380];   // route-space window around the car that is always simulated (plus anyone on screen)   // accessory bits (vertex attr aAcc, instance mask)
 // radius each street-furniture type blocks on the sidewalk (m)
 // a stretch of pavement with less than this much band (m, see bandAt) is too narrow for a runner and someone in his way to pass
@@ -117,9 +119,12 @@ export class Crowd {
    * route: RouteFrame · ground(x,y) · surfAt(x,y,below) road-surface height or null · onRoute(x,y) on the route's roadway
    * isFree(x,y) outside buildings · furniture: {type: [[x,y,...],...]} street props · visible(x,y,z,r) camera test · camera
    * spot: parking space {s,d} (the corner store is on its side) · mobile: phone budget
+   * walls: the drawn buildings' wall segments · heroWalls: the hand-built row's wall slices · roads: the other roads (SegIndex)
+   * heightAt(x,y,below): what a person's feet stand on: the road surface and the curbs (default: surfAt)
    */
-  constructor({ route, ground, surfAt, onRoute, isFree, furniture, visible, camera, spot, mobile, scene }) {
+  constructor({ route, ground, surfAt, heightAt, onRoute, isFree, furniture, visible, camera, spot, mobile, scene, walls, heroWalls, roads }) {
     Object.assign(this, { route, ground, surfAt, visible, camera });
+    this.footAt = heightAt || surfAt;
     // the whole route is populated from the start (one person per ~5 m of sidewalk, 6.5 m on phones); only the
     // stretch around the car is simulated and drawn, so nobody ever has to be moved or spawned in view
     this.spacing = mobile ? 6.5 : 5;
@@ -135,6 +140,11 @@ export class Crowd {
       for (let dd = lo; dd <= hw + 5; dd += 0.25) { const p = route.at(s, side * dd); if (!isFree(p.x, p.y)) break; hi = dd; }
       this.band[side][0][i] = lo; this.band[side][1][i] = Math.max(lo, hi - 0.35);
     }
+    // --- the corral: exact standing room every 0.5 m (see corral.js). The 2 m band above stays as it was for drive.js's PATH
+    // (the player's and the bully's run lines read it); everything the crowd itself does reads the corral
+    this.corralArgs = { route, old: this.band, walls: walls || new Float32Array(0), hero: heroWalls || new Float32Array(0), roads: roads || { covering: () => null }, spot };
+    this.cb = buildCorral(this.corralArgs);
+    this.clamps = { n: 0, sum: 0, max: 0, log: [] }; this.roads = roads;
     // --- street furniture in route space, per side (people walk round it)
     this.obst = { 1: [], [-1]: [] }; const shelters = [];
     for (const [type, list] of Object.entries(furniture || {})) for (const [x, y] of list) {
@@ -163,6 +173,7 @@ export class Crowd {
       const g = this.addGroup({ ...this.randomGroup(s), side });
       s += g.members.length * this.spacing * rnd(0.6, 1.4);            // stratified: even overall, never regular
     }
+    this.relocate();
     // one instance slot per person: whatever the camera sees can be drawn (only the drawn ones cost GPU time)
     const cap = this.people.length;
     const inst = (k) => { const a = new THREE.InstancedBufferAttribute(new Float32Array(cap * k), k); a.setUsage(THREE.DynamicDrawUsage); return a; };
@@ -176,26 +187,119 @@ export class Crowd {
     this.t = 0;
   }
 
-  bandAt(side, s) {
-    const i = Math.max(0, Math.min(this.band[side][0].length - 1, Math.round(s / 2)));
-    return [this.band[side][0][i], this.band[side][1][i]];
+  /** [lo, hi]: where a body may be at s (crowd d, + toward the buildings): the stricter of the two columns either side of s */
+  bandAt(side, s) { const o = [0, 0]; this.limits(side, s, o); return o; }
+  limits(side, s, o) {
+    const c = this.cb[side], f = Math.max(0, Math.min(c.n - 1.0001, s / COL)), i = f | 0;
+    const hi = Math.min(c.hi[i], c.hi[i + 1]), lo = Math.min(Math.max(c.lo[i], c.lo[i + 1]), hi);
+    o[0] = lo; o[1] = hi; return o;
   }
-  narrow(side, s) { const [lo, hi] = this.bandAt(side, s); return hi - lo < ROOM; }
+  /** is a moving vehicle (cars, buses: `vehicles()`) in, or about to be in, the mouth stretch ahead of this walking group, along its line? */
+  mouthBusy(g) {
+    for (let k = 2.2; k <= 16; k += 2) {
+      const s2 = g.s + g.dir * k; if (!this.mouthAt(g.side, s2)) { if (k > 2.2) break; continue; }
+      const p = this.route.at(s2, g.side * g.cd);
+      for (const v of this.vehicles()) {
+        if (v.dead || v.deck || v.x === undefined || (v.vs || 0) < 0.8) continue;
+        const dx = p.x - v.x, dy = p.y - v.y, c = Math.cos(v.h), sn = Math.sin(v.h), al = dx * c + dy * sn, lat = Math.abs(-dx * sn + dy * c);
+        const hl = v.type === 'bus' ? 6.2 : 2.4, hw = v.type === 'bus' ? 1.4 : 1.0;   // (`al`: how far ahead of the vehicle's middle the point is)
+        if (al > -(hl + 0.9) && al < hl + 1.2 + v.vs * 3.5 && lat < hw + 0.9) return true;
+      }
+    }
+    return false;
+  }
+  /** the farthest from the road something with a body can be at s, by the walls alone (not the pavement's other limits) */
+  wallHi(side, s) { const c = this.cb[side], f = Math.max(0, Math.min(c.n - 1.0001, s / COL)), i = f | 0; return Math.min(c.hiW[i], c.hiW[i + 1]); }
+  /** the corral flags (corral.js F_*) of the two columns either side of s */
+  flagsAt(side, s) { const c = this.cb[side], f = Math.max(0, Math.min(c.n - 1.0001, s / COL)), i = f | 0; return c.fl[i] | c.fl[i + 1]; }
+  closedAt(side, s) { return (this.flagsAt(side, s) & F_CLOSED) !== 0; }
+  mouthAt(side, s) { return (this.flagsAt(side, s) & F_MOUTH) !== 0; }
+  /** for someone walking (dir = ±1) or standing (0): the tightest band over the next few steps, so the group moves in before a wall
+   *  corner reaches it instead of being pushed (a group's lane can only slide about 1.3 m/s) */
+  reach(side, s, dir, o) {
+    const c = this.cb[side], a = s - (dir > 0 ? 0.6 : 0.6 + (dir < 0 ? AHEAD : 0)), b = s + (dir > 0 ? AHEAD : 0.6);
+    let lo = -Infinity, hi = Infinity;
+    for (let i = Math.max(0, Math.floor(a / COL)), e = Math.min(c.n - 1, Math.ceil(b / COL)); i <= e; i++) { if (c.lo[i] > lo) lo = c.lo[i]; if (c.hi[i] < hi) hi = c.hi[i]; }
+    o[0] = Math.min(lo, hi); o[1] = hi; return o;
+  }
+  narrow(side, s) { const [lo, hi] = this.bandAt(side, s); return hi - lo < ROOM || this.closedAt(side, s); }
+  oldNarrow(side, s) { const i = Math.max(0, Math.min(this.band[side][0].length - 1, Math.round(s / 2))); return this.band[side][1][i] - this.band[side][0][i] < ROOM; }
+  /** last line of defence, after the springs: nobody ends a frame farther from the road than the wall allows (or nearer than a step
+   *  past the curb). `clamps` counts how often that actually had to move someone (the behaviour above should keep it near 0) */
+  pin(m, side, count = true) {
+    const c = this.cb[side], f = Math.max(0, Math.min(c.n - 1.0001, m.s / COL)), i = f | 0;
+    const hi = Math.min(c.hi[i], c.hi[i + 1]), lo = Math.min(Math.max(c.mn[i], c.mn[i + 1]), hi);
+    let e = 0;
+    if (m.d > hi) { e = m.d - hi; m.d = hi; if (m.vd > 0) m.vd = 0; }
+    else if (m.d < lo) { e = lo - m.d; m.d = lo; if (m.vd < 0) m.vd = 0; }
+    if (e > 0.02 && count) {
+      const K = this.clamps; K.n++; K.sum += e; if (e > K.max) K.max = e;
+      if (K.log.length < 40 || e > K.log[K.log.length - 1].e) { K.log.push({ e: +e.toFixed(2), s: +m.s.toFixed(1), d: +m.d.toFixed(2), side, kind: m.g.kind, anch: m.g.anchored, g: { s: +m.g.s.toFixed(1), dir: m.g.dir, cd: +m.g.cd.toFixed(2), hold: !!m.g.hold, n: m.g.members.length, lane: +m.g.lane.toFixed(2) }, dT: +(m.dT ?? 0).toFixed(2), vd: +(m.vd || 0).toFixed(2), ev: m.ev === null ? null : +m.ev.toFixed(2), shove: +(m.shove || 0).toFixed(2), fl: this.flagsAt(side, m.s), lo: +lo.toFixed(2), hi: +hi.toFixed(2), t: +this.t.toFixed(1) }); K.log.sort((a, b) => b.e - a.e); if (K.log.length > 40) K.log.length = 40; }
+    }
+    return e;
+  }
+  /** Once, before anything is drawn: groups that were placed where nobody can stand (no room for a body between the curb and the wall; for
+   *  the ones that stand still, also a side street's mouth) are moved along the route to the nearest place that is fine. Never removed
+   *  (the random draws that made them are already spent: removing people would shift everything drawn after). No random numbers here. */
+  relocate() {
+    const bad = (g, s) => {
+      if (this.closedAt(g.side, s)) return true;
+      if (g.kind !== 'walk' && (this.closedAt(g.side, s - 1.4) || this.closedAt(g.side, s + 1.4) || this.mouthAt(g.side, s) || this.mouthAt(g.side, s - 1.4) || this.mouthAt(g.side, s + 1.4))) return true;
+      return false;
+    };
+    let gi = 0;
+    for (const g of this.groups) {
+      g.s0 = g.s; gi++;
+      if (g.anchored || !bad(g, g.s)) continue;
+      let to = null;
+      for (let k = 0.5; k <= 90 && to === null; k += 0.5) for (const x of [g.s + k, g.s - k]) if (x > 2 && x < this.route.length - 2 && !bad(g, x)) { to = x; break; }
+      if (to === null) continue;
+      const out = Math.sign(to - g.s), j = ((Math.imul(gi, 2654435761) >>> 0) / 4294967296) * 4;   // (spread: a stretch's groups don't all land on its edge)
+      for (let q = j; q > 0; q -= 0.5) { const x = to + out * 0.5; if (bad(g, x) || x < 2 || x > this.route.length - 2) break; to = x; }
+      g.s = to;
+      const [lo, hi] = this.bandAt(g.side, to);
+      g.cd = lo + g.lane * (hi - lo);
+      for (const p of g.members) { p.s = g.s + p.ds; p.d = g.cd + p.dd; this.pin(p, g.side, false); }
+    }
+  }
   /** Once, before anything has been drawn: the groups standing on the stretch the chase runs along (from the start to the car) where
    *  the pavement is too narrow to step aside on are moved to the nearest stretch that isn't (jittered, so they don't pile up on its
    *  edge). Everyone else, and the rest of the route, is as it was. */
   clearNarrow(carS) {
+    // (the random numbers this used to draw, one per group it moved, are still drawn, for the groups the old 2 m band would have
+    // moved, so everything random later in the run is the same as before; the jitter itself is now deterministic)
     for (const g of this.groups) {
+      if (g.anchored || (g.s0 ?? g.s) > carS + 10 || !this.oldNarrow(g.side, g.s0 ?? g.s)) continue;
+      let to = null;
+      for (let k = 2; k <= 60 && to === null; k += 2) for (const x of [(g.s0 ?? g.s) + k, (g.s0 ?? g.s) - k]) if (x > 2 && x < this.route.length - 2 && !this.oldNarrow(g.side, x)) { to = x; break; }
+      if (to !== null) rnd(0, 4);
+    }
+    let gi = 0;
+    for (const g of this.groups) {
+      gi++;
       if (g.anchored || g.s > carS + 10 || !this.narrow(g.side, g.s)) continue;
       let to = null;
-      for (let k = 2; k <= 60 && to === null; k += 2) for (const x of [g.s + k, g.s - k]) if (x > 2 && x < this.route.length - 2 && !this.narrow(g.side, x)) { to = x; break; }
+      for (let k = 2; k <= 60 && to === null; k += 2) for (const x of [g.s + k, g.s - k]) if (x > 2 && x < this.route.length - 2 && !this.narrow(g.side, x) && !(g.kind !== 'walk' && this.mouthAt(g.side, x))) { to = x; break; }
       if (to === null) continue;
-      const out = Math.sign(to - g.s); let j = rnd(0, 4);
+      const out = Math.sign(to - g.s); let j = ((Math.imul(gi, 40503) >>> 0) / 4294967296) * 4;
       while (j > 0 && !this.narrow(g.side, to + out * j) && to + out * j > 2) { to += out * 1; j -= 1; }
       const [lo, hi] = this.bandAt(g.side, to);
       g.s = to; g.cd = lo + g.lane * (hi - lo);
-      for (const p of g.members) { p.s = g.s + p.ds; p.d = g.cd + p.dd; }
+      for (const p of g.members) { p.s = g.s + p.ds; p.d = g.cd + p.dd; this.pin(p, g.side, false); }
     }
+  }
+  /** Once, before anything is drawn: a group whose lane was picked from the band where it stands, but which is about to walk into a
+   *  narrower one (a wall corner a step along), starts in the lane its look-ahead would have given it, so nobody has to be pulled
+   *  sideways in the first second (the lane eases at 1.3 m/s; the wall doesn't wait). Same formula as the lane in update(). */
+  settle(g) {
+    if (g.anchored) return;
+    const o = this._st || (this._st = [0, 0]); this.reach(g.side, g.s, g.kind === 'walk' ? g.dir : 0, o);
+    const lo = o[0], hi = o[1];
+    if (g.cd <= hi + 0.02 && g.cd >= lo - 0.02) return;
+    const half = g.kind === 'walk' ? ((g.members.length - 1) / 2) * 0.62 + 0.3 : 0.6;
+    const t = Math.min(Math.max(lo + g.lane * (hi - lo), lo + half), Math.max(lo + half, hi - half));
+    g.cd = Math.min(hi, Math.max(lo, t));
+    for (const p of g.members) { p.d = g.cd + p.dd; this.pin(p, g.side, false); }
   }
   randomGroup(s) {
     const r = Math.random();
@@ -219,7 +323,7 @@ export class Crowd {
       else { const a = (k / n) * Math.PI * 2 + rnd(-0.3, 0.3), rr = n === 1 ? 0 : 0.55; p.ds = Math.cos(a) * rr; p.dd = Math.sin(a) * rr; }
       if (kind === 'wait' || kind === 'solo') p.phone = Math.random() < 0.55 ? 1 : 0;
       if (kind === 'talk') p.phone = Math.random() < 0.15 ? 1 : 0;
-      p.s = s + p.ds; p.d = g.cd + p.dd;
+      p.s = s + p.ds; p.d = g.cd + p.dd; this.pin(p, side, false);
       g.members.push(p); this.people.push(p); this.face(p);
     }
     this.groups.push(g);
@@ -228,7 +332,7 @@ export class Crowd {
 
   update(dt, car, hornT) {
     this.t += dt;
-    if (!this._init) { this._init = true; this.clearNarrow(car.s); for (const m of this.people) this.traits(m); }
+    if (!this._init) { this._init = true; this.clearNarrow(car.s); for (const g of this.groups) this.settle(g); for (const m of this.people) this.traits(m); }
     const r = this.route, sim0 = car.s + SIM[0], sim1 = car.s + SIM[1];
     this.watch(dt);
     // simulate what's near the car or on screen; everyone else is out of sight and simply waits
@@ -236,14 +340,23 @@ export class Crowd {
     const walkers = { 1: [], [-1]: [] };
     for (const g of active) if (g.kind === 'walk') walkers[g.side].push(g);
     for (const g of active) {
-      const [lo, hi] = this.bandAt(g.side, g.s), half = g.kind === 'walk' ? ((g.members.length - 1) / 2) * 0.62 + 0.3 : 0.6;
+      // (the corral's own tightest band over the next few steps: a walking group moves in before a wall corner, not at it)
+      const [lo, hi] = this.reach(g.side, g.s, g.kind === 'walk' ? g.dir : 0, this._lh || (this._lh = [0, 0])), half = g.kind === 'walk' ? ((g.members.length - 1) / 2) * 0.62 + 0.3 : 0.6;
       let target = g.anchored ? g.cd : Math.min(Math.max(lo + g.lane * (hi - lo), lo + half), Math.max(lo + half, hi - half));
-      let single = false;
+      let single = g.kind === 'walk' && hi - lo < 2 * half - 0.1;   // (the pavement is too narrow to walk side by side: single file)
       if (g.kind === 'walk') {
         // (the runner on foot: a group about to step into a stretch with no room to pass waits at its mouth until he has gone by)
         const run = this.thr.length && this.thr[0].who === 'runner' ? this.thr[0] : null;
-        g.hold = !!run && Math.abs(run.s - g.s) < 70 && !this.narrow(g.side, g.s) && this.narrow(g.side, g.s + g.dir * 3);
-        if (!g.hold) g.s += g.dir * g.v * dt;
+        g.hold = !!run && Math.abs(run.s - g.s) < 70 && !this.narrow(g.side, g.s) && !this.mouthAt(g.side, g.s) && this.narrow(g.side, g.s + g.dir * 3);   // (never waiting in a side street's mouth)
+        // no room for a body ahead (a wall at the curb): turn back at its mouth, don't walk into it
+        if (!g.hold && this.closedAt(g.side, g.s + g.dir * 2.5) && !this.closedAt(g.side, g.s)) g.dir = -g.dir;
+        // a vehicle driving through the side street's mouth they are about to cross: they wait at its edge (never in it), 6 s at most
+        let wait = false;
+        if (this.vehicles && !g.hold && !(g.passT > this.t) && !this.mouthAt(g.side, g.s) && this.mouthAt(g.side, g.s + g.dir * 2.2)) wait = this.mouthBusy(g);
+        g.waitT = wait ? (g.waitT || 0) + dt : 0;
+        if (g.waitT > 6) { g.passT = this.t + 4; g.waitT = 0; wait = false; }
+        g.wait = wait;
+        if (!g.hold && !g.wait) g.s += g.dir * g.v * dt;
         if (g.s < 3 || g.s > r.length - 3) { g.dir = g.s < 3 ? 1 : -1; g.s = Math.max(3, Math.min(r.length - 3, g.s)); }
         // street furniture a few steps ahead: pass on the roomier side, or go single file
         // (the list is sorted by s: start a little before the first one that can be within 3.5 m and stop a little past it, instead of
@@ -267,8 +380,8 @@ export class Crowd {
           const gap = (o.s - g.s) * g.dir; if (gap < 0 || gap > 4) continue;
           if (Math.abs(o.cd - g.cd) < half + 0.7) target += -g.dir * g.side * 0.55;
         }
-        target = Math.min(hi, Math.max(lo, target));
       }
+      if (!g.anchored) target = Math.min(hi, Math.max(lo, target));
       g.cd += Math.max(-1.3 * dt, Math.min(1.3 * dt, target - g.cd));
       // the car or the horn: flinch away from the curb
       const near = g.s - car.s, curbSide = Math.sign(car.d) === g.side && Math.abs(car.d) > r.hw(car.s) - 2.2;
@@ -279,9 +392,9 @@ export class Crowd {
         m.startle = Math.max(scare, m.startle - dt * 1.4);
         // m.shove: knocked aside (drive.js, when the runner or the bully barges into them on foot), easing back over ~2 s
         if (m.shove) { m.shove *= Math.exp(-dt * 0.9); if (Math.abs(m.shove) < 0.01) m.shove = 0; }
-        const [mlo, mhi] = this.bandAt(g.side, m.s);
+        const ml = this.limits(g.side, m.s, this._ml || (this._ml = [0, 0])), mlo = ml[0], mhi = ml[1];
         m.sT = g.s + (single ? -g.dir * k * 0.85 : m.ds);
-        m.dT = Math.min(mhi + 0.3, g.cd + (single ? 0 : m.dd) + m.startle * 0.9 + (m.shove || 0));   // where they'd stand if nobody came
+        m.dT = Math.min(mhi, Math.max(lo - 0.25, Math.min(hi, g.cd + (single ? 0 : m.dd) + m.startle * 0.9 + (m.shove || 0))));   // where they'd stand if nobody came (within the group's look-ahead band as well as their own; their own wall is the last word: a group turning round at a dead end has its tail in the narrow part while its look-ahead is already the roomy side)
         m.lo = mlo; m.hi = mhi;
         if (picks) this.react(m, g, dt, picks);
         else this.calm(m, dt);
@@ -291,8 +404,8 @@ export class Crowd {
         // move: critically damped springs (no overshoot, no snapping, the same at any frame rate). Along the walk they ride
         // the group's own speed; across they ease to where they'd stand, or to the gap they've picked to let you by
         const evading = m.ev !== null;
-        const vt = g.kind === 'walk' && !g.hold ? g.dir * g.v : 0;
-        const dT = evading ? Math.min(m.hi + 0.1, Math.max(m.lo - 0.25, m.ev + (m.shove || 0))) : m.dT;
+        const vt = g.kind === 'walk' && !g.hold && !g.wait ? g.dir * g.v : 0;
+        const dT = evading ? Math.min(m.hi, Math.max(m.lo - 0.25, m.ev + (m.shove || 0))) : m.dT;
         const w = evading ? m.wEv : 6.5;
         this.spring(m, 's', 'vs', m.sT, vt, 6, dt);
         const d0 = m.d;
@@ -300,6 +413,7 @@ export class Crowd {
         const vmax = 4.2;
         if (m.vd > vmax) m.vd = vmax; else if (m.vd < -vmax) m.vd = -vmax;
         if (m.ev !== null || m.shove) this.keepOut(m, g.side, d0);
+        this.pin(m, g.side);
         const speed = Math.hypot(m.vs, m.vd);
         m.sp += (speed - m.sp) * Math.min(1, dt * 12);
         // legs follow the ground actually covered (a step aside is a few quick steps, standing is a slow weight shift)
@@ -399,7 +513,7 @@ export class Crowd {
   }
   /** pick the gap: just outside every path that's coming, on a side with room (not through a tree or a wall) */
   evade(m, side, ints, picks, dirS) {
-    const lo = m.lo - 0.25, hi = m.hi + 0.1;   // right up to the wall, or to the very edge of the curb
+    const lo = m.lo - 0.25, hi = m.hi;   // right up to the wall's clearance, or to the very edge of the curb
     const inside = (x, eps = 0) => ints.some((i) => x > i[0] - eps && x < i[1] + eps);
     const cand = [];
     for (const i of ints) for (const x of [i[1] + 0.05, i[0] - 0.05]) {
@@ -430,7 +544,7 @@ export class Crowd {
       const grp = picks.filter((m) => m.ev !== null && m.evSide === sd && Math.abs(m.ev - picks.find((o) => o.evSide === sd).ev) < 0.5);
       if (grp.length < 2) continue;
       grp.sort((a, b) => (b.d - a.d) * sd);                         // the one nearest the edge they're heading for goes first
-      grp.forEach((m, k) => { const nx = Math.min(m.hi + 0.1, Math.max(m.lo - 0.25, m.ev + sd * 0.42 * (grp.length - 1 - k))); if (!this.blocked(m.g.side, m.s, nx, m.d)) m.ev = nx; });
+      grp.forEach((m, k) => { const nx = Math.min(m.hi, Math.max(m.lo - 0.25, m.ev + sd * 0.42 * (grp.length - 1 - k))); if (!this.blocked(m.g.side, m.s, nx, m.d)) m.ev = nx; });
     }
   }
   /** is standing at crowd-d x (at s) inside a trunk, pole, bench or shelter? `from` is where they are now: crossing one is blocked too */
@@ -458,10 +572,7 @@ export class Crowd {
       const up = d0 >= o.d;
       m.d = up ? o.d + hw : o.d - hw; m.vd = up ? Math.max(0, m.vd) : Math.min(0, m.vd);
     }
-    if (m.ev !== null) {   // (only someone stepping aside is held to the pavement's width: the standing groups keep their places)
-      if (m.d > m.hi + 0.1) { m.d = Math.max(d0 > m.hi + 0.1 ? Math.min(d0, m.d) : m.hi + 0.1, m.hi + 0.1); if (m.vd > 0) m.vd = 0; }
-      if (m.d < m.lo - 0.25) { m.d = Math.min(d0 < m.lo - 0.25 ? Math.max(d0, m.d) : m.lo - 0.25, m.lo - 0.25); if (m.vd < 0) m.vd = 0; }
-    }
+    // (the pavement's edges are held by pin(), for everyone, after this)
   }
   /** critically damped spring on m[key] toward target (moving at tv), velocity in m[vkey]; exact for any dt */
   spring(m, key, vkey, target, tv, w, dt) {
@@ -497,7 +608,7 @@ export class Crowd {
     for (const m of this.people) {
       if (m.dirty || m.x === undefined) {                       // moved (or never placed): find the ground under them
         const p = r.at(m.s, m.g.side * m.d), gz = this.ground(p.x, p.y);
-        m.x = p.x; m.y = p.y; m.z = Math.max(this.surfAt(p.x, p.y, gz + 1.2) ?? -Infinity, gz + LEVEL.TERRAIN);   // crosswalk or sidewalk
+        m.x = p.x; m.y = p.y; m.z = Math.max(this.footAt(p.x, p.y, gz + 1.2) ?? -Infinity, gz + LEVEL.TERRAIN);   // crosswalk, curb or sidewalk
         m.dirty = false;
       }
       // margin grows with distance (≈2.3°): a turning camera sweeps far-off sidewalks into view within a frame

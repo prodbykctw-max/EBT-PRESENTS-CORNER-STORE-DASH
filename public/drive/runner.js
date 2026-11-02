@@ -373,6 +373,33 @@ export class World {
     this.planAmbient();
   }
 
+  /** where, across the street, someone working the corner stands (`off` m past the curb line, right side): there, unless a wall is
+   *  within a body's clearance of it (the crowd's corral, crowd.wallHi), then the pavement's far edge, or the street's own edge
+   *  where the building is at the curb */
+  cornerD(s, off) {
+    const hw = this.route.hw(s), w = hw + off, wall = this.crowd ? this.crowd.wallHi(-1, s) : Infinity;
+    return -(w <= wall ? w : wall >= hw + 0.3 ? wall : hw - 0.25);
+  }
+  /** once, when the crowd exists (the dogs and cyclists were placed before it, in plan()): a dog standing where the corral has no room for a body between
+   *  the curb and a wall (or a cyclist where there's no room for the bike lane, `bikeRoom`) is moved along to the nearest stretch that has room. No random numbers (every draw of plan() is spent). */
+  relocateDogs() {
+    const cr = this.crowd, r = this.route; if (!cr) return;
+    const bad = (side, s) => cr.closedAt(side, s) || cr.closedAt(side, s - 1.5) || cr.closedAt(side, s + 1.5);
+    const noBike = (s) => !this.bikeRoom(s) || !this.bikeRoom(s - 4) || !this.bikeRoom(s + 4);
+    for (const e of this.ents) {
+      const dog = e.type === 'dog', bike = e.type === 'cyclist';
+      if (!(dog && bad(e.side, e.s)) && !(bike && noBike(e.s))) continue;
+      for (let k = 0.5; k <= 90; k += 0.5) {
+        const to = [e.s + k, e.s - k].find((x) => x > 8 && x < r.length - 8 && (dog ? !bad(e.side, x) : !noBike(x)));
+        if (to !== undefined) { e.s = to; e.d = dog ? e.side * (r.hw(to) + e.off) : -(r.hw(to) + 0.55); break; }
+      }
+    }
+  }
+  /** is there room at s for a cyclist in the bike lane (right side, 0.55 m past the curb line) before the walls' clearance? */
+  bikeRoom(s) {
+    const r = this.route; if (!this.crowd || s < 0 || s > r.length) return true;
+    return this.crowd.limits(-1, s, this._br || (this._br = [0, 0]))[1] >= r.hw(s) + 0.55;
+  }
   /** the people who work the red lights: at signalised junctions a kid (or two) selling cold water from a cooler
    *  on the corner, or a panhandler with a sign. They wait at the stop line on the lane line; on red they walk
    *  down between the stopped cars to the driver's window; on green they linger a few seconds before drifting
@@ -385,10 +412,10 @@ export class World {
       const roll = Math.random();
       if (roll > 0.85) continue;
       const kids = roll < 0.5, crew = kids ? (Math.random() < 0.45 ? 2 : 1) : 1;
-      if (kids) this.add('cooler', { s: line - 2.5, d: -(r.hw(line - 2.5) + 1.3), scenery: true, yawOff: Math.PI / 2 });
+      if (kids) this.add('cooler', { s: line - 2.5, d: this.cornerD(line - 2.5, 1.3), scenery: true, yawOff: Math.PI / 2 });
       for (let k = 0; k < crew; k++) {
         const s0 = line - 0.6 - k * 1.3;
-        this.add(kids ? 'seller' : 'panhandler', { s: s0, d: -(r.hw(s0) + 0.7), color: pick(SHIRTS), worker: true, node: n, line,
+        this.add(kids ? 'seller' : 'panhandler', { s: s0, d: this.cornerD(s0, 0.7), color: pick(SHIRTS), worker: true, node: n, line,
           post: s0, beat: line - rnd(8, 26) - k * 9, delay: rnd(1, 3.5), linger: rnd(2.5, 5), hd: Math.PI });
       }
     }
@@ -525,6 +552,16 @@ export class World {
           e.d = e.home + Math.sin(t * 0.8 + e.sway) * 0.6; // works the line between lanes
           if (hornT > 0 && e.s - car.s < 60 && e.s > car.s) { e.leaving = true; e.home2 = (Math.random() < 0.5 ? 1 : -1) * (r.hw(e.s) + 1.8); }
         }
+      }
+      // cyclists keep to the bike lane at the street's edge. Where a wall comes too close to the curb for a bike (or the
+      // pavement runs into another road) they turn back the way they came, like the dogs, instead of riding into the
+      // parking lane (parked cars, the store's P space) or through the facade
+      if (e.type === 'cyclist' && this.crowd && !e.flying) {
+        const cr = this.crowd, dir = e.v < 0 ? -1 : 1;
+        if (e.v && (!this.bikeRoom(e.s + dir * 1.5) || !this.bikeRoom(e.s + dir * 4)) && this.bikeRoom(e.s - dir * 1.5)) e.v = -e.v;
+        const hwc = r.hw(e.s), hi = cr.limits(-1, e.s, this._cl || (this._cl = [0, 0]))[1];
+        const want = -Math.max(hwc + 0.05, Math.min(hwc + 0.55, hi));
+        e.d += Math.max(-2 * dt, Math.min(2 * dt, want - e.d));
       }
       // cyclists turn around at the ends of the mapped street instead of piling up there
       if (e.scenery && e.v && (e.s < 3 || e.s > r.length - 3)) { e.v = Math.abs(e.v) * (e.s < 3 ? 1 : -1); e.s = Math.max(3, Math.min(r.length - 3, e.s)); }
@@ -664,10 +701,10 @@ export class World {
   work(e, dt, car) {
     const r = this.route, red = (this.signals?.routeAspect(e.node) ?? 'G') !== 'G';
     if (red) { e.redT = (e.redT || 0) + dt; e.greenT = 0; } else { e.greenT = (e.greenT || 0) + dt; e.redT = 0; }
-    const xs = e.line + 1.6, curbD = -(r.hw(xs) + 0.7);                           // the crosswalk, and the corner
+    const xs = e.line + 1.6, curbD = this.cornerD(xs, 0.7);                           // the crosswalk, and the corner
     e.phase ??= 'corner';
     const out = red ? e.redT > e.delay : e.greenT < e.linger;
-    let ts = e.post, td = -(r.hw(e.post) + 0.7), sp = 1.3;
+    let ts = e.post, td = this.cornerD(e.post, 0.7), sp = 1.3;
     e.atWindow = false;
     if (e.phase === 'corner' && red && e.redT > e.delay) e.phase = 'out';
     if (e.phase === 'out') { ts = xs; td = this.laneLine(xs); }
@@ -697,19 +734,22 @@ export class World {
   /** a stray dog: ambles along its sidewalk with sniffing stops; sometimes trots across the street ahead of the
    *  player (only when it's on screen and nothing is coming the other way, so it's always a fair dodge) */
   dog(e, dt, car, seen) {
-    const r = this.route, hw = r.hw(e.s);
+    const r = this.route, hw = r.hw(e.s), cr = this.crowd;
+    // how far from the road the sidewalk goes on a side here (the crowd's corral: the wall's clearance), for where it keeps to
+    const reach = (side, want) => { if (!cr) return want; const L = cr.limits(side, e.s, this._dl || (this._dl = [0, 0])); return Math.min(L[1], Math.max(L[0] - 0.25, want)); };
     let vs = 0, vd = 0;
     if (e.bolt) {                                                  // spooked: runs for the nearest sidewalk
       vd = e.bolt * 6;
-      if (Math.abs(e.d) > hw + 1.2 && Math.sign(e.d) === e.bolt) { Object.assign(e, { side: e.bolt, bolt: 0, leaving: false }); setTimeout(() => { e.hitDone = false; }, 1500); }
+      if (Math.abs(e.d) > reach(e.bolt, hw + 1.2) && Math.sign(e.d) === e.bolt) { Object.assign(e, { side: e.bolt, bolt: 0, leaving: false }); setTimeout(() => { e.hitDone = false; }, 1500); }
     } else if (e.crossing) {
       vd = e.crossing * 3.3; vs = Math.sign(e.walk) * 0.4;
-      if (Math.abs(e.d) > hw + e.off && Math.sign(e.d) === e.crossing) { e.side = e.crossing; e.crossing = 0; }
+      if (Math.abs(e.d) > reach(e.crossing, hw + e.off) && Math.sign(e.d) === e.crossing) { e.side = e.crossing; e.crossing = 0; }
     } else {
       e.pause -= dt;
       if (e.pause < -rnd(5, 10)) e.pause = rnd(1, 3);            // stops to sniff now and then
       vs = e.pause > 0 ? 0 : e.walk;
-      vd = (e.side * (hw + e.off) - e.d) * 2;                     // keeps to the sidewalk as the street widens
+      vd = (e.side * reach(e.side, hw + e.off) - e.d) * 2;        // keeps to the sidewalk as the street widens (and off the walls)
+      if (cr && cr.closedAt(e.side, e.s + Math.sign(e.walk) * 1.5)) e.walk = -e.walk;   // no room for a dog between the curb and a wall ahead: back the way it came
       if (e.s < 8 || e.s > r.length - 8) e.walk = Math.abs(e.walk) * (e.s < 8 ? 1 : -1);
       const ahead = e.s - car.s, eta = ahead / Math.max(car.v, 1);   // seconds until the player gets here
       if (!e.crossed && ahead > 30 && eta > 2.3 && eta < 3.6 && car.v > 4 && Math.random() < dt * 1.2 && seen(e, 1)
@@ -718,6 +758,7 @@ export class World {
         && !(this.workZones || []).some(([a, b]) => e.s > a && e.s < b)) { e.crossing = -e.side; e.crossed = true; }
     }
     e.s += vs * dt; e.d += vd * dt; e.v = 0; e.dd = vd;   // (dd: sideways speed, so cars can see it step into the road)
+    if (cr && !e.bolt && !e.crossing) { const R = reach(e.side, hw + e.off); if (e.side * e.d > R) e.d = e.side * R; }
     if (Math.abs(vs) + Math.abs(vd) > 0.2) { e.hd = Math.atan2(vd, vs); e.gait += dt * (e.bolt ? 16 : e.crossing ? 12 : 7); }
   }
 
@@ -766,9 +807,10 @@ export class World {
       let surf;
       const seated = !e.flying && (VEHICLE[e.type] || (inStreet && (e.type === 'cone' || e.type === 'barricade')));
       // anything standing IN the street (cones, barricades, a panhandler) stands on the rendered road surface
-      let z = seated ? 0 : inStreet ? ((surf = this.surfAt(p.x, p.y, p.z + 1.2)) ?? p.z + lvl) : p.z + lvl, roll = 0, pitch = 0;
       const afoot = ON_FOOT.has(e.type) || e.type === 'cooler';
-      if (afoot && !inStreet) z = Math.max((surf = this.surfAt(p.x, p.y, p.z + 1.2)) ?? -Infinity, p.z + LEVEL.TERRAIN);   // sidewalk / curb top
+      const feetAt = (afoot || e.type === 'cyclist') && this.footAt ? this.footAt : this.surfAt;   // (people, dogs and bikes also ride over the curbs along the route: see drive.js footAt)
+      let z = seated ? 0 : inStreet ? ((surf = feetAt(p.x, p.y, p.z + 1.2)) ?? p.z + lvl) : p.z + lvl, roll = 0, pitch = 0;
+      if ((afoot || e.type === 'cyclist') && !inStreet) z = Math.max((surf = feetAt(p.x, p.y, p.z + 1.2)) ?? -Infinity, p.z + LEVEL.TERRAIN);   // sidewalk / curb top
       if (seated) {
         // cones and barricades sit flat on the slope; vehicles put all four wheels on the rendered road surface.
         // Seating something reads the road under its corners (4 surface queries). Most of what is drawn stands still

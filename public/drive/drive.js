@@ -13,6 +13,7 @@ import { TopSurface } from './surface.js';
 import { RouteFrame, RunnerCar, World } from './runner.js';
 import { DriveAudio } from './audio.js';
 import { Crowd } from './crowd.js';
+import { heroSegments } from './corral.js';
 import { Streetcars } from './tram.js';
 import { Signals } from './signals.js';
 import { Birds } from './birds.js';
@@ -182,13 +183,43 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const signals = world.signals = new Signals({ route, nodes: city.signals, marks: city.streets.routeMarks, scene });
   const trams = world.trams = new Streetcars({ W, route, ground, surfAt, scene, props: props.scene, world, audio });
   const onRouteRoad = (x, y) => roadSurface.top(x, -y, ground(x, y) + 1.2)?.name === 'route_road';
+  // what people's feet stand on (the crowd, dogs, water sellers): the road surface, and the curbs along the route. (The curbs
+  // are not in `roadSurface`: wheels and the player's feet never read them. Only the triangles within ~25 m of the route are kept.)
+  const nearRoute = new Set();
+  for (let i = 0; i < route.n; i += 4) for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) nearRoute.add(Math.floor((route.X[i] + a * 10) / 10) * 65536 + Math.floor((route.Y[i] + b * 10) / 10));
+  // (a triangle is kept when its bounds touch a cell near the route; one that spans more than 6 cells is kept whole)
+  const nearTri = (x0, z0, x1, z1) => {
+    const gx0 = Math.floor(x0 / 10), gx1 = Math.floor(x1 / 10), gy0 = Math.floor(-z1 / 10), gy1 = Math.floor(-z0 / 10);
+    if (gx1 - gx0 > 6 || gy1 - gy0 > 6) return true;
+    for (let gx = gx0; gx <= gx1; gx++) for (let gy = gy0; gy <= gy1; gy++) if (nearRoute.has(gx * 65536 + gy)) return true;
+    return false;
+  };
+  // every surface a person can see under his feet but a wheel never reads: the curbs, the crosswalk paint, the lawns / lots / parks, the
+  // hero row's sidewalk slab. Only the meshes (and in them only the triangles) that come near the route are read, and each of
+  // those is the tile that is actually drawn (the big originals that were split into tiles are hidden and skipped)
+  const flat = [], meshNear = (b) => {
+    const gx0 = Math.floor(b.min.x / 10), gx1 = Math.floor(b.max.x / 10), gy0 = Math.floor(-b.max.z / 10), gy1 = Math.floor(-b.min.z / 10);
+    for (let gx = gx0; gx <= gx1; gx++) for (let gy = gy0; gy <= gy1; gy++) if (nearRoute.has(gx * 65536 + gy)) return true;
+    return false;
+  };
+  city.group.traverse((o) => { if (o.userData.wbox && /^(curbs|crosswalks|cover_)/.test(o.name) && meshNear(o.userData.wbox)) flat.push(o); });
+  hero.scene.traverse((o) => { if (o.isMesh && /^SIDEWALK_hero/.test(o.name)) flat.push(o); });
+  const feetSurface = flat.length ? new TopSurface(flat, 8, nearTri) : null;
+  const footAt = (x, y, below) => {
+    const a = roadSurface.top(x, -y, below), b = feetSurface ? feetSurface.top(x, -y, below) : null;
+    return a && b ? Math.max(a.y, b.y) : a ? a.y : b ? b.y : null;
+  };
+  world.footAt = footAt; world.feet = { surface: feetSurface, rebuild: () => (flat.length ? new TopSurface(flat, 8, nearTri) : null) };   // (rebuild: for measuring the load-time cost)
   const crowd = world.crowd = new Crowd({
-    route, ground, surfAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree,
+    route, ground, surfAt, heightAt: footAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree,
+    walls: city.walls, heroWalls: heroSegments(hero.scene, ground(SPOT.x, SPOT.y)), roads: city.streets.index,
     furniture: { ...city.furniture, shelter: [...(city.furniture.shelter || []), ...trams.shelters] },   // riders wait at streetcar platforms too
     onRoute: (x, y) => onRouteRoad(x, y),
     visible: (x, y, z, r) => world.visible(x, y, z, r),
   });
   crowd.shadowBox = world.shadowBox;
+  crowd.vehicles = () => world.ambient;   // (walking groups wait at a side street's mouth while a vehicle drives through it)
+  world.relocateDogs();   // (the dogs were placed before the crowd existed: out of any stretch with no room between curb and wall)
   world.planCorners(signals);   // water sellers and panhandlers working the red lights
   // flocks fly over the roofs: height of whatever is under a point (roofs, freeway decks, landmarks), by a ray from above
   // (rayTargets: the same roofs, freeway and storefronts cut into small tiles, so a ray tests only what's under it)
