@@ -380,18 +380,25 @@ export class World {
     const hw = this.route.hw(s), w = hw + off, wall = this.crowd ? this.crowd.wallHi(-1, s) : Infinity;
     return -(w <= wall ? w : wall >= hw + 0.3 ? wall : hw - 0.25);
   }
-  /** once, when the crowd exists (the dogs were placed before it, in plan()): a dog standing where the corral has no room for a body between
-   *  the curb and a wall is moved along the sidewalk to the nearest stretch that has room. No random numbers (every draw of plan() is spent). */
+  /** once, when the crowd exists (the dogs and cyclists were placed before it, in plan()): a dog standing where the corral has no room for a body between
+   *  the curb and a wall (or a cyclist where there's no room for the bike lane, `bikeRoom`) is moved along to the nearest stretch that has room. No random numbers (every draw of plan() is spent). */
   relocateDogs() {
     const cr = this.crowd, r = this.route; if (!cr) return;
     const bad = (side, s) => cr.closedAt(side, s) || cr.closedAt(side, s - 1.5) || cr.closedAt(side, s + 1.5);
+    const noBike = (s) => !this.bikeRoom(s) || !this.bikeRoom(s - 4) || !this.bikeRoom(s + 4);
     for (const e of this.ents) {
-      if (e.type !== 'dog' || !bad(e.side, e.s)) continue;
+      const dog = e.type === 'dog', bike = e.type === 'cyclist';
+      if (!(dog && bad(e.side, e.s)) && !(bike && noBike(e.s))) continue;
       for (let k = 0.5; k <= 90; k += 0.5) {
-        const to = [e.s + k, e.s - k].find((x) => x > 8 && x < r.length - 8 && !bad(e.side, x));
-        if (to !== undefined) { e.s = to; e.d = e.side * (r.hw(to) + e.off); break; }
+        const to = [e.s + k, e.s - k].find((x) => x > 8 && x < r.length - 8 && (dog ? !bad(e.side, x) : !noBike(x)));
+        if (to !== undefined) { e.s = to; e.d = dog ? e.side * (r.hw(to) + e.off) : -(r.hw(to) + 0.55); break; }
       }
     }
+  }
+  /** is there room at s for a cyclist in the bike lane (right side, 0.55 m past the curb line) before the walls' clearance? */
+  bikeRoom(s) {
+    const r = this.route; if (!this.crowd || s < 0 || s > r.length) return true;
+    return this.crowd.limits(-1, s, this._br || (this._br = [0, 0]))[1] >= r.hw(s) + 0.55;
   }
   /** the people who work the red lights: at signalised junctions a kid (or two) selling cold water from a cooler
    *  on the corner, or a panhandler with a sign. They wait at the stop line on the lane line; on red they walk
@@ -546,9 +553,14 @@ export class World {
           if (hornT > 0 && e.s - car.s < 60 && e.s > car.s) { e.leaving = true; e.home2 = (Math.random() < 0.5 ? 1 : -1) * (r.hw(e.s) + 1.8); }
         }
       }
-      // cyclists keep to the bike lane at the street's edge, riding the street's edge itself where a wall closes in on the pavement
+      // cyclists keep to the bike lane at the street's edge. Where a wall comes too close to the curb for a bike (or the
+      // pavement runs into another road) they turn back the way they came, like the dogs, instead of riding into the
+      // parking lane (parked cars, the store's P space) or through the facade
       if (e.type === 'cyclist' && this.crowd && !e.flying) {
-        const L = this.crowd.reach(-1, e.s, e.v < 0 ? -1 : 1, this._cl || (this._cl = [0, 0])), hwc = r.hw(e.s), want = -(L[1] >= hwc + 0.55 ? hwc + 0.55 : hwc - 0.4);
+        const cr = this.crowd, dir = e.v < 0 ? -1 : 1;
+        if (e.v && (!this.bikeRoom(e.s + dir * 1.5) || !this.bikeRoom(e.s + dir * 4)) && this.bikeRoom(e.s - dir * 1.5)) e.v = -e.v;
+        const hwc = r.hw(e.s), hi = cr.limits(-1, e.s, this._cl || (this._cl = [0, 0]))[1];
+        const want = -Math.max(hwc + 0.05, Math.min(hwc + 0.55, hi));
         e.d += Math.max(-2 * dt, Math.min(2 * dt, want - e.d));
       }
       // cyclists turn around at the ends of the mapped street instead of piling up there
