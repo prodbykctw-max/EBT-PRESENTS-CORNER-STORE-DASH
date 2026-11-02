@@ -283,7 +283,7 @@ function curbPatch(T) {     // curbs have no uv at all: project the concrete in 
     sh.vertexShader = rep(rep(sh.vertexShader, '#include <common>', 'varying vec3 vWP; varying vec3 vWN;'), '#include <project_vertex>',
       'vWP = (modelMatrix * vec4(transformed, 1.0)).xyz; vWN = normalize(mat3(modelMatrix) * objectNormal);');
     let f = rep(sh.fragmentShader, '#include <common>', 'varying vec3 vWP; varying vec3 vWN;\n' + paveSnippet());
-    sh.fragmentShader = paveShade(f, '(abs(vWN.y) > 0.6 ? vWP.xz : vec2(dot(vWP.xz, vec2(-vWN.z, vWN.x)), vWP.y)) / 1.8', 'diffuseColor.rgb * 0.9');
+    sh.fragmentShader = paveShade(f, '(abs(vWN.y) > 0.6 ? vWP.xz : vec2(dot(vWP.xz, vec2(-vWN.z, vWN.x)), vWP.y)) / 1.8', 'diffuseColor.rgb * 0.30');
   };
 }
 function roofPatch(T) {
