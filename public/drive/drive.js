@@ -47,7 +47,7 @@ const SCREEN_FADE = 0.3;
 const cancelFrame = QA ? clearTimeout : cancelAnimationFrame;
 
 export async function startDrive({ mount = document.body, muted = false, onDone = () => {}, onProgress = () => {}, look: lookOption } = {}) {
-  // which look: the comic ink look (the default) or the realistic look (?look=real, or startDrive({ look: 'real' }))
+  // which look: the realistic look (the default) or the comic ink look (?look=comic, or startDrive({ look: 'comic' })); mode.js
   const REAL = resolveLook(lookOption);
   // ---------- load (the game has no loader of its own, so the drive shows one) ----------
   if (!document.querySelector('link[data-drive-css]')) {
