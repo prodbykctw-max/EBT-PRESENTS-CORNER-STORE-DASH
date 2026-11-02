@@ -696,7 +696,7 @@ the switch off, `snapshot()` is pixel-identical to main at fixed camera poses). 
 `tex/CREDITS.txt`, built by `drive/tools/build_real_tex.mjs`).
 
 - `real-post.js` (`RealLook`, same API as `Look`): the scene renders into the same half-float MSAA target, then a depth-based AO
-  (half resolution on phones), a bloom mip chain, aerial haze, AgX tone map, a light grade and dithering in one final pass.
+  (half resolution on phones), a bloom mip chain, aerial haze, Neutral tone map, sRGB output, a light grade (on the display values) and dithering in one final pass.
 - `real.js`: `upgradeCity` (PBR facades from the building's own style and colour, worn asphalt, concrete curbs, leaf lighting),
   `propMaterial`/`propGeo` hooks in `runner.js` (traffic cars and props become clear-coated paint, glass, rubber, lamps by part
   class, with baked AO), `upgradeCar` (the player's car), `upgradeCharacter`, `shadows`/`placeSun` (a 124 m box on 2048 px on phones,

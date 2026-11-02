@@ -9,5 +9,6 @@ export const hooks = {};
 export function resolveLook(option) {
   const q = new URLSearchParams(location.search).get('look');
   look.real = q === 'real' || (q !== 'comic' && option === 'real');
+  if (!look.real) { delete hooks.propMaterial; delete hooks.propGeo; }   // a page that was real once (the store re-enters the drive) must not keep the hooks
   return look.real;
 }

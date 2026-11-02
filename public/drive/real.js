@@ -112,7 +112,7 @@ function propMaterial() {
       int pc = int(vProp.x + 0.5); float pAO = vProp.y > 0.001 ? vProp.y : 1.0;
       float pCoat = 0.0, pCoatR = 0.05; vec3 pEmit = vec3(0.0);
       if (pc == 1 || pc == 7) {                       // car paint: a coloured base under a hard clear coat
-        roughnessFactor = 0.36; metalnessFactor = 0.45; pCoat = 1.0; pCoatR = 0.035;
+        roughnessFactor = 0.3; metalnessFactor = 0.05; pCoat = 1.0; pCoatR = 0.02;
         diffuseColor.rgb = max(diffuseColor.rgb, vec3(0.025));
       } else if (pc == 2) {                           // glass: nearly black, and a clear coat gives it its sky reflection
         diffuseColor.rgb = vec3(0.012, 0.016, 0.02); roughnessFactor = 0.05; metalnessFactor = 0.0; pCoat = 1.0; pCoatR = 0.02;
@@ -167,13 +167,19 @@ export function placeSun(sun, carPos, fwd, dir) {
  *  a warm sun, a weak hemisphere fill, and the sky's own environment doing most of the ambient and all of the reflections */
 export function tuneWeather(w, { scene, renderer, sun, hemi, look }) {
   const cloud = w.cloud / 100, grey = Math.min(1, cloud * 0.85 + w.rain * 0.3);
-  sun.intensity = THREE.MathUtils.lerp(4.6, 1.5, grey);
+  sun.intensity = THREE.MathUtils.lerp(6.0, 2.0, grey);                  // a hard sun and a weak fill: deep, cool shadows
   sun.color.set(cloud > 0.7 ? 0xe6edf6 : 0xffeed6);
-  hemi.intensity = THREE.MathUtils.lerp(0.28, 0.55, cloud);
-  scene.environmentIntensity = THREE.MathUtils.lerp(1.0, 1.25, grey);
-  renderer.toneMapping = THREE.AgXToneMapping; renderer.toneMappingExposure = 1.0 + cloud * 0.1;
+  hemi.intensity = THREE.MathUtils.lerp(0.2, 0.3, cloud);             // (0.08 left 3-4% of the frame crushed to black)
+  scene.environmentIntensity = THREE.MathUtils.lerp(0.9, 1.0, grey);
+  renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = 1.0;
   const fog = w.code === 45 || w.code === 48;
-  look.setAtmosphere({ haze: scene.fog.color, sunColor: sun.color, sunDir: sun.userData.dir, k: fog ? 0.006 : THREE.MathUtils.lerp(0.00085, 0.0016, grey), mix: fog ? 0.9 : 0.7 });
+  // aerial haze is the post pass's job (from depth); the linear fog is left only to hide the cull edge (city.cull reads fog.far, so that stays)
+  scene.fog.near = scene.fog.far * 0.7;
+  // the haze colour: the horizon pulled 30% toward the zenith and darkened, not the pale horizon itself
+  const sky = scene.getObjectByName('sky')?.material.uniforms, haze = scene.fog.color.clone();
+  if (sky) haze.lerp(sky.uZenith.value, 0.3);
+  haze.multiplyScalar(0.8);
+  look.setAtmosphere({ haze, sunColor: sun.color, sunDir: sun.userData.dir, k: fog ? 0.006 : THREE.MathUtils.lerp(0.0004, 0.0009, grey), mix: fog ? 0.9 : 0.45 });
 }
 
 // ------------------------------------------------------------------ the world
@@ -195,7 +201,7 @@ function wallPatch(T) {
     f = rep(f, '#include <color_fragment>', `
       float style = vInfo.x, height = vInfo.y, seed = vInfo.z;
       vec3 tint = diffuseColor.rgb;
-      tint = mix(vec3(rLum(tint)), tint, 0.6) * 0.9;     // the comic palette is candy: pull it toward real brick, stucco and glass, same colour family
+      tint = mix(vec3(rLum(tint)), tint, 0.85);     // the comic palette is candy: pull it toward real brick, stucco and glass, same colour family
       bool isBrick = style < 0.5, isTower = style > 2.5;
       vec2 uvB = vFac / 1.9, uvC = vFac / 2.7, uvG = vFac / vec2(21.7, 35.0);     // tile sizes in metres (the scans' real sizes)
       wUv = isBrick ? uvB : (isTower ? uvG : uvC);
@@ -283,6 +289,8 @@ function roofPatch(T) {
   return (sh) => {
     paveUniforms(sh, T);
     let f = rep(sh.fragmentShader, '#include <common>', paveSnippet());
+    // the comic roof patch (city.js) washes the roof texture halfway to white after map_fragment: not in the realistic look
+    f = f.replace('diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0), 0.5);', '');
     f = rep(f, '#include <map_fragment>', 'pUv = vMapUv * (8.0 / 1.8); { vec3 pn = texture2D(rPaveN, pUv).rgb; pNr = pn; pRough = 0.9; }');
     f = rep(f, '#include <roughnessmap_fragment>', 'roughnessFactor = 0.9;');
     sh.fragmentShader = rep(f, '#include <normal_fragment_maps>', 'normal = normalize(rTBN(-vViewPosition, normal, pUv) * rNormal(pNr.xy, 0.7));', 'replace');
@@ -373,11 +381,11 @@ export function upgradeCar(carModel, T) {
       roughnessFactor = clamp(roughnessFactor + (pk.g - 0.5) * ${kind === 'paint' ? '0.08' : '0.14'}, 0.02, 1.0);
     }`, 'before');
     sh.fragmentShader = f;
-  }, 'carpeel');
+  }, 'carpeel_' + kind);
   carModel.traverse((o) => {
     if (!o.isMesh) return;
     const k = /_\|_(\d\d)_/.exec(o.name)?.[1], src = o.material;
-    if (k === '01') { o.material = phys(src, { clearcoat: 1, clearcoatRoughness: 0.03, roughness: 0.34, metalness: 0.6, envMapIntensity: 1.3 }); detail(o.material, 'paint'); }
+    if (k === '01') { o.material = phys(src, { clearcoat: 1, clearcoatRoughness: 0.02, roughness: 0.28, metalness: 0.05, envMapIntensity: 1.0 }); detail(o.material, 'paint'); }
     else if (k === '05') o.material = phys(src, { color: new THREE.Color(0.03, 0.04, 0.05), roughnessMap: null, metalnessMap: null, map: null, roughness: 0.04, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.5 });
     else if (k === '04') { o.material = phys(src, { roughness: 0.85, metalness: 0, roughnessMap: null, metalnessMap: null, color: new THREE.Color(0.9, 0.9, 0.9) }); detail(o.material, 'rubber'); }
     else if (k === '06' || k === '07') o.material = phys(src, { envMapIntensity: 1.2 });

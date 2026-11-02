@@ -3,8 +3,8 @@
 //   1. ambient occlusion, computed from the depth buffer alone (view position and normal rebuilt from depth), at half
 //      resolution on phones and full resolution on desktops, then smoothed with a depth-aware blur;
 //   2. bloom: bright HDR pixels (tail lights, signals, the sun on paint) through a down/up mip chain;
-//   3. one final pass: AO (depth-aware upsample), aerial haze from depth, bloom, then the tone map (AgX, chosen by the
-//      renderer's toneMapping, so the comic look's Neutral map is untouched), a light colour grade and sRGB output.
+//   3. one final pass: AO (depth-aware upsample), aerial haze from depth, bloom, then the tone map (Neutral, chosen by the
+//      renderer's toneMapping: three's own Neutral map, the comic look's custom map is not installed), sRGB output, then a light colour grade.
 // Depth is the main pass's own depthTexture, so the overpass cutaway, the near-tree cut, leaf alpha and wind and the
 // crowd's vertex animation are all in it already: no second geometry pass.
 import * as THREE from './vendor/three.module.min.js';
@@ -129,14 +129,15 @@ const FINAL_FRAG = `
     if (uBloomOn > 0.5) col += texture2D(tBloom, vUv).rgb * uBloom;
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>
-    // light grade, after the tone map (display-referred): a touch of contrast and saturation, a warm tint in the lights
+    #include <colorspace_fragment>
+    // light grade, on the display values (after the sRGB conversion, so the S-curve pivots at the display's mid-grey): saturation,
+    // contrast, a warm tint in the lights
     vec3 g = gl_FragColor.rgb;
     float l = dot(g, vec3(0.2126, 0.7152, 0.0722));
     g = mix(vec3(l), g, uSat);
     g = mix(g, g * g * (3.0 - 2.0 * g), uContrast);
     g *= mix(vec3(1.0), uTint, smoothstep(0.25, 1.0, l));
     gl_FragColor.rgb = mix(gl_FragColor.rgb, clamp(g, 0.0, 1.0), uGrade);
-    #include <colorspace_fragment>
     gl_FragColor.rgb += (ign(gl_FragCoord.xy + uTime) - 0.5) / 255.0;   // breaks up banding in the sky gradient
   }`;
 
@@ -170,14 +171,14 @@ export class RealLook {
     this.m = {
       ao: mkMat(AO_FRAG, { ...depthU(), uTexel: { value: new THREE.Vector2() }, uRadius: { value: 1.15 }, uBias: { value: 0.05 }, uPower: { value: 1.6 }, uFade: { value: 90 }, uSamples: { value: this.tier.aoSamples }, uKernel: { value: kernel(16) } }),
       blur: mkMat(BLUR_FRAG, { tAO: { value: null }, uTexel: { value: new THREE.Vector2() } }),
-      pre: mkMat(PRE_FRAG, { tColor: { value: this.target.texture }, uTexel: { value: new THREE.Vector2() }, uThreshold: { value: 1.15 }, uKnee: { value: 0.4 } }),
+      pre: mkMat(PRE_FRAG, { tColor: { value: this.target.texture }, uTexel: { value: new THREE.Vector2() }, uThreshold: { value: 0.9 }, uKnee: { value: 0.4 } }),
       down: mkMat(DOWN_FRAG, { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() } }),
       up: mkMat(UP_FRAG, { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uMix: { value: 1 } }, { blending: THREE.AdditiveBlending, transparent: true }),
       fin: mkMat(FINAL_FRAG, {
         ...depthU(), tColor: { value: this.target.texture }, tAO: { value: null }, tBloom: { value: null }, uAoSize: { value: new THREE.Vector2(1, 1) },
         uAoOn: { value: 1 }, uAoMix: { value: 0.85 }, uBloomOn: { value: 1 }, uBloom: { value: this.tier.bloom }, uHazeOn: { value: 1 }, uHazeK: { value: 0.00085 }, uHazeMix: { value: 0.7 },
         uHaze: { value: new THREE.Color(0xc9dcef) }, uSunCol: { value: new THREE.Color(1, 0.9, 0.7) }, uSunView: { value: new THREE.Vector3(0, 1, 0) },
-        uGrade: { value: 1 }, uSat: { value: 1.08 }, uContrast: { value: 0.22 }, uTint: { value: new THREE.Color(1.03, 1.0, 0.95) }, uTime: { value: 0 },
+        uGrade: { value: 1 }, uSat: { value: 1.15 }, uContrast: { value: 0.25 }, uTint: { value: new THREE.Color(1.03, 1.0, 0.95) }, uTime: { value: 0 },
       }, { toneMapped: true }),
     };
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.m.fin); this.quad.frustumCulled = false;

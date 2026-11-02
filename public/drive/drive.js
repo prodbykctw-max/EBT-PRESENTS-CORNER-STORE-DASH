@@ -116,7 +116,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       c = pow( c, vec3( 1.1 ) ) * 1.08;
       return clamp( c, 0.0, 1.0 );
     }`);
-  renderer.toneMapping = RL ? THREE.AgXToneMapping : THREE.CustomToneMapping; renderer.toneMappingExposure = 1.0;   // (the realistic look tone-maps with AgX in its own final pass: real-post.js)
+  renderer.toneMapping = RL ? THREE.NeutralToneMapping : THREE.CustomToneMapping; renderer.toneMappingExposure = 1.0;   // (the realistic look tone-maps with three's Neutral map in its own final pass: real-post.js)
   root.prepend(renderer.domElement);
   const scene = new THREE.Scene();
   // near 2 m: as close as the chase camera ever gets to the ground (measured along the whole route: the road at the
