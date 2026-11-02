@@ -14,6 +14,11 @@ const pick = (arr) => arr[(Math.random() * arr.length) | 0];
 const platoonSize = () => 1 + (Math.random() < 0.4 * TRAFFIC ? (Math.random() < 0.75 ? 1 : 2) : 0);
 /** the most cross-street vehicles (cars, buses, freeway-deck traffic) alive at once */
 const AMBIENT_CAP = Math.max(1, Math.round(14 * TRAFFIC));
+/** a cross-street driver at an unsignalised junction: how long the route has to stay clear before it goes, and blocked before it stops (s), and the hardest it will
+ *  still stop for (m/s^2); how fast its acceleration may change (m/s^3) when braking comes on and when it lets go */
+const GO_AFTER = 0.4, STOP_AFTER = 0.25, COMFY_STOP = 4.0, CROSS_JERK_ON = 16, CROSS_JERK_OFF = 5;
+/** half the stretch of its mapped way (m) that a cross-street vehicle is drawn on the average of: the polyline's corners are sharp, a car's path is not */
+const PATH_SMOOTH = 4;
 
 // ---------------------------------------------------------------- route frame
 export class RouteFrame {
@@ -635,11 +640,25 @@ export class World {
       let vt = a.vd, hold = false;
       if (approach && lineDist > -0.4) {
         const gate = dCur < 30 ? this.signals?.crossGate(cx, cy) ?? null : null;
-        hold = gate === null ? !this.crossClear(a, cx, cy, car) : !gate;
+        if (gate === null) {
+          // No signal here: it goes when the route is clear (crossClear), and it MAKES UP ITS MIND. The answer of crossClear is a snapshot (a car of
+          // ours coming in or out of its 4.5 s window turns it on and off from one frame to the next): taken frame by frame the cross car crept, braked,
+          // crept again. Now a change has to last (GO_AFTER s clear to go, STOP_AFTER s blocked to stop), and a car that cannot stop comfortably any more
+          // (more than COMFY_STOP m/s^2) just carries on across, as a driver would.
+          const raw = !this.crossClear(a, cx, cy, car);
+          a.rawT = a.rawHold === raw ? (a.rawT || 0) + dt : 0; a.rawHold = raw;
+          if (a.held === undefined) a.held = raw;
+          else if (raw !== a.held) {
+            if (!raw) { if (a.rawT >= GO_AFTER) a.held = false; }
+            else if (a.rawT >= STOP_AFTER && a.vs * a.vs <= 2 * COMFY_STOP * Math.max(lineDist, 0.05)) a.held = true;
+          }
+          hold = a.held;
+        } else hold = !gate;
         if (a.dead_end) hold = true;
         if (hold) vt = lineDist < 0.15 ? 0 : Math.min(a.vd, Math.sqrt(2 * 3.2 * lineDist));
-      }
+      } else { a.held = undefined; a.rawHold = undefined; a.rawT = 0; }
       a.waiting = approach && hold && lineDist < 1.5;
+      a.hold = hold; a.apr = approach; a.lineDist = lineDist;   // (traffic.js: where this car will stop, not how far it would get at its present speed)
       a.waitT = a.waiting && a.vs < 0.3 ? (a.waitT || 0) + dt : 0;
       // a way that dead-ends at our road and has nowhere to go: after a spell at the line it is gone once the player is well away from it
       a.stillT = a.vs < 0.3 ? (a.stillT || 0) + dt : 0;
@@ -649,7 +668,11 @@ export class World {
         const ox = b.x - cx, oy = b.y - cy, al = ox * Math.cos(a.h) + oy * Math.sin(a.h);
         if (al > 0 && al < 30 && Math.abs(-ox * Math.sin(a.h) + oy * Math.cos(a.h)) < 2.5) vt = Math.min(vt, al < 9 ? 0 : (b.vs ?? b.vd) * Math.min(1, (al - 9) / 10));
       }
-      a.vs += Math.max(-(approach ? 7 : 4) * dt, Math.min(2.2 * dt, vt - a.vs));
+      // (the acceleration it asks for is limited to 7 / 4 m/s^2 braking and 2.2 m/s^2 driving off as it always was, and now also in how fast it
+      // changes: brakes come on over ~0.4 s and let go over ~0.5 s, so no stop or start is a step of acceleration)
+      const want = Math.max(-(approach ? 7 : 4), Math.min(2.2, (vt - a.vs) / Math.max(dt, 1e-3))), acc0 = a.acc || 0, jerk = (want < acc0 ? CROSS_JERK_ON : CROSS_JERK_OFF) * dt;
+      a.acc = acc0 + Math.max(-jerk, Math.min(jerk, want - acc0));
+      a.vs = Math.max(0, a.vs + a.acc * dt);
       const nt = a.t + a.vs * dt / L, nx = p[0] + (q[0] - p[0]) * Math.min(nt, 1), ny = p[1] + (q[1] - p[1]) * Math.min(nt, 1);
       a.moved = a.x === undefined ? 0 : Math.hypot(nx - a.x, ny - a.y);
       if (a.dead_end === undefined) { const e = a.pts[a.pts.length - 1]; a.dead_end = r.distTo(e[0], e[1]) < r.hw(r.project(e[0], e[1]).s) + 3 && !this.nextWay(a); }
@@ -659,11 +682,12 @@ export class World {
       if (a.dead_end && stopLine && a.x !== undefined && !this.visible(a.x, a.y, a.zAbs, a.type === 'bus' ? 7 : 3.5)) { a.dead = true; continue; }   // gave up, out of sight
       a.t = nt; if (a.t >= 1) { a.i++; a.t = 0; }
       a.x = nx; a.y = ny; a.h = Math.atan2(q[1] - p[1], q[0] - p[0]);
+      this.smoothPose(a, dt);
       const zOld = a.zAbs;
       a.z = a.hs ? a.hs[a.i] + ((a.hs[a.i + 1] ?? a.hs[a.i]) - a.hs[a.i]) * Math.min(a.t, 1) : 0;
       a.grade = a.hs ? ((a.hs[a.i + 1] ?? a.hs[a.i]) - a.hs[a.i]) / L : 0; // deck climb per metre (on top of the terrain's)
       a.zAbs = r.ground(nx, ny) + a.z;
-      if (zOld !== undefined && a.moved > 0.01) a.pitch = (a.pitch || 0) * 0.8 + Math.atan2(a.zAbs - zOld, a.moved) * 0.2;
+      if (zOld !== undefined && a.moved > 0.01) a.pitch = (a.pitch || 0) + (Math.atan2(a.zAbs - zOld, a.moved) - (a.pitch || 0)) * (1 - Math.exp(-dt / 0.075));   // (a fifth of the way per 60 Hz frame, as it was; now the same at any frame rate)
       // in our road while we're close? it's solid — test it like any obstacle
       if (!a.deck && r.distTo(nx, ny) < 8 && Math.hypot(nx - car.pose.x, ny - car.pose.y) < 20) {
         const pr = r.project(nx, ny);
@@ -679,6 +703,27 @@ export class World {
     return out;
   }
 
+  /** the point on a cross-street vehicle's way `off` metres along it from where it is (negative: behind it), not past the ends of the way */
+  pathPoint(a, off) {
+    const P = a.pts, seg = (i) => Math.hypot(P[i + 1][0] - P[i][0], P[i + 1][1] - P[i][1]) || 1;
+    let i = a.i, L = seg(i), at = a.t * L + off;
+    while (at < 0 && i > 0) { i--; L = seg(i); at += L; }
+    while (at > L && P[i + 2]) { at -= L; i++; L = seg(i); }
+    const u = Math.max(0, Math.min(1, at / L));
+    return [P[i][0] + (P[i + 1][0] - P[i][0]) * u, P[i][1] + (P[i + 1][1] - P[i][1]) * u];
+  }
+  /** What a cross-street vehicle is DRAWN at (a.rx, a.ry, a.rh). The way it follows is an OSM polyline, with a sharp corner at every shape point and junction,
+   *  and the heading used to be the raw direction of its segment: the vehicle spun on the spot at every corner. Its logic (stop lines, the hit test, what
+   *  the route's cars see) is on the polyline as it was; it is DRAWN on the average of the way over +-PATH_SMOOTH m, pointing along the chord of that
+   *  stretch, with the heading eased (dt-correct) over a tenth of a second on top, for the join between one way and the next. */
+  smoothPose(a, dt) {
+    if (!a.pts[a.i + 1]) { a.rx = a.x; a.ry = a.y; a.rh ??= a.h; return; }   // (at the very end of its way: the next frame carries it on, or removes it)
+    const W = PATH_SMOOTH, pts = [-W, -W / 2, 0, W / 2, W].map((o) => this.pathPoint(a, o));
+    a.rx = pts.reduce((v, q) => v + q[0], 0) / pts.length; a.ry = pts.reduce((v, q) => v + q[1], 0) / pts.length;
+    const front = pts[4], back = pts[0], chord = Math.hypot(front[0] - back[0], front[1] - back[1]);
+    const h = chord > 0.5 ? Math.atan2(front[1] - back[1], front[0] - back[0]) : a.h;
+    a.rh = a.rh === undefined ? h : a.rh + Math.atan2(Math.sin(h - a.rh), Math.cos(h - a.rh)) * (1 - Math.exp(-dt / 0.1));
+  }
   /** may a cross-street vehicle `a` at (x, y) go on across our road? True when nothing on the route (cars, the streetcar,
    *  you) will be in the junction inside 4.5 s, or has stopped in it. After waiting 8 s it goes anyway if the junction itself is empty. */
   crossClear(a, x, y, car) {
@@ -843,14 +888,14 @@ export class World {
       }
     }
     for (const a of this.ambient) if (a.x !== undefined) {
-      const ox = -Math.sin(a.h) * a.lane, oy = Math.cos(a.h) * a.lane, x = a.x + ox, y = a.y + oy, g = this.route.ground;
+      const ah = a.rh ?? a.h, ox = -Math.sin(ah) * a.lane, oy = Math.cos(ah) * a.lane, x = (a.rx ?? a.x) + ox, y = (a.ry ?? a.y) + oy, g = this.route.ground;
       const [hl, hw] = VEHICLE[a.type];
       // every wheel reads the rendered surface under it: its own deck (below the expected height + 1.2 m, so a
       // deck overhead is never picked), or the street
       const expect = (px, py) => (a.deck ? deckTop(g, px, py, a.z) : g(px, py)) + LEVEL.ROAD;
       const on = (px, py) => this.surfAt(px, py, expect(px, py) + (a.deck ? 2.1 : 1.2)) ?? expect(px, py); // decks: merged surface up to 2 m
-      const st = standOn(on, x, y, a.h, hl, hw);
-      put(a.type, x, y, st.z, a.h, a.color, st.roll, st.pitch);
+      const st = standOn(on, x, y, ah, hl, hw);
+      put(a.type, x, y, st.z, ah, a.color, st.roll, st.pitch);
     }
     for (const k in this.meshes) {
       const im = this.meshes[k], cap = im.instanceMatrix.count, nIn = lo[k], nOut = hi[k];

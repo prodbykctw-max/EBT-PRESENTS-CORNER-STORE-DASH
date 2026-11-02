@@ -163,7 +163,11 @@ export class Traffic {
       // across takes 2.55 m of the street's length and 12 m of its width), so its own length and width are turned by the
       // angle between its heading and the route's
       const bus = a.type === 'bus', L0 = bus ? 12 : 4.6, W0 = bus ? 2.55 : 1.9, ct = Math.abs(Math.cos(a.h - A)), st = Math.abs(Math.sin(a.h - A));
-      obs.push({ o: a, s: pr.s, d: pr.d, L: L0 * ct + W0 * st, W: L0 * st + W0 * ct, vs: sp * (c * Math.cos(A) + sn * Math.sin(A)), vd: sp * (-c * Math.sin(A) + sn * Math.cos(A)), ped: false, veh: true, cross: true });
+      const vd = sp * (-c * Math.sin(A) + sn * Math.cos(A));
+      // where it is going to stop: a car holding for its stop line (runner.js: red, or the route not clear) does not carry on across for the next 1.8 s at
+      // the speed it has now, it stops at its line, so the sideways distance it can still cover is the rest of the way to that line
+      const stopShift = a.apr && a.hold && sp > 0.1 ? Math.max(0, a.lineDist ?? 0) * (vd / sp) : undefined;
+      obs.push({ o: a, s: pr.s, d: pr.d, L: L0 * ct + W0 * st, W: L0 * st + W0 * ct, vs: sp * (c * Math.cos(A) + sn * Math.sin(A)), vd, stopShift, ped: false, veh: true, cross: true });
     }
     obs.push({ o: car, s: car.s, d: car.d, L: 2 * this.PLAYER.halfL, W: 2 * this.PLAYER.halfW, vs: car.v, vd: car.dv || 0, ped: false, veh: true, player: true, tgt: car.targetD });
     for (const q of W.others || []) if (q.o?.visible) obs.push(   // (the bully: a person in the street while he can be seen, whether or not you are on foot yourself: he runs on behind you for a bit after you get in)
@@ -188,7 +192,9 @@ export class Traffic {
       let gap = ds - (o.L + e.L) / 2; if (gap > look) continue;
       const vlu = dir * o.vs, tau = clamp(Math.max(gap, 0) / Math.max(1, sp - vlu), 0.3, o.ped ? 2.6 : 1.8);
       // its lateral extent now and where it's heading (people step into the road, cars change lane)
-      const pad = o.ped ? 0.42 : 0.12, shift = o.vd * tau;
+      let shift = o.vd * tau;
+      if (o.stopShift !== undefined && Math.abs(shift) > Math.abs(o.stopShift)) shift = o.stopShift;   // (a cross car holding for its line: only as far as the line)
+      const pad = o.ped ? 0.42 : 0.12;
       const oLo = o.d - o.W / 2 - pad + Math.min(0, shift), oHi = o.d + o.W / 2 + pad + Math.max(0, shift);
       // in the middle of a lane change what counts is where we will be when we get there, not the whole sweep
       let lo = lo0, hi = hi0;
