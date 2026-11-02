@@ -178,7 +178,7 @@ export class RealLook {
         ...depthU(), tColor: { value: this.target.texture }, tAO: { value: null }, tBloom: { value: null }, uAoSize: { value: new THREE.Vector2(1, 1) },
         uAoOn: { value: 1 }, uAoMix: { value: 0.85 }, uBloomOn: { value: 1 }, uBloom: { value: this.tier.bloom }, uHazeOn: { value: 1 }, uHazeK: { value: 0.00085 }, uHazeMix: { value: 0.7 },
         uHaze: { value: new THREE.Color(0xc9dcef) }, uSunCol: { value: new THREE.Color(1, 0.9, 0.7) }, uSunView: { value: new THREE.Vector3(0, 1, 0) },
-        uGrade: { value: 1 }, uSat: { value: 1.15 }, uContrast: { value: 0.25 }, uTint: { value: new THREE.Color(1.03, 1.0, 0.95) }, uTime: { value: 0 },
+        uGrade: { value: 1 }, uSat: { value: 1.0 }, uContrast: { value: 0.12 }, uTint: { value: new THREE.Color(1.03, 1.0, 0.95) }, uTime: { value: 0 },
       }, { toneMapped: true }),
     };
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.m.fin); this.quad.frustumCulled = false;

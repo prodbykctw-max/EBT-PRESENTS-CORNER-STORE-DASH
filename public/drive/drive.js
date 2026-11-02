@@ -18,7 +18,7 @@ import { Signals } from './signals.js';
 import { Birds } from './birds.js';
 import { haptic, HAP, tapHaptic } from './haptics.js';
 import { Look } from './look.js';
-import { resolveLook } from './mode.js';
+import { resolveLook, fallbackToComic } from './mode.js';
 import { WIND, NEAR_CUT } from './landscape.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
@@ -70,7 +70,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   audio.unlock(); // still inside the START tap's user activation on most browsers
   const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
   const MOBILE = matchMedia('(pointer: coarse)').matches;
-  const realReady = REAL ? import('./real.js').then(async (R) => ({ R, T: await R.loadTextures(BASE, { mobile: MOBILE }) })) : null;   // the realistic look's code and its 1K scans load alongside the rest
+  const realReady = REAL ? import('./real.js').then(async (R) => ({ R, T: await R.loadTextures(BASE, { mobile: MOBILE }) })).catch((e) => { console.warn('realistic look unavailable, drawing the comic look:', e?.message || e); return null; }) : null;   // the realistic look's code and its 1K scans load alongside the rest
   // motion (GSAP): the store page already carries it; on its own (/drive/index.html) the drive loads the same
   // vendored copy. Phones set to reduce motion, or no GSAP at all, keep the plain CSS behaviour.
   const gsapReady = window.gsap ? Promise.resolve(window.gsap) : new Promise((ok) => {
@@ -89,6 +89,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     realReady,
   ]);
   const { R: RL, T: realTex } = realPack || {};
+  if (REAL && !RL) fallbackToComic();   // real.js or its textures failed to load: exactly the comic look from here on (everything below keys off RL)
   // ?wx=rain|overcast|fog|storm (tests only): force the weather the lighting and the roads follow
   if (QA && new URLSearchParams(location.search).get('wx')) Object.assign(weather, { rain: { code: 63, cloud: 90, rain: 1, label: 'Rain 58°' }, overcast: { code: 3, cloud: 95, rain: 0, label: 'Overcast 62°' }, fog: { code: 45, cloud: 100, rain: 0, label: 'Fog 55°' } }[new URLSearchParams(location.search).get('wx')] || {});
   if (RL) RL.install();   // the realistic look's prop material and prop geometry hooks: before the city and the traffic are built

@@ -6,6 +6,9 @@
 export const look = { real: false };
 export const hooks = {};
 
+/** the realistic look's code or textures didn't load: from here on the drive is the plain comic look */
+export function fallbackToComic() { look.real = false; delete hooks.propMaterial; delete hooks.propGeo; }
+
 export function resolveLook(option) {
   const q = new URLSearchParams(location.search).get('look');
   look.real = q === 'real' || (q !== 'comic' && option === 'real');

@@ -169,7 +169,8 @@ export function tuneWeather(w, { scene, renderer, sun, hemi, look }) {
   const cloud = w.cloud / 100, grey = Math.min(1, cloud * 0.85 + w.rain * 0.3);
   sun.intensity = THREE.MathUtils.lerp(6.0, 2.0, grey);                  // a hard sun and a weak fill: deep, cool shadows
   sun.color.set(cloud > 0.7 ? 0xe6edf6 : 0xffeed6);
-  hemi.intensity = THREE.MathUtils.lerp(0.2, 0.3, cloud);             // (0.08 left 3-4% of the frame crushed to black)
+  hemi.color.set(0xe4e8ee); hemi.groundColor.set(0x8a7a64);              // a near-neutral sky fill over a warm ground bounce (the comic look's is blue-tinted)
+  hemi.intensity = THREE.MathUtils.lerp(0.9, 1.0, cloud);              // the fill that keeps shade neutral (the sky environment alone made it blue)
   scene.environmentIntensity = THREE.MathUtils.lerp(0.9, 1.0, grey);
   renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = 1.0;
   const fog = w.code === 45 || w.code === 48;
@@ -201,8 +202,8 @@ function wallPatch(T) {
     f = rep(f, '#include <color_fragment>', `
       float style = vInfo.x, height = vInfo.y, seed = vInfo.z;
       vec3 tint = diffuseColor.rgb;
-      tint = mix(vec3(rLum(tint)), tint, 0.85);     // the comic palette is candy: pull it toward real brick, stucco and glass, same colour family
       bool isBrick = style < 0.5, isTower = style > 2.5;
+      tint = mix(vec3(rLum(tint)), tint, isTower ? 0.4 : 0.75);     // the comic palette is candy: pull it toward real brick, stucco and glass (glass most), same colour family
       vec2 uvB = vFac / 1.9, uvC = vFac / 2.7, uvG = vFac / vec2(21.7, 35.0);     // tile sizes in metres (the scans' real sizes)
       wUv = isBrick ? uvB : (isTower ? uvG : uvC);
       vec2 gx = dFdx(wUv), gy = dFdy(wUv);
@@ -216,10 +217,10 @@ function wallPatch(T) {
       if (isTower) {
         // glass curtain wall: the scan gives the panels and mullions; panels are reflective tinted glass, a spandrel band marks each floor slab
         float pm = smoothstep(0.01, 0.05, al), fy = fract(vFac.y / 3.9), band = 1.0 - smoothstep(0.17, 0.21, fy);
-        vec3 panel = tint * 1.25 * (al / mean) * vec3(0.9, 1.0, 1.1);
+        vec3 panel = tint * (al / mean) * vec3(0.95, 1.0, 1.03);
         diffuseColor.rgb = mix(wallCol * 0.35, panel, pm);
         diffuseColor.rgb = mix(diffuseColor.rgb, tint * 0.5, band);
-        wRough = mix(0.5, clamp(nr.b * 0.5 + 0.03, 0.03, 0.4), pm * (1.0 - band)); wMetal = pm * (1.0 - band) * 0.8;
+        wRough = mix(0.5, clamp(nr.b * 0.5 + 0.03, 0.03, 0.4), pm * (1.0 - band)); wMetal = pm * (1.0 - band) * 0.25;
         wAO *= 1.0 - 0.15 * band;
       } else {
         float bay = isTower ? 1.55 : (style > 1.5 ? 2.4 : 3.0), floorH = style > 2.5 ? 3.9 : 3.6;
@@ -329,10 +330,10 @@ function leafPatch() {
     f = rep(f, '#include <normal_fragment_begin>', 'normal = normalize(vNormal); nonPerturbedNormal = normal;       // the rounded canopy normal, on both sides of a card');
     f = rep(f, '#include <emissivemap_fragment>', `
       #if NUM_DIR_LIGHTS > 0
-        float lt = pow(clamp(-dot(directionalLights[0].direction, normalize(vViewPosition)), 0.0, 1.0), 2.0);
-        totalEmissiveRadiance += diffuseColor.rgb * directionalLights[0].color * lt * 0.32 * mix(0.5, 1.0, vLeafH);   // sun through the leaves
+        float lt = pow(clamp(-dot(directionalLights[0].direction, normalize(vViewPosition)), 0.0, 1.0), 1.2);
+        totalEmissiveRadiance += diffuseColor.rgb * directionalLights[0].color * lt * 0.45 * mix(0.5, 1.0, vLeafH);   // sun through the leaves
       #endif`);
-    f = rep(f, '#include <aomap_fragment>', 'reflectedLight.indirectDiffuse *= mix(0.45, 1.0, vLeafH); reflectedLight.indirectSpecular *= mix(0.6, 1.0, vLeafH);', 'replace');
+    f = rep(f, '#include <aomap_fragment>', 'reflectedLight.indirectDiffuse *= mix(0.7, 1.0, vLeafH); reflectedLight.indirectSpecular *= mix(0.6, 1.0, vLeafH);', 'replace');
     sh.fragmentShader = f;
   };
 }
@@ -385,7 +386,7 @@ export function upgradeCar(carModel, T) {
   carModel.traverse((o) => {
     if (!o.isMesh) return;
     const k = /_\|_(\d\d)_/.exec(o.name)?.[1], src = o.material;
-    if (k === '01') { o.material = phys(src, { clearcoat: 1, clearcoatRoughness: 0.02, roughness: 0.28, metalness: 0.05, envMapIntensity: 1.0 }); detail(o.material, 'paint'); }
+    if (k === '01') { o.material = phys(src, { clearcoat: 1, clearcoatRoughness: 0.02, roughness: 0.4, metalness: 0.05, envMapIntensity: 0.85 }); detail(o.material, 'paint'); }
     else if (k === '05') o.material = phys(src, { color: new THREE.Color(0.03, 0.04, 0.05), roughnessMap: null, metalnessMap: null, map: null, roughness: 0.04, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.5 });
     else if (k === '04') { o.material = phys(src, { roughness: 0.85, metalness: 0, roughnessMap: null, metalnessMap: null, color: new THREE.Color(0.9, 0.9, 0.9) }); detail(o.material, 'rubber'); }
     else if (k === '06' || k === '07') o.material = phys(src, { envMapIntensity: 1.2 });

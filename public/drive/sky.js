@@ -23,7 +23,8 @@ const REAL_FRAG = `uniform vec3 uZenith, uHorizon, uGround, uEnvGround, uSun; un
       sky = mix(sky, cc, cov);
     }
 #ifdef ENVMAP
-    vec3 col = h < 0.0 ? uEnvGround : sky;          // what the paint reflects: the sky over a dark ground, with a crisp horizon line between them
+    sky = mix(vec3(dot(sky, vec3(0.2126, 0.7152, 0.0722))), sky, 0.2);   // the light and the reflections: a calmer sky than the one you see
+    vec3 col = h < 0.0 ? uEnvGround : sky;          // what the paint reflects: the sky over a warm ground bounce, with a crisp horizon line between them
 #else
     vec3 col = h < 0.0 ? mix(uHorizon * 0.85, uGround, clamp(-h * 6.0, 0.0, 1.0)) : sky;
 #endif
@@ -35,7 +36,7 @@ export function buildSky(renderer, scene, { zenith, horizon, sunDir, cloud = 0, 
     side: THREE.BackSide, depthWrite: false, fog: false,
     uniforms: {
       uZenith: { value: new THREE.Color(zenith) }, uHorizon: { value: new THREE.Color(horizon) },
-      uGround: { value: new THREE.Color(0x6b6862) }, uEnvGround: { value: new THREE.Color(0x22201e) }, uSun: { value: sunDir.clone().normalize() }, uCloud: { value: cloud },
+      uGround: { value: new THREE.Color(0x6b6862) }, uEnvGround: { value: new THREE.Color(0x7a746a) }, uSun: { value: sunDir.clone().normalize() }, uCloud: { value: cloud },
     },
     vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: real ? REAL_FRAG : `uniform vec3 uZenith, uHorizon, uGround, uSun; uniform float uCloud; varying vec3 vDir;

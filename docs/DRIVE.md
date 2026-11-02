@@ -704,3 +704,4 @@ the switch off, `snapshot()` is pixel-identical to main at fixed camera poses). 
 - `sky.js` `REAL_FRAG` (clouds, sun glow) is used when `real` is passed through `weather.js`.
 - Adaptive resolution (`adaptRes` in `drive.js`) drops AO first, then resolution, and restores resolution before AO.
 - QA only: `?qa&wx=rain|overcast|fog` forces the weather.
+- If `real.js` or its textures fail to load, `drive.js` catches it, calls `fallbackToComic()` (mode.js) and the drive runs exactly as the comic look; everything downstream keys off `RL`.
