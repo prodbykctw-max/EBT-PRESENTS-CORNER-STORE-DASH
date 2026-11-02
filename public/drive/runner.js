@@ -814,7 +814,7 @@ export class World {
   }
 
   /** push every live entity into its InstancedMesh */
-  render(car, t) {
+  render(car, t, dt = 0) {
     // Shadow split: every instance is drawn for the camera, but only the ones inside the sun's shadow box (the 220 m
     // square of shadow map that follows the car) can put a shadow anywhere, so those go first in each buffer and
     // the shadow pass draws just that leading run (shadowSplit). Instances outside it used to go through the shadow
@@ -873,6 +873,9 @@ export class World {
           e._seat = standOn(inStreet ? onRoute : onTerrain, p.x, p.y, yaw, hl, hw);
         }
         z = e._seat.z; pitch = e._seat.pitch; roll = e._seat.roll;
+        // a vehicle on the move is seated from four samples of the road surface under its wheels, every frame, with nothing between one frame and the next: a curb edge or a
+        // junction patch under a wheel, or the fallback height where there is no surface at all, made its height, pitch and roll jump. Smoothed (critically damped, 0.12 s)
+        if (dt > 0 && !e.parked && e.drv && !e.flying) [z, pitch, roll] = settle(e, z, pitch, roll, dt);
       }
       if (e.hd !== undefined) yaw = p.a + e.hd;                 // people and dogs face where they're going
       else if (e.type === 'panhandler') yaw = p.a + Math.PI;
@@ -895,7 +898,8 @@ export class World {
       const expect = (px, py) => (a.deck ? deckTop(g, px, py, a.z) : g(px, py)) + LEVEL.ROAD;
       const on = (px, py) => this.surfAt(px, py, expect(px, py) + (a.deck ? 2.1 : 1.2)) ?? expect(px, py); // decks: merged surface up to 2 m
       const st = standOn(on, x, y, ah, hl, hw);
-      put(a.type, x, y, st.z, ah, a.color, st.roll, st.pitch);
+      if (dt > 0) { const [z, pitch, roll] = settle(a, st.z, st.pitch, st.roll, dt); put(a.type, x, y, z, ah, a.color, roll, pitch); }
+      else put(a.type, x, y, st.z, ah, a.color, st.roll, st.pitch);
     }
     for (const k in this.meshes) {
       const im = this.meshes[k], cap = im.instanceMatrix.count, nIn = lo[k], nOut = hi[k];
@@ -919,6 +923,19 @@ export class World {
     this.tokenMesh.count = n; uploadUsed(this.tokenMesh.instanceMatrix, n);
   }
 }
+
+/** Critically damped smoothing (Unity's SmoothDamp, time constant `T` s) of one number kept on `o` (value `_f<k>`, speed `_v<k>`): the value follows `target` with no overshoot
+ *  and no step. A jump bigger than `snap` is a move to somewhere else (it was just placed, or the road surface under it changed level), not a bump: it is taken at once. */
+function damp(o, k, target, T, dt, snap) {
+  const kx = '_f' + k, kv = '_v' + k;
+  if (o[kx] === undefined || Math.abs(target - o[kx]) > snap) { o[kx] = target; o[kv] = 0; return target; }
+  const w = 2 / T, x = w * dt, ex = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x), ch = o[kx] - target, tmp = (o[kv] + w * ch) * dt;
+  o[kv] = (o[kv] - w * tmp) * ex;
+  return (o[kx] = target + (ch + tmp) * ex);
+}
+/** the pose a moving vehicle is seated with (height, pitch, roll), smoothed over 0.12 s: see render */
+const SEAT_T = 0.12;
+const settle = (o, z, pitch, roll, dt) => [damp(o, 'z', z, SEAT_T, dt, 1.2), damp(o, 'p', pitch, SEAT_T, dt, 0.5), damp(o, 'r', roll, SEAT_T, dt, 0.5)];
 
 /** The shadow pass draws only an instanced mesh's first `userData.shadowCount` instances (the ones that can cast a
  *  shadow into the shadow map: see World.render); the camera still draws all `count`. */

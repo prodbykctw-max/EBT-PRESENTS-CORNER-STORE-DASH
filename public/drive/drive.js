@@ -1227,7 +1227,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     for (const w of wheelSpin) w.o.quaternion.copy(w.q0).multiply(dq.setFromAxisAngle(X, wheelRoll));
     // front wheels stay straight: a lane change is a sideways slide of the whole car, not a steer
     for (const w of wheelSteer) w.o.quaternion.copy(w.q0);
-    world.render(car, drove);
+    world.render(car, drove, dt);
     signals.update(dt); WIND.value += dt;   // traffic lights; the tree canopies sway
     if (state !== 'driving') { world.updateFrustum(); trams.render(); }   // (world.update keeps the frustum current while driving)
     crowd.update(dt, car, hornT);
