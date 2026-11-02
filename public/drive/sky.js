@@ -26,7 +26,9 @@ const REAL_FRAG = `uniform vec3 uZenith, uHorizon, uGround, uEnvGround, uSun; un
     sky = mix(vec3(dot(sky, vec3(0.2126, 0.7152, 0.0722))), sky, 0.2);   // the light and the reflections: a calmer sky than the one you see
     vec3 col = h < 0.0 ? uEnvGround : sky;          // what the paint reflects: the sky over a warm ground bounce, with a crisp horizon line between them
 #else
-    vec3 col = h < 0.0 ? mix(uHorizon * 0.85, uGround, clamp(-h * 6.0, 0.0, 1.0)) : sky;
+    // below the horizon the dome is only ever seen through a gap in the ground: plain pavement grey (well under the bloom threshold), blending to the
+    // horizon colour only in the last degree or two, where the real terrain's far edge meets it
+    vec3 col = h < 0.0 ? mix(uGround, uHorizon * 0.9, 1.0 - smoothstep(0.0, 0.03, -h)) : sky;
 #endif
     gl_FragColor = vec4(col, 1.0);
   }`;

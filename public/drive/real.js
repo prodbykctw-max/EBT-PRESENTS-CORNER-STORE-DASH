@@ -274,7 +274,7 @@ function groundPatch(T) {   // the terrain / sidewalk mesh: uv = metres / 3
   return (sh) => {
     paveUniforms(sh, T);
     let f = rep(sh.fragmentShader, '#include <common>', paveSnippet());
-    sh.fragmentShader = paveShade(f, 'vMapUv * (3.0 / 1.8)', 'diffuseColor.rgb * 0.82');
+    sh.fragmentShader = paveShade(f, 'vMapUv * (3.0 / 1.8)', 'diffuseColor.rgb * 0.4');
   };
 }
 function curbPatch(T) {     // curbs have no uv at all: project the concrete in world space (top faces on x,z; sides along the curb and up)
@@ -338,8 +338,23 @@ function leafPatch() {
   };
 }
 
+/** landscape.js builds the terrain wound face-down (its comment says up), so from above it is back-face culled and the sky dome shows
+ *  wherever nothing is draped on it (the sidewalk strips, plazas, bare lots). In the comic look that reads as a tan strip; in the realistic look
+ *  it is the pale horizon colour with bloom on it. Flip the winding and the normals once (the tiles share the original's vertex buffers), so the
+ *  terrain is a real surface: it takes the pavement material below, the sun and the shadows. */
+function faceTerrainUp(city) {
+  const idxDone = new Set(), nrmDone = new Set();
+  city.group.traverse((o) => {
+    if (!o.isMesh || !/^ground(_tile)?$/.test(o.name)) return;
+    const g = o.geometry, I = g.index, N = g.attributes.normal;
+    if (I && !idxDone.has(I)) { idxDone.add(I); const a = I.array; for (let k = 0; k + 2 < a.length; k += 3) { const t = a[k + 1]; a[k + 1] = a[k + 2]; a[k + 2] = t; } I.needsUpdate = true; }
+    if (N && !nrmDone.has(N)) { nrmDone.add(N); const a = N.array; for (let k = 0; k < a.length; k++) a[k] = -a[k]; N.needsUpdate = true; }
+  });
+}
+
 /** change the city's materials after it is built and before anything is drawn or compiled */
 export function upgradeCity({ city, T, scene }) {
+  faceTerrainUp(city);
   const seen = new Set(), once = (m, tag, fn) => { if (seen.has(m)) return; seen.add(m); (tag === 'walls' ? swap : chain)(m, fn, tag); };
   city.group.traverse((o) => {
     if (!o.isMesh) return;
