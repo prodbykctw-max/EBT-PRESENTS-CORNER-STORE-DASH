@@ -18,6 +18,7 @@ import { Signals } from './signals.js';
 import { Birds } from './birds.js';
 import { haptic, HAP, tapHaptic } from './haptics.js';
 import { Look } from './look.js';
+import { resolveLook, fallbackToComic } from './mode.js';
 import { WIND, NEAR_CUT } from './landscape.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
@@ -45,7 +46,9 @@ const nextFrame = QA ? (f) => setTimeout(f, 16) : requestAnimationFrame;
 const SCREEN_FADE = 0.3;
 const cancelFrame = QA ? clearTimeout : cancelAnimationFrame;
 
-export async function startDrive({ mount = document.body, muted = false, onDone = () => {}, onProgress = () => {} } = {}) {
+export async function startDrive({ mount = document.body, muted = false, onDone = () => {}, onProgress = () => {}, look: lookOption } = {}) {
+  // which look: the comic ink look (the default) or the realistic look (?look=real, or startDrive({ look: 'real' }))
+  const REAL = resolveLook(lookOption);
   // ---------- load (the game has no loader of its own, so the drive shows one) ----------
   if (!document.querySelector('link[data-drive-css]')) {
     const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = new URL('drive.css', BASE).href; l.dataset.driveCss = '';
@@ -66,13 +69,15 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const audio = new DriveAudio({ muted });
   audio.unlock(); // still inside the START tap's user activation on most browsers
   const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
+  const MOBILE = matchMedia('(pointer: coarse)').matches;
+  const realReady = REAL ? import('./real.js').then(async (R) => ({ R, T: await R.loadTextures(BASE, { mobile: MOBILE }) })).catch((e) => { console.warn('realistic look unavailable, drawing the comic look:', e?.message || e); return null; }) : null;   // the realistic look's code and its 1K scans load alongside the rest
   // motion (GSAP): the store page already carries it; on its own (/drive/index.html) the drive loads the same
   // vendored copy. Phones set to reduce motion, or no GSAP at all, keep the plain CSS behaviour.
   const gsapReady = window.gsap ? Promise.resolve(window.gsap) : new Promise((ok) => {
     const s = document.createElement('script'); s.src = new URL('vendor/gsap.min.js', BASE).href;
     s.onload = () => ok(window.gsap || null); s.onerror = () => ok(null); document.head.appendChild(s);
   });
-  const [W, hero, carGltf, props, trees, weather, gsapLib, charGltf] = await Promise.all([
+  const [W, hero, carGltf, props, trees, weather, gsapLib, charGltf, realPack] = await Promise.all([
     fetch(new URL('world.json', BASE)).then((r) => r.json()),
     loader.loadAsync(new URL('hero.glb', BASE).href),
     loader.loadAsync(new URL('car.glb', BASE).href),
@@ -81,7 +86,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     fetchWeather(),
     gsapReady,
     loader.loadAsync(new URL('character.glb', BASE).href),   // you and the bully on foot (people.js)
+    realReady,
   ]);
+  const { R: RL, T: realTex } = realPack || {};
+  if (REAL && !RL) fallbackToComic();   // real.js or its textures failed to load: exactly the comic look from here on (everything below keys off RL)
+  // ?wx=rain|overcast|fog|storm (tests only): force the weather the lighting and the roads follow
+  if (QA && new URLSearchParams(location.search).get('wx')) Object.assign(weather, { rain: { code: 63, cloud: 90, rain: 1, label: 'Rain 58°' }, overcast: { code: 3, cloud: 95, rain: 0, label: 'Overcast 62°' }, fog: { code: 45, cloud: 100, rain: 0, label: 'Fog 55°' } }[new URLSearchParams(location.search).get('wx')] || {});
+  if (RL) RL.install();   // the realistic look's prop material and prop geometry hooks: before the city and the traffic are built
+
   const G = gsapLib && !matchMedia('(prefers-reduced-motion: reduce)').matches ? gsapLib : null;
   if (G) root.classList.add('gs');   // drive.css: GSAP, not CSS transitions, moves the messages and pop-ups
   progress(0.7, 'Building the city');
@@ -92,12 +104,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // the canvas only ever receives one full-screen quad, which multisampling can't change by a single pixel. A
   // multisampled canvas just cost a full-screen MSAA buffer and a resolve every frame.
   const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-  const MOBILE = matchMedia('(pointer: coarse)').matches;
   renderer.setPixelRatio(Math.min(devicePixelRatio, MOBILE ? 1.5 : 2)); // phones: fill-rate is the budget
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
   // The look: GTA Chinatown Wars colour, not a washed-out film grade. A hue-true filmic shoulder (Khronos
   // Neutral), then saturation and a touch of contrast on top, in the same pass (no post-processing cost on phones).
-  THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace(
+  if (!RL) THREE.ShaderChunk.tonemapping_pars_fragment = THREE.ShaderChunk.tonemapping_pars_fragment.replace(
     'vec3 CustomToneMapping( vec3 color ) { return color; }',
     `vec3 CustomToneMapping( vec3 color ) {
       vec3 c = NeutralToneMapping( color );
@@ -106,7 +117,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       c = pow( c, vec3( 1.1 ) ) * 1.08;
       return clamp( c, 0.0, 1.0 );
     }`);
-  renderer.toneMapping = THREE.CustomToneMapping; renderer.toneMappingExposure = 1.0;
+  renderer.toneMapping = RL ? THREE.NeutralToneMapping : THREE.CustomToneMapping; renderer.toneMappingExposure = 1.0;   // (the realistic look tone-maps with three's Neutral map in its own final pass: real-post.js)
   root.prepend(renderer.domElement);
   const scene = new THREE.Scene();
   // near 2 m: as close as the chase camera ever gets to the ground (measured along the whole route: the road at the
@@ -116,7 +127,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // ink pass's depth precision at half the old value, not an eighth; the tightest layer gap (3 cm, levels.js) stays
   // clean out to ~1 km.
   const camera = new THREE.PerspectiveCamera(42, 1, 2, 3000);
-  const comic = new Look(renderer, scene, camera, { mobile: MOBILE });   // GTA Chinatown Wars ink + comic shading
+  // the look pass: GTA Chinatown Wars ink + comic shading, or the realistic look's post chain (the same API: target, resize, render)
+  const comic = RL ? new RL.RealLook(renderer, scene, camera, { mobile: MOBILE }) : new Look(renderer, scene, camera, { mobile: MOBILE });
 
   // shared tiling textures come from the hero glTF materials, so they download once
   const tex = {};
@@ -139,6 +151,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const ground = makeGround(W);
   const route = new RouteFrame(W, ground, 200); // road continues 200 m past the store: traffic drives on out of view
   const city = buildCity(W, tex, ground, route, props.scene, trees.scene);
+  if (RL) RL.upgradeCity({ city, T: realTex, scene });   // PBR facades, worn roads, concrete, lit trees (real.js)
   scene.add(city.group, hero.scene);
   // the city and the storefront row never move: their matrices are worked out once here, instead of three.js
   // recomposing every one of their hundreds of objects every frame (and again for the shadow pass)
@@ -151,8 +164,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   sun.castShadow = true; sun.shadow.mapSize.set(MOBILE ? 1024 : 2048, MOBILE ? 1024 : 2048);
   Object.assign(sun.shadow.camera, { left: -110, right: 110, top: 110, bottom: -110, near: 1, far: 600 });
   sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.6;
+  if (RL) RL.shadows(sun, MOBILE);   // the realistic look: one tightened sun shadow instead of the comic look's coarse +/-110 m box
   scene.add(hemi, sun, sun.target);
-  const sky = applyWeather(weather, { scene, renderer, sun, hemi, roads: city.surfaces });
+  const sky = applyWeather(weather, { scene, renderer, sun, hemi, roads: city.surfaces, real: !!RL });
+  if (RL) RL.tuneWeather(weather, { scene, renderer, sun, hemi, look: comic });   // physical light: warm sun, weak hemisphere fill, the sky's environment, haze
   // wheels read the height of the actual road triangles under them (never a formula that could disagree)
   const roadSurface = new TopSurface(city.streets.drivable);
   const surfAt = (x, y, below) => { const h = roadSurface.top(x, -y, below); return h ? h.y : null; };
@@ -184,6 +199,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     trees: [...(city.furniture.tree_round || []), ...(city.furniture.tree_upright || [])],
     occupied: (s, d) => world.ents.some((e) => e.alive && Math.abs(e.s - s) < 7 && Math.abs(e.d - d) < 2.5), visible: (x, y, z, r) => world.visible(x, y, z, r), mobile: MOBILE });
   const carModel = carGltf.scene;
+  if (RL) RL.upgradeCar(carModel, realTex);   // clearcoat paint, real glass and rubber (before the brake lamps are looked for just below)
   carModel.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   // brake lights: the tail-lamp material flares when you're on the brakes
   // (the asset optimiser renames materials, so find it by its glow: the purest red emissive on the car)
@@ -351,6 +367,17 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       else res.lockUp = Math.min(240, 30 * 2 ** res.bounces);       // it helped: stay there a while (longer each time it bounces)
       res.trial = null; res.slow = res.fast = 0; return;
     }
+    // the realistic look's ambient occlusion is the first thing to go, before any resolution is given up; it comes back last
+    if (comic.setAO) {
+      if (res.aoTrial) {
+        if ((res.aoTrial.t -= sec) > 0) return;                     // judge dropping it after 2 s: if frames aren't at least 10% faster it wasn't the cost, so it comes back
+        if (res.ema > res.aoTrial.ema * 0.9) { comic.setAO(true); res.lockAO = Math.min(300, 30 * 2 ** res.aoFails++); }
+        res.aoTrial = null; res.slow = res.fast = 0; return;
+      }
+      res.lockAO = Math.max(0, (res.lockAO || 0) - sec);
+      if (res.slow > 1.5 && !res.lockAO && comic.aoActive) { comic.setAO(false); res.aoTrial = { ema: res.ema, t: 2 }; res.aoFails ||= 0; res.slow = 0; return; }
+      if (res.fast > 6 && !res.lockUp && pr >= PR_MAX && !comic.aoActive && !res.lockAO) { comic.setAO(true); res.fast = 0; return; }
+    }
     if (res.slow > 1.5 && !res.lockDown && pr > PR_MIN) {
       if (res.clock - res.upAt < 10) res.bounces++;                  // the last step up didn't hold
       res.trial = { from: pr, ema: res.ema, t: 2 }; setPR(Math.max(PR_MIN, pr - PR_STEP)); res.slow = 0; return;
@@ -507,6 +534,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   markerSprite.scale.set(1.3, 1.3, 1); markerSprite.position.set(0, 2.9, 0); markerSprite.renderOrder = 5; carRig.add(markerSprite); markerSprite.visible = !SKIPFOOT;
 
   // you and the bully: the store's character in 3D (people.js), with a walk, a run built from it, and a standing pose
+  if (RL) RL.upgradeCharacter(charGltf.scene);   // before makePerson clones it for the bully
   const clips = { walk: charGltf.animations.find((a) => a.name === 'walk') };
   clips.run = makeRunClip(clips.walk); clips.stand = makeStandClip(clips.walk);
   // How fast the ground goes by under a clip: the speed a planted foot sweeps backwards while it's on the ground,
@@ -1264,8 +1292,13 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     camera.lookAt(camLook);
     sky.follow(camera);
 
-    sun.position.copy(carRig.position).add(tmp.copy(sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35)).multiplyScalar(220));
-    sun.target.position.copy(carRig.position);
+    if (RL) {   // the realistic look's shadow box rides a little ahead of the car and moves in whole shadow texels (no shimmer)
+      const fwd = tmp.set(Math.cos(camA), 0, -Math.sin(camA));
+      RL.placeSun(sun, carRig.position, fwd, sun.userData.dir);
+    } else {
+      sun.position.copy(carRig.position).add(tmp.copy(sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35)).multiplyScalar(220));
+      sun.target.position.copy(carRig.position);
+    }
 
     // the pedal the engine hears: light throttle to hold speed, more to pull away (never floored for long), none
     // coasting or on the brakes

@@ -686,3 +686,22 @@ scratch rather than hand-tweaked.
 
 `drive/tools/bl.py` talks to the BlenderMCP add-on socket directly (port 9876). It is used
 for long jobs such as imports and bakes, where the MCP bridge times out.
+
+## The "real" look (opt-in, `?look=real`)
+
+A second look for the drive, next to the comic ink look. The comic look is the default and its code path is unchanged (with
+the switch off, `snapshot()` is pixel-identical to main at fixed camera poses). Real mode is chosen in `startDrive({ look: 'real' })`
+(what the store page can pass later) or by `?look=real` / `?look=comic` in the URL (the URL wins). `mode.js` holds the switch
+(`look.real`, `hooks`); `real.js` and `real-post.js` are only downloaded when it is on, with `tex/real/*.webp` (1.5 MB, credits in
+`tex/CREDITS.txt`, built by `drive/tools/build_real_tex.mjs`).
+
+- `real-post.js` (`RealLook`, same API as `Look`): the scene renders into the same half-float MSAA target, then a depth-based AO
+  (half resolution on phones), a bloom mip chain, aerial haze, Neutral tone map, sRGB output, a light grade (on the display values) and dithering in one final pass.
+- `real.js`: `upgradeCity` (PBR facades from the building's own style and colour, worn asphalt, concrete curbs, leaf lighting),
+  `propMaterial`/`propGeo` hooks in `runner.js` (traffic cars and props become clear-coated paint, glass, rubber, lamps by part
+  class, with baked AO), `upgradeCar` (the player's car), `upgradeCharacter`, `shadows`/`placeSun` (a 124 m box on 2048 px on phones,
+  following the car, snapped to whole texels), `tuneWeather`.
+- `sky.js` `REAL_FRAG` (clouds, sun glow) is used when `real` is passed through `weather.js`.
+- Adaptive resolution (`adaptRes` in `drive.js`) drops AO first, then resolution, and restores resolution before AO.
+- QA only: `?qa&wx=rain|overcast|fog` forces the weather.
+- If `real.js` or its textures fail to load, `drive.js` catches it, calls `fallbackToComic()` (mode.js) and the drive runs exactly as the comic look; everything downstream keys off `RL`.

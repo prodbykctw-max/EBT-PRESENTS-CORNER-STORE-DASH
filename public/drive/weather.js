@@ -23,18 +23,19 @@ export async function fetchWeather(timeoutMs = 2500) {
 }
 
 /** Daytime always; sun strength, shadow softness, haze and wet roads follow the sky. */
-export function applyWeather(w, { scene, renderer, sun, hemi, roads }) {
+export function applyWeather(w, { scene, renderer, sun, hemi, roads, real = false }) {
   const cloud = w.cloud / 100, fog = w.code === 45 || w.code === 48;
   const grey = Math.min(1, cloud * 1.1 + w.rain * 0.4);
-  const zenith = new THREE.Color().lerpColors(new THREE.Color(0x3f78c8), new THREE.Color(0x9aa3ad), grey);
-  const horizon = new THREE.Color().lerpColors(new THREE.Color(0xc9dcef), new THREE.Color(0xc2c6ca), grey);
+  // (the realistic look's sky is deeper blue over a paler horizon; overcast and rain still grade it to grey)
+  const zenith = new THREE.Color().lerpColors(new THREE.Color(real ? 0x2a6fd8 : 0x3f78c8), new THREE.Color(0x9aa3ad), grey);
+  const horizon = new THREE.Color().lerpColors(new THREE.Color(real ? 0xa8c9ee : 0xc9dcef), new THREE.Color(0xc2c6ca), grey);
   scene.fog = new THREE.Fog(horizon, fog ? 90 : 320, fog ? 420 : 1600);
   sun.intensity = THREE.MathUtils.lerp(3.4, 0.9, Math.min(1, cloud * 0.85 + w.rain * 0.3));
   sun.color.set(cloud > 0.7 ? 0xe9eef5 : 0xfff1dc);
   hemi.intensity = THREE.MathUtils.lerp(1.0, 1.7, cloud);
   sun.shadow.radius = 2 + cloud * 8; // soft-edged shadows under cloud cover
   sun.userData.dir = new THREE.Vector3(-0.45, 0.82, 0.36).normalize(); // mid-afternoon sun from the SW
-  const sky = buildSky(renderer, scene, { zenith, horizon, sunDir: sun.userData.dir, cloud });
+  const sky = buildSky(renderer, scene, { zenith, horizon, sunDir: sun.userData.dir, cloud, real });
   renderer.toneMappingExposure = 1.0 + cloud * 0.15;
   for (const r of roads || []) r.material.userData.wet.value = w.rain ? 1 : 0;
   return sky;
