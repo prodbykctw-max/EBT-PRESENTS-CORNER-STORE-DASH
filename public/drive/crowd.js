@@ -121,8 +121,9 @@ export class Crowd {
    * spot: parking space {s,d} (the corner store is on its side) · mobile: phone budget
    * walls: the drawn buildings' wall segments · heroWalls: the hand-built row's wall slices · roads: the other roads (SegIndex)
    * heightAt(x,y,below): what a person's feet stand on: the road surface and the curbs (default: surfAt)
+   * blob: a cheap round contact shadow under each person drawn (phones, where the crowd casts no sun shadow: castShadow is !mobile); one instanced quad mesh
    */
-  constructor({ route, ground, surfAt, heightAt, onRoute, isFree, furniture, visible, camera, spot, mobile, scene, walls, heroWalls, roads }) {
+  constructor({ route, ground, surfAt, heightAt, onRoute, isFree, furniture, visible, camera, spot, mobile, scene, walls, heroWalls, roads, blob = false }) {
     Object.assign(this, { route, ground, surfAt, visible, camera });
     this.footAt = heightAt || surfAt;
     // the whole route is populated from the start (one person per ~5 m of sidewalk, 6.5 m on phones); only the
@@ -184,6 +185,7 @@ export class Crowd {
     Object.assign(this.mesh, { name: 'crowd', frustumCulled: false, castShadow: !mobile, receiveShadow: true, customDepthMaterial: depth, count: 0 });
     shadowSplit(this.mesh);
     scene.add(this.mesh);
+    if (blob) this.blob = contactBlobs(cap, scene);
     this.t = 0;
   }
 
@@ -604,7 +606,7 @@ export class Crowd {
     const SB = M.castShadow && car ? this.shadowBox : null, cp = SB ? r.at(car.s, car.d) : null;
     let ax, ay, lim;
     if (SB) { const zA = new THREE.Vector3().copy(SB.dir).normalize(); ax = new THREE.Vector3(0, 1, 0).cross(zA).normalize(); ay = zA.clone().cross(ax); lim = SB.half() + 25; }
-    let lo = 0, hi = 0;
+    let lo = 0, hi = 0, nb = 0; const BL = this.blob, bq = BL ? BL.mesh.instanceMatrix : null;
     for (const m of this.people) {
       if (m.dirty || m.x === undefined) {                       // moved (or never placed): find the ground under them
         const p = r.at(m.s, m.g.side * m.d), gz = this.ground(p.x, p.y);
@@ -623,6 +625,7 @@ export class Crowd {
       // model faces +Z; heading a in the route plane maps to three yaw a + π/2
       m4.compose(pos.set(m.x, m.z + (m.hop >= 0 ? 0.12 * Math.sin(Math.PI * m.hop) : 0), -m.y), q.setFromAxisAngle(up, m.yaw + Math.PI / 2), sc.set(m.w, m.h, m.w));
       M.setMatrixAt(i, m4);
+      if (BL) { m4.compose(pos.set(m.x, m.z + 0.04, -m.y), q.identity(), sc.set(m.w, 1, m.w)); BL.mesh.setMatrixAt(nb++, m4); }
       A.iAnim.setXYZW(i, m.phase, Math.min(1.15, Math.max(0.05, m.sp / 1.3)), m.acc, m.lean);
       A.iPose.setXY(i, m.phone && m.startle < 0.3 && !(m.fl > 0.3) && !(m.lkT > 0) ? 1 : 0, Math.min(1, Math.max(m.startle, m.fl) * 1.4));
       A.iPal.setXYZW(i, ...m.pal);
@@ -633,7 +636,26 @@ export class Crowd {
     }
     const n = lo + hi;
     M.count = n; M.userData.shadowCount = lo; uploadUsed(M.instanceMatrix, n);
+    if (BL) { BL.mesh.count = nb; uploadUsed(bq, nb); }
     for (const a of Object.values(A)) uploadUsed(a, n);   // only the people drawn this frame (the buffers hold the whole route)
   }
 }
 const xy = (p) => [p.x, p.y];
+
+/** Phones: the crowd casts no sun shadow there (the shadow map is the budget), so each person drawn gets a soft round contact shadow on the
+ *  ground instead: one instanced mesh of flat quads (2 triangles each) with a radial-fade texture, drawn after the opaque scene without
+ *  writing depth. No shadow-map cost, one extra draw call. (Not under the person's feet exactly: 4 cm up, so a sloped pavement doesn't cut it.) */
+function contactBlobs(cap, scene) {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(0,0,0,0.9)'); grad.addColorStop(0.5, 'rgba(0,0,0,0.55)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  const geo = new THREE.PlaneGeometry(1.35, 1.35); geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, color: 0x000000, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const mesh = new THREE.InstancedMesh(geo, mat, cap);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  Object.assign(mesh, { name: 'crowd_contact', frustumCulled: false, castShadow: false, receiveShadow: false, count: 0, renderOrder: 1 });
+  scene.add(mesh);
+  return { mesh };
+}
