@@ -29,6 +29,8 @@ const SPEED_OVER = [1.05, 1.3];
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+/** how fast a car's lane-change clock runs: a car that is hardly moving cannot slide sideways as fast as one at speed */
+const profRate = (sp) => clamp(0.4 + sp / 3, 0.4, 1);
 const hermite = (x0, v0, T, t) => {   // from (x0, v0) at t = 0 to (0, 0) at t = T: position and velocity
   const u = clamp(t / T, 0, 1), u2 = u * u, u3 = u2 * u;
   const h00 = 2 * u3 - 3 * u2 + 1, h10 = u3 - 2 * u2 + u, dh00 = (6 * u2 - 6 * u) / T, dh10 = (3 * u2 - 4 * u + 1);
@@ -103,13 +105,26 @@ export class Traffic {
     return v;
   }
 
+  /** The street's half width at s, read BETWEEN the 1 m samples. route.hw() takes the nearest sample (the road ribbon and your lanes use it as it is),
+   *  so a lane line read through it moved in a step every metre, and a car that follows it was pushed sideways in a step every metre (its nose
+   *  flicked: yawLat). A car's lane line is read through this instead; hw() itself is unchanged. */
+  hwS(s) {
+    const r = this.world.route, f = clamp(s, 0, r.n - 1), i = Math.min(r.n - 2, Math.floor(f)), t = f - i;
+    return r.HW[i] + (r.HW[i + 1] - r.HW[i]) * t;
+  }
+  /** (the same lane arithmetic as route.lane / travel / parkD, on hwS) */
+  laneAt(s, k) { const hw = this.hwS(s), t = Math.min(hw, Math.max(3.45, hw - 2.4)); return k === 0 ? -t / 2 : t / 2; }
   refD(ref, s) {
-    const r = this.world.route;
     switch (ref) {
-      case 'l0': return r.lane(s, 0);
-      case 'l1': return r.lane(s, 1);
-      case 'pR': return r.parkD(s, -1) ?? r.lane(s, 0) - (r.travel(s) / 2 - 1.05);
-      default: return r.parkD(s, 1) ?? r.lane(s, 1) + (r.travel(s) / 2 - 1.05);
+      case 'l0': return this.laneAt(s, 0);
+      case 'l1': return this.laneAt(s, 1);
+      default: {
+        // the middle of the parking lane (route.parkD: only where it is 2 m wide or more). Where it narrows below that the line moves over to
+        // the travel lane's edge as it narrows (it used to jump 2 m sideways the moment parkD turned null)
+        const side = ref === 'pR' ? -1 : 1, hw = this.hwS(s), t = Math.min(hw, Math.max(3.45, hw - 2.4)), p = hw - t;
+        const park = side * (t + p / 2), inLane = this.laneAt(s, side < 0 ? 0 : 1) + side * (t / 2 - 1.05);
+        return p >= 2 ? park : inLane + (park - inLane) * clamp(p / 2, 0, 1);
+      }
     }
   }
   /** the lateral position the reference puts a car at, lateral extent for the free-space checks */
@@ -118,7 +133,9 @@ export class Traffic {
   /** swing e onto another reference line, easing the offset out with zero speed at the end */
   changeRef(e, ref, T) {
     const c = this.refD(ref, e.s);
-    e.ref = ref; e.prof = { t: 0, T, x0: e.d - c - e.pers - (e.room || 0), v0: e.dd };   // (e.d already includes the lean away from people (room): left in, the car jumped sideways by it the moment it changed lane)
+    // (v0 is in profile time, and a slow car runs the profile slower (move): the sideways speed it already has is v0 times that rate, so it is divided by it here, or the
+    // sideways speed jumped by that factor the moment the change began)
+    e.ref = ref; e.prof = { t: 0, T, x0: e.d - c - e.pers - (e.room || 0), v0: e.dd / profRate(e.sp) };   // (e.d already includes the lean away from people (room): left in, the car jumped sideways by it the moment it changed lane)
     e.refT = this.clock; this.stats.lanechanges++;
   }
 
@@ -303,7 +320,8 @@ export class Traffic {
     e.drv = newDriver(e.type);
     e.sp = e.dir === -1 ? -(e.v || 0) : e.v || 0;
     e.lane = e.dir === -1 ? 1 : 0; e.ref = e.ref || (e.lane ? 'l1' : 'l0');
-    e.pers = rnd(-0.2, 0.2); e.off = 0; e.dd = 0; e.aF = 0; e.stillT = 0; e.prof = null; e.lcT = -9;
+    e.pers = rnd(-0.2, 0.2); e.off = 0; e.dd = 0; e.aF = 0; e.stillT = 0; e.prof = null; e.lcT = -9; e.yawLat = 0;
+    e.d = this.refD(e.ref, e.s) + e.pers;   // (on its line from the first step: it was placed on route.lane, and its first move pushed it over to its own habit of riding a little to one side)
     if (!e.cruise) e.cruise = e.drv.v0;
   }
 
@@ -582,13 +600,14 @@ export class Traffic {
     // lateral: reference lane + eased offset
     if (e.prof) {
       // (a car that is hardly moving cannot slide sideways as fast as one at speed: the change takes up to 2.5 times as long when it is stopped)
-      e.prof.t += dt * clamp(0.4 + e.sp / 3, 0.4, 1); const [x, v] = hermite(e.prof.x0, e.prof.v0, e.prof.T, Math.min(e.prof.t, e.prof.T));
+      e.prof.t += dt * profRate(e.sp); const [x, v] = hermite(e.prof.x0, e.prof.v0, e.prof.T, Math.min(e.prof.t, e.prof.T));
       e.off = x; if (e.prof.t >= e.prof.T) { e.prof = null; e.off = 0; }
     }
     const d0 = e.d, d1 = this.refD(e.ref, e.s) + e.pers + e.off + (e.room || 0);
     e.d = d1; e.dd = dt > 0 ? clamp((d1 - d0) / dt, -4, 4) : 0;
     // the nose follows the lane change a little
-    e.yawLat = e.dir * Math.atan2(e.dd, Math.max(e.sp, 3)) * 0.8;
+    // (low-passed: the nose turns into a lane change over a fifth of a second, it does not follow every little step of the sideways speed)
+    e.yawLat = (e.yawLat || 0) + (e.dir * Math.atan2(e.dd, Math.max(e.sp, 3)) * 0.8 - (e.yawLat || 0)) * (1 - Math.exp(-dt / 0.2));
   }
 
   // ------------------------------------------------------------------ lanes
