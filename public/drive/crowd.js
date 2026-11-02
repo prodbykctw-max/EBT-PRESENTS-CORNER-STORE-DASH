@@ -194,21 +194,19 @@ export class Crowd {
     const hi = Math.min(c.hi[i], c.hi[i + 1]), lo = Math.min(Math.max(c.lo[i], c.lo[i + 1]), hi);
     o[0] = lo; o[1] = hi; return o;
   }
-  /** a vehicle at (x, y) heading h, `front` m from its middle to its bumper, `half` m wide: the gap in metres from its bumper to the nearest
-   *  person in the strip it is about to drive over (within `reach` m), or null. (People walk across a side street's mouth along the pavement:
-   *  the cross-street traffic that is not otherwise looking out for them brakes for them, see World.update) */
-  crosserAhead(x, y, h, front, half, reach) {
-    const s0 = this.route.project(x, y).s, c = Math.cos(h), sn = Math.sin(h); let best = null;
-    for (const g of this.groups) {
-      if (Math.abs(g.s - s0) > reach + 8) continue;
-      for (const m of g.members) {
-        if (m.x === undefined) continue;
-        const dx = m.x - x, dy = m.y - y, al = dx * c + dy * sn - front;
-        if (al < -0.3 || al > reach || Math.abs(-dx * sn + dy * c) > half + 0.55) continue;
-        if (best === null || al < best) best = al;
+  /** is a moving vehicle (cars, buses: `vehicles()`) in, or about to be in, the mouth stretch ahead of this walking group, along its line? */
+  mouthBusy(g) {
+    for (let k = 2.2; k <= 16; k += 2) {
+      const s2 = g.s + g.dir * k; if (!this.mouthAt(g.side, s2)) { if (k > 2.2) break; continue; }
+      const p = this.route.at(s2, g.side * g.cd);
+      for (const v of this.vehicles()) {
+        if (v.dead || v.deck || v.x === undefined || (v.vs || 0) < 0.8) continue;
+        const dx = p.x - v.x, dy = p.y - v.y, c = Math.cos(v.h), sn = Math.sin(v.h), al = dx * c + dy * sn, lat = Math.abs(-dx * sn + dy * c);
+        const hl = v.type === 'bus' ? 6.2 : 2.4, hw = v.type === 'bus' ? 1.4 : 1.0;   // (`al`: how far ahead of the vehicle's middle the point is)
+        if (al > -(hl + 0.9) && al < hl + 1.2 + v.vs * 3.5 && lat < hw + 0.9) return true;
       }
     }
-    return best;
+    return false;
   }
   /** the farthest from the road something with a body can be at s, by the walls alone (not the pavement's other limits) */
   wallHi(side, s) { const c = this.cb[side], f = Math.max(0, Math.min(c.n - 1.0001, s / COL)), i = f | 0; return Math.min(c.hiW[i], c.hiW[i + 1]); }
@@ -352,7 +350,13 @@ export class Crowd {
         g.hold = !!run && Math.abs(run.s - g.s) < 70 && !this.narrow(g.side, g.s) && !this.mouthAt(g.side, g.s) && this.narrow(g.side, g.s + g.dir * 3);   // (never waiting in a side street's mouth)
         // no room for a body ahead (a wall at the curb): turn back at its mouth, don't walk into it
         if (!g.hold && this.closedAt(g.side, g.s + g.dir * 2.5) && !this.closedAt(g.side, g.s)) g.dir = -g.dir;
-        if (!g.hold) g.s += g.dir * g.v * dt;
+        // a vehicle driving through the side street's mouth they are about to cross: they wait at its edge (never in it), 6 s at most
+        let wait = false;
+        if (this.vehicles && !g.hold && !(g.passT > this.t) && !this.mouthAt(g.side, g.s) && this.mouthAt(g.side, g.s + g.dir * 2.2)) wait = this.mouthBusy(g);
+        g.waitT = wait ? (g.waitT || 0) + dt : 0;
+        if (g.waitT > 6) { g.passT = this.t + 4; g.waitT = 0; wait = false; }
+        g.wait = wait;
+        if (!g.hold && !g.wait) g.s += g.dir * g.v * dt;
         if (g.s < 3 || g.s > r.length - 3) { g.dir = g.s < 3 ? 1 : -1; g.s = Math.max(3, Math.min(r.length - 3, g.s)); }
         // street furniture a few steps ahead: pass on the roomier side, or go single file
         // (the list is sorted by s: start a little before the first one that can be within 3.5 m and stop a little past it, instead of
@@ -400,7 +404,7 @@ export class Crowd {
         // move: critically damped springs (no overshoot, no snapping, the same at any frame rate). Along the walk they ride
         // the group's own speed; across they ease to where they'd stand, or to the gap they've picked to let you by
         const evading = m.ev !== null;
-        const vt = g.kind === 'walk' && !g.hold ? g.dir * g.v : 0;
+        const vt = g.kind === 'walk' && !g.hold && !g.wait ? g.dir * g.v : 0;
         const dT = evading ? Math.min(m.hi, Math.max(m.lo - 0.25, m.ev + (m.shove || 0))) : m.dT;
         const w = evading ? m.wEv : 6.5;
         this.spring(m, 's', 'vs', m.sT, vt, 6, dt);

@@ -102,10 +102,10 @@ obstacles and collisions line up exactly with what's painted on the road.
     each side, `[lo, hi]` = where a body may be. `hi` is the real distance to the nearest wall (the buildings' wall segments, and
     the hand-built row's meshes sliced at body height), minus 0.45 m (arms reach ~0.38). Where another road runs along the
     pavement the cells it covers are cut out (a street that merely crosses it is a *mouth*: people cross it straight, nobody stands
-    or waits there). Where a wall leaves no room for a body, groups placed there are moved along the route to the nearest place that
-    has room (never removed) and walking groups turn back at its mouth. After the springs, `pin` puts anyone who still ended up
+    or waits there). Where a wall leaves no room for a body, groups (and dogs, `World.relocateDogs`) placed there are moved along the route to the nearest place that
+    has room (never removed) and walking groups turn back at its mouth; a body that still ends up in such a column is held on the street's own edge (`hw - 0.25`), never in the wall. The hero row's standing room starts at the curb's inner edge (its slab lies under the road up to `hw`). A walking group waits at the edge of a side street's mouth, 6 s at most, while a moving vehicle is driving through it (`crowd.mouthBusy`); the cars themselves are untouched. After the springs, `pin` puts anyone who still ended up
     outside back (`crowd.clamps` counts how often it had to; it should stay near 0). Heights: people, dogs, sellers and bikes also
-    stand on the curbs, crosswalk paint, lawns and the hero row's slab along the route (`footAt` in `drive.js`: a second height field from only the triangles within ~20 m of the route, about 36k, built in ~50 ms; the player's and the bully's feet, and wheels, do not read it). A group that turns round at a dead end starts in the lane its look-ahead would give it (`settle`). Cross-street cars and buses brake for people crossing a side street's mouth (`crowd.crosserAhead`, used in `runner.js`).
+    stand on the curbs, crosswalk paint, lawns and the hero row's slab along the route (`footAt` in `drive.js`: a second height field from only the triangles within ~20 m of the route, about 36k, built in ~50 ms; the player's and the bully's feet, and wheels, do not read it). A group that turns round at a dead end starts in the lane its look-ahead would give it (`settle`).
     The old 2 m band (`crowd.band`) is still built, unchanged, because the player's and the bully's run lines read it.
   - **Reactions:** they flinch back and put their hands up when you run close to their curb or honk. On foot they see
     you and the bully coming and step out of the way (see "The street sees you coming" under The chase).

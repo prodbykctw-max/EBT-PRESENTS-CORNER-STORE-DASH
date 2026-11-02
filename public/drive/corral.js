@@ -15,7 +15,7 @@
 export const COL = 0.5;            // m between columns
 export const CLEAR = 0.45;         // body centre to wall (the arms reach ~0.38 m)
 export const F_CLOSED = 1, F_MOUTH = 2, F_CUT = 4, F_HERO = 8;
-const CELL = 8, LAT = 0.25, MOUTH_MAX = 16, ROAD_MARGIN = 0.65, MIN_FROM_CURB = 0.55, HERO_STRIP = 0.9;
+const CELL = 8, LAT = 0.25, MOUTH_MAX = 16, ROAD_MARGIN = 0.65, MIN_FROM_CURB = 0.55, MN_CURB = 0.05, HERO_STRIP = 0.9;
 
 /** wall segments of the hand-built row: each mesh sliced at body height (0.4, 1.0 and 1.6 m above the ground), world plane x, y = -z */
 export function heroSegments(root, ground0) {
@@ -144,11 +144,12 @@ export function buildCorral({ route, old, walls, hero, roads, spot }) {
       const ds = hw + MIN_FROM_CURB; dS[i] = ds;
       let hi = Math.min(hiW, hw + 4.65), lo = Math.max(ds, Math.min(lo2, hi)), fl = 0;
       if (hero_ && hiW < ds + 1e-3) {                         // the hand-built row: a facade right at the curb; the strip in front of it, on the road's edge, is the standing room
-        fl |= F_HERO; hi = hiW; lo = Math.max(hw - 1.0, hi - HERO_STRIP);
-        if (spot && Math.abs(s - spot.s) < 3.6) lo = Math.min(hi, Math.max(lo, hw + 0.04));   // the parking space's own length: keep clear of the car in the stall
-      } else if (hi < ds) { fl |= F_CLOSED; lo = hi = ds; }
+        // (measured: the hero row's SIDEWALK_hero slab lies UNDER the route's road up to d = hw, the curb is hw..hw+0.3 and the slab shows only from
+        // there to the facade, so the standing room starts at the curb's inner edge, hw + 0.05, like anywhere else: never in the road)
+        fl |= F_HERO; hi = hiW; lo = Math.min(hi, Math.max(hw + MN_CURB, hi - HERO_STRIP));
+      } else if (hi < ds) { fl |= F_CLOSED; lo = hi = Math.min(hw - 0.25, hiW); }   // (no room for a body: the street's own edge, where the facade is at the curb; never inside the wall's clearance)
       LO[i] = lo; HI[i] = hi; FL[i] = fl;
-      MN[i] = Math.min(hi, fl & F_HERO ? lo : hw + 0.05);   // the nearest to the road anyone may be at all: the curb's inner edge (the hero row: its strip on the road's edge)
+      MN[i] = Math.min(hi, fl & F_HERO ? lo : hw + MN_CURB);   // the nearest to the road anyone may be at all: the curb's inner edge (the hero row: its strip on the road's edge)
       // 2) other roads' coverage of the cells of this column, on a fixed lattice of d (so a run along s can be followed)
       if (!(fl & F_CLOSED)) {
         const k0 = Math.max(0, Math.ceil((lo - ds - 1e-6) / LAT)), k1 = Math.min(KMAX - 1, Math.floor((hi - ds + 1e-6) / LAT));

@@ -15,7 +15,7 @@ export class TopSurface {
       m.updateMatrixWorld(true); const e = m.matrixWorld.elements, ok = new Uint8Array(cnt / 3);
       const ident = e[0] === 1 && e[5] === 1 && e[10] === 1 && e[12] === 0 && e[13] === 0 && e[14] === 0 && e[1] === 0 && e[2] === 0 && e[4] === 0 && e[6] === 0 && e[8] === 0 && e[9] === 0;
       // (plain float arrays read directly: this pass looks at every triangle of the meshes it is given)
-      const A = P.isInterleavedBufferAttribute ? null : P.array;
+      const A = P.isInterleavedBufferAttribute || P.normalized || P.itemSize !== 3 ? null : P.array;   // (plain 3-float arrays read directly; anything else through getX/Y/Z)
       for (let k = 0, t = 0; k < cnt; k += 3, t++) {
         let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
         for (let q = 0; q < 3; q++) {
@@ -34,7 +34,7 @@ export class TopSurface {
     meshes.forEach((m, mi) => {
       m.updateMatrixWorld(true); this.names[mi] = m.name;
       const P = m.geometry.attributes.position, I = m.geometry.index ? m.geometry.index.array : null, cnt = I ? I.length : P.count;
-      const e = m.matrixWorld.elements, A = P.isInterleavedBufferAttribute ? null : P.array, ok = kept ? kept[mi] : null;
+      const e = m.matrixWorld.elements, A = P.isInterleavedBufferAttribute || P.normalized || P.itemSize !== 3 ? null : P.array, ok = kept ? kept[mi] : null;
       for (let k = 0, ti = 0; k < cnt; k += 3, ti++) {
         if (ok && !ok[ti]) continue;
         for (let q = 0; q < 3; q++) {

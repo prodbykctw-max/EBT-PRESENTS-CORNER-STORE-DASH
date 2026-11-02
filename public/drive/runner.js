@@ -380,6 +380,19 @@ export class World {
     const hw = this.route.hw(s), w = hw + off, wall = this.crowd ? this.crowd.wallHi(-1, s) : Infinity;
     return -(w <= wall ? w : wall >= hw + 0.3 ? wall : hw - 0.25);
   }
+  /** once, when the crowd exists (the dogs were placed before it, in plan()): a dog standing where the corral has no room for a body between
+   *  the curb and a wall is moved along the sidewalk to the nearest stretch that has room. No random numbers (every draw of plan() is spent). */
+  relocateDogs() {
+    const cr = this.crowd, r = this.route; if (!cr) return;
+    const bad = (side, s) => cr.closedAt(side, s) || cr.closedAt(side, s - 1.5) || cr.closedAt(side, s + 1.5);
+    for (const e of this.ents) {
+      if (e.type !== 'dog' || !bad(e.side, e.s)) continue;
+      for (let k = 0.5; k <= 90; k += 0.5) {
+        const to = [e.s + k, e.s - k].find((x) => x > 8 && x < r.length - 8 && !bad(e.side, x));
+        if (to !== undefined) { e.s = to; e.d = e.side * (r.hw(to) + e.off); break; }
+      }
+    }
+  }
   /** the people who work the red lights: at signalised junctions a kid (or two) selling cold water from a cooler
    *  on the corner, or a panhandler with a sign. They wait at the stop line on the lane line; on red they walk
    *  down between the stopped cars to the driver's window; on green they linger a few seconds before drifting
@@ -617,12 +630,6 @@ export class World {
         if (b === a || b.dead || b.x === undefined || b.road !== a.road || Math.cos(a.h - b.h) < 0.3) continue;   // (one going the other way on that road is not in front of us: two of them head to head each waited for the other for the whole run)
         const ox = b.x - cx, oy = b.y - cy, al = ox * Math.cos(a.h) + oy * Math.sin(a.h);
         if (al > 0 && al < 30 && Math.abs(-ox * Math.sin(a.h) + oy * Math.cos(a.h)) < 2.5) vt = Math.min(vt, al < 9 ? 0 : (b.vs ?? b.vd) * Math.min(1, (al - 9) / 10));
-      }
-      // someone from the crowd crossing the street it is on (people cross a side street's mouth straight along the pavement): it brakes for them
-      if (this.crowd && dCur < 50 && !a.deck) {
-        const V = VEHICLE[a.type], hd = a.x === undefined ? Math.atan2(q[1] - p[1], q[0] - p[0]) : a.h;
-        const pg = this.crowd.crosserAhead(cx, cy, hd, V[0] + (a.type === 'bus' ? 2.6 : 0), V[1], 4 + (a.vs || 0) * (a.vs || 0) / 6.4);   // (a bus's VEHICLE front is 3.6, but its bumper is 6.2 m ahead of its middle: see `clear` above)
-        if (pg !== null) vt = Math.min(vt, pg < 1.6 ? 0 : Math.sqrt(2 * 3.2 * (pg - 1.6)));
       }
       a.vs += Math.max(-(approach ? 7 : 4) * dt, Math.min(2.2 * dt, vt - a.vs));
       const nt = a.t + a.vs * dt / L, nx = p[0] + (q[0] - p[0]) * Math.min(nt, 1), ny = p[1] + (q[1] - p[1]) * Math.min(nt, 1);

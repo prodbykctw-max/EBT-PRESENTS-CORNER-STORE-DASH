@@ -218,6 +218,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     visible: (x, y, z, r) => world.visible(x, y, z, r),
   });
   crowd.shadowBox = world.shadowBox;
+  crowd.vehicles = () => world.ambient;   // (walking groups wait at a side street's mouth while a vehicle drives through it)
+  world.relocateDogs();   // (the dogs were placed before the crowd existed: out of any stretch with no room between curb and wall)
   world.planCorners(signals);   // water sellers and panhandlers working the red lights
   // flocks fly over the roofs: height of whatever is under a point (roofs, freeway decks, landmarks), by a ray from above
   // (rayTargets: the same roofs, freeway and storefronts cut into small tiles, so a ray tests only what's under it)
