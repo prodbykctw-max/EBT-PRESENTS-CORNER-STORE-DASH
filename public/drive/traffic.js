@@ -314,9 +314,12 @@ export class Traffic {
     if (e.revT > 0) {
       e.revT -= dt;
       const tg0 = this.refD(e.ref, e.s) + e.pers, rb = this.ahead(e, -dir, 0, 3, Math.min(e.d, tg0), Math.max(e.d, tg0), 12);
-      if (!rb || rb.gap > 1.5) { e.aF = 0; e.sp = 0; e.v = -dir * 2.2; e.stopT = 0; e.stillT = 0; e.faceT = 0; return; }
+      // (it gets up to the walking pace at 2.5 m/s^2: it used to be there in one step)
+      if (!rb || rb.gap > 1.5) { e.aF = 0; e.sp = 0; e.v += clamp(-dir * 2.2 - e.v, -2.5 * dt, 2.5 * dt); e.stopT = 0; e.stillT = 0; e.faceT = 0; return; }
       e.revT = 0;
     }
+    // still rolling backwards after that (the reversing ended, or something got in the way): rolls to a stop at the same pace, not in one step
+    if (e.v * dir < -0.02) { e.aF = 0; e.sp = 0; e.v += dir * Math.min(-e.v * dir, 2.5 * dt); e.stopT = 0; e.stillT = 0; return; }
     let sp = dir === -1 ? -e.v : e.v; if (sp < 0) sp = 0;
     e.sp = sp;
     const two = !r.oneway(e.s);
@@ -560,6 +563,7 @@ export class Traffic {
 
   /** smooth the acceleration and step the speed */
   finish(e, dt, a, sp) {
+    if (e.creepT > 0) { e.creepT -= dt; a = Math.max(a, 1.2); }
     // brake hard when you must, but ease off the brake and onto the gas (a firm 0.3 s filter: no jerk)
     const k = a < e.aF ? 1 - Math.exp(-dt / 0.12) : 1 - Math.exp(-dt / 0.35);
     e.aF += (a - e.aF) * k;
@@ -569,7 +573,7 @@ export class Traffic {
     e.stopT = sp < 0.3 ? (e.stopT || 0) + dt : 0;
     // never a car that sits still with nothing in the way: a gentle creep gets it going again
     e.stillT = sp < 0.3 && a > 0.2 ? e.stillT + dt : 0;
-    if (e.stillT > 5) { e.sp = 1.2; e.v = e.dir * 1.2; e.stillT = 0; this.stats.unstuck++; }   // (sp is the speed along its own direction, v the signed one)
+    if (e.stillT > 5) { e.creepT = 1.5; e.stillT = 0; this.stats.unstuck++; }   // (it used to be set to 1.2 m/s in one step; now it accelerates at 1.2 m/s^2 for a moment, and the following model takes over)
   }
 
   move(e, dt) {
