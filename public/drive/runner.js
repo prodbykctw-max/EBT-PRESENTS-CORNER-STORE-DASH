@@ -263,7 +263,7 @@ const SHIRTS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2e2e2e, 0xe8e8e8, 0x3d9a5b, 0x8e
 const BUS_STRIPE = [0x1d5fbf, 0xc62828];
 
 export class World {
-  constructor({ route, props, scene, W, sEnd, audio, surfAt, camera, marks }) {
+  constructor({ route, props, scene, W, sEnd, audio, surfAt, camera, marks, carSets }) {
     Object.assign(this, { route, scene, W, sEnd, audio, surfAt, camera, marks });
     this.frustum = new THREE.Frustum(); this._pm = new THREE.Matrix4(); this._sph = new THREE.Sphere();
     this.ents = []; this.tokens = [];
@@ -280,6 +280,10 @@ export class World {
       im.castShadow = true; im.receiveShadow = true; im.count = 0; im.frustumCulled = false; im.name = 'inst_' + t; shadowSplit(im);
       this.meshes[t] = im; scene.add(im);
     }
+    // car-look options (cars.js, ?cars=A|B|C): off unless the page asked for one; the props above stay as they are
+    this.carSet = null; this.carSets = {}; this._vehicle0 = null;
+    if (carSets) for (const [name, mk] of Object.entries(carSets)) this.carSets[name] = mk(scene, this.meshes, CAP);
+    this.setCarSet(Object.keys(this.carSets)[0] || null);
     // EBT tokens: gold discs with an emissive rim, spinning
     const tg = new THREE.CylinderGeometry(0.55, 0.55, 0.12, 20); tg.rotateX(Math.PI / 2);
     this.tokenMesh = new THREE.InstancedMesh(tg, new THREE.MeshStandardMaterial({ color: 0xffc81a, metalness: 0.85, roughness: 0.25, emissive: 0x6b4a00, emissiveIntensity: 0.6 }), 260);
@@ -295,6 +299,14 @@ export class World {
     this.traffic = new Traffic(this, { PLAYER, CARS, ON_FOOT });   // how every car in the street drives (traffic.js)
     this.runner = null; this.runnerOn = false;   // the person on foot (drive.js sets these): cars see and avoid them
     this.plan();
+  }
+
+  /** draw the traffic and parked cars with a car-look option (cars.js), or with null the props.glb cars */
+  setCarSet(name) {
+    if (this._vehicle0) { Object.assign(VEHICLE, this._vehicle0); this._vehicle0 = null; }
+    this.carSet = name ? this.carSets[name] || null : null;
+    if (this.carSet && this.carSet.vehicle) { this._vehicle0 = {}; for (const k in this.carSet.vehicle) { this._vehicle0[k] = VEHICLE[k]; VEHICLE[k] = this.carSet.vehicle[k]; } }
+    this.carSetName = this.carSet ? name : null;
   }
 
   carType() { return carType(); }
@@ -853,11 +865,15 @@ export class World {
       const rx = X - cp.x, ry = Y - cp.z, rz = Z + cp.y;
       return Math.abs(rx * ax.x + ry * ax.y + rz * ax.z) <= lim && Math.abs(rx * ay.x + ry * ay.y + rz * ay.z) <= lim;
     };
+    const CS = this.carSet, ccam = this.camera?.position;
     const put = (type, x, y, z, yaw, color, roll = 0, pitch = 0, sc = one) => {
-      const im = this.meshes[type], cap = im.instanceMatrix.count; if (lo[type] + hi[type] >= cap) return;
-      const i = inBox(x, z, -y) ? lo[type]++ : cap - 1 - hi[type]++;    // shadow casters fill from the front, the rest from the back
+      const K = CS && CS.keys[type];   // a car-look option draws this car: its LOD mesh by distance, and a shadow proxy for the near ones
+      const lod = K ? CS.lodAt(x, z, -y, ccam || pos.set(0, 0, 0)) : -1, key = K ? K.lod[lod] : type;
+      const im = this.meshes[key], cap = im.instanceMatrix.count; if (lo[key] + hi[key] >= cap) return;
+      const inb = inBox(x, z, -y), i = inb ? lo[key]++ : cap - 1 - hi[key]++;    // shadow casters fill from the front, the rest from the back
       m4.compose(pos.set(x, z, -y), q.setFromEuler(e3.set(pitch, yaw - Math.PI / 2, roll, 'YXZ')), sc);
       im.setMatrixAt(i, m4); im.setColorAt(i, c.set(color));
+      if (K && lod < 2 && inb && lo[K.shadow] < cap) { const j = lo[K.shadow]++; this.meshes[K.shadow].setMatrixAt(j, m4); }
     };
     // drawn: everything near the car, plus anything farther that the camera can see (the margin grows with
     // distance, so a turning camera never sweeps an undrawn car into view)
@@ -929,6 +945,7 @@ export class World {
       im.count = nIn + nOut; im.userData.shadowCount = nIn;
       uploadUsed(im.instanceMatrix, im.count); if (im.instanceColor) uploadUsed(im.instanceColor, im.count);
     }
+    if (CS) CS.sync();   // the see-through glass meshes draw exactly the cars their near LOD does
     this.halo.count = halos; uploadUsed(this.halo.instanceMatrix, halos); uploadUsed(this.halo.instanceColor, halos);
     // tokens
     let n = 0; const spin = t * 4;

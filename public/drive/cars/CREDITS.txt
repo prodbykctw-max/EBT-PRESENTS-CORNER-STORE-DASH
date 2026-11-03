@@ -1,0 +1,16 @@
+Car-look options (public/drive/cars.js, loaded only with ?cars=A|B|C). Built by drive/tools/cars/.
+
+A  a.cars   The owner's own car.glb ("Crimson Demon X", already in this repo: public/drive/car.glb), decimated into three levels of detail
+            and recoloured per instance. Nothing outside the repo. The roof light bar and the robotaxi sensor are made in build_c.py.
+
+B  b.cars   "Car Concept" from KhronosGroup/glTF-Sample-Assets (Models/CarConcept), artist Eric Chadwick, (c) 2024 Darmstadt Graphics Group GmbH,
+            licensed CC BY 4.0: https://creativecommons.org/licenses/by/4.0/   Source: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept
+            (the asset itself was started from a public-domain concept-car model by "Unity Fan", per its README).
+            CHANGES MADE HERE: decimated into three levels of detail, textures dropped (flat per-material colours), paint made tintable,
+            scaled/stretched to this game's vehicle sizes, a roof light bar / sensor added. The licence plate (the only part that carried
+            the Khronos / 3D Commerce logos, which the licence excludes) was removed and replaced by a blank plate.
+            If B is ever made the default, this notice (or an equivalent credit in the game) must ship with it.
+
+C  c.cars   Modelled from scratch by drive/tools/cars/carbody.py + build_c.py (parametric lofted body, wheels, lamps, interior). No outside
+            model data and no real-brand shapes or badges. A GitHub search for CC0 / CC-BY street-car glTF/OBJ found only stylised toy kits
+            (Kenney Car Kit, CC0) and unlicensed re-uploads, so none was used.

@@ -11,6 +11,7 @@ import { LEVEL, standOn } from './levels.js';
 import { CUT } from './roads.js';
 import { TopSurface } from './surface.js';
 import { RouteFrame, RunnerCar, World } from './runner.js';
+import { carSetsFromURL, loadCarFile, CarSet } from './cars.js';
 import { DriveAudio } from './audio.js';
 import { Crowd } from './crowd.js';
 import { heroSegments } from './corral.js';
@@ -176,7 +177,13 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // parking space: in front of the store, in the curbside parking lane (or at the right curb if there isn't one)
   const spotS = route.project(SPOT.x, SPOT.y).s;
   const spot = { s: spotS, d: route.parkD(spotS, -1) ?? route.lane(spotS, 0) - 0.35 };
-  const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks });
+  // car-look options (cars.js): only with ?cars=A|B|C and the realistic look; with nothing asked for, the drive draws its props.glb cars
+  const carSets = {};
+  if (RL) await Promise.all(carSetsFromURL().map(async (n) => {
+    try { const data = await loadCarFile(new URL(`cars/${n.toLowerCase()}.cars`, BASE).href); carSets[n] = (sc, meshes, caps) => new CarSet(n, data, sc, meshes, caps); }
+    catch (e) { console.warn('car set ' + n + ' unavailable, drawing the usual cars:', e?.message || e); }
+  }));
+  const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks, carSets });
   // the sun's shadow box, so the props that can't cast a shadow into it skip the shadow pass (World.render)
   world.shadowBox = { dir: sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35), half: () => Math.max(sun.shadow.camera.right, sun.shadow.camera.top) };
   const car = new RunnerCar(route, 4);
