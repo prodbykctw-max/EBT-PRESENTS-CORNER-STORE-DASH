@@ -280,8 +280,8 @@ export class World {
       im.castShadow = true; im.receiveShadow = true; im.count = 0; im.frustumCulled = false; im.name = 'inst_' + t; shadowSplit(im);
       this.meshes[t] = im; scene.add(im);
     }
-    // car-look options (cars.js, ?cars=A|B|C): off unless the page asked for one; the props above stay as they are
-    this.carSet = null; this.carSets = {}; this._vehicle0 = null;
+    // car sets (cars.js): drive.js passes the one(s) the realistic look loads (none for the comic look or ?cars=none); the props above stay as they are
+    this.carSet = null; this.carSets = {}; this._vehicle0 = null; this._cid = 0;
     if (carSets) for (const [name, mk] of Object.entries(carSets)) this.carSets[name] = mk(scene, this.meshes, CAP);
     this.setCarSet(Object.keys(this.carSets)[0] || null);
     // EBT tokens: gold discs with an emissive rim, spinning
@@ -311,7 +311,7 @@ export class World {
 
   carType() { return carType(); }
   paint() { return pick(PAINT); }
-  add(type, props) { const e = { type, ...TYPES[type], v: 0, dv: 0, yaw: 0, alive: true, color: 0xffffff, ...props }; this.ents.push(e); return e; }
+  add(type, props) { const e = { type, ...TYPES[type], v: 0, dv: 0, yaw: 0, alive: true, color: 0xffffff, ...props, cid: this._cid++ }; this.ents.push(e); return e; }   // (cid: a number for life, in the order cars are made; cars.js picks a body from it: no random draw)
   /** 1–3 oncoming cars (a platoon) from s on, moving toward the player; returns where the platoon ends */
   oncomingPlatoon(s) {
     const r = this.route, v0 = -LIMIT * rnd(1.0, 1.2), n = platoonSize();
@@ -489,7 +489,8 @@ export class World {
       const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t;
       if (!rd.h && r.distTo(x, y) < 18) continue;
       if (!initial && this.visible(x, y, hs ? r.ground(x, y) + hs[i] : undefined, bus ? 7 : 3.5)) continue;
-      this.ambient.push(this.ambientOn(rd, pts, hs, bus ? 'bus' : carType(), i, t, bus ? pick(BUS_STRIPE) : pick(PAINT)));
+      const a = this.ambientOn(rd, pts, hs, bus ? 'bus' : carType(), i, t, bus ? pick(BUS_STRIPE) : pick(PAINT)); a.cid = this._cid++;
+      this.ambient.push(a);
       return;
     }
   }
@@ -866,8 +867,8 @@ export class World {
       return Math.abs(rx * ax.x + ry * ax.y + rz * ax.z) <= lim && Math.abs(rx * ay.x + ry * ay.y + rz * ay.z) <= lim;
     };
     const CS = this.carSet, ccam = this.camera?.position;
-    const put = (type, x, y, z, yaw, color, roll = 0, pitch = 0, sc = one) => {
-      const K = CS && CS.keys[type];   // a car-look option draws this car: its LOD mesh by distance, and a shadow proxy for the near ones
+    const put = (type, x, y, z, yaw, color, roll = 0, pitch = 0, sc = one, cid) => {
+      const K = CS && CS.pick(type, cid);   // a car-look option draws this car: its LOD mesh by distance, and a shadow proxy for the near ones
       const lod = K ? CS.lodAt(x, z, -y, ccam || pos.set(0, 0, 0)) : -1, key = K ? K.lod[lod] : type;
       const im = this.meshes[key], cap = im.instanceMatrix.count; if (lo[key] + hi[key] >= cap) return;
       const inb = inBox(x, z, -y), i = inb ? lo[key]++ : cap - 1 - hi[key]++;    // shadow casters fill from the front, the rest from the back
@@ -916,7 +917,7 @@ export class World {
       if (e.flying) { z += e.fz; roll = e.spin; pitch = e.spin * 0.7; }
       if (afoot) { pitch = 0; roll = 0; }
       const big = HAZARD_SCALE[e.type];                                       // drawn bigger than life: they read on a phone
-      put(e.type === 'dog' ? (Math.sin(e.gait) > 0 ? 'dog_a' : 'dog_b') : e.type, p.x, p.y, z, yaw, e.color, roll, pitch, big ? sc3.setScalar(big) : one);
+      put(e.type === 'dog' ? (Math.sin(e.gait) > 0 ? 'dog_a' : 'dog_b') : e.type, p.x, p.y, z, yaw, e.color, roll, pitch, big ? sc3.setScalar(big) : one, e.cid);
       if (HALO[e.type] && !e.flying && !e.hitDone && Math.abs(e.d) < this.route.hw(e.s) + 0.3 && e.s > car.s - 4 && e.s - car.s < 110 && halos < 200) {
         const [rad, col] = HALO[e.type], pulse = 1 + 0.12 * Math.sin(t * 7 + e.s);
         if (inStreet && surf === undefined) surf = this.surfAt(p.x, p.y, p.z + 1.2);
@@ -932,8 +933,8 @@ export class World {
       const expect = (px, py) => (a.deck ? deckTop(g, px, py, a.z) : g(px, py)) + LEVEL.ROAD;
       const on = (px, py) => this.surfAt(px, py, expect(px, py) + (a.deck ? 2.1 : 1.2)) ?? expect(px, py); // decks: merged surface up to 2 m
       const st = standOn(on, x, y, ah, hl, hw);
-      if (dt > 0) { const [z, pitch, roll] = settle(a, st.z, st.pitch, st.roll, dt, this._rf); put(a.type, x, y, z, ah, a.color, roll, pitch); }
-      else put(a.type, x, y, st.z, ah, a.color, st.roll, st.pitch);
+      if (dt > 0) { const [z, pitch, roll] = settle(a, st.z, st.pitch, st.roll, dt, this._rf); put(a.type, x, y, z, ah, a.color, roll, pitch, one, a.cid); }
+      else put(a.type, x, y, st.z, ah, a.color, st.roll, st.pitch, one, a.cid);
     }
     for (const k in this.meshes) {
       const im = this.meshes[k], cap = im.instanceMatrix.count, nIn = lo[k], nOut = hi[k];

@@ -1,6 +1,7 @@
-// Car-look OPTIONS for the traffic and parked cars (realistic look only). Nothing here runs unless the page asks for it
-// with ?cars=A, ?cars=B or ?cars=C (QA: ?cars=A,B,C loads several and World.setCarSet(name) switches between them).
-// With no ?cars the drive draws exactly the props.glb cars it always did.
+// The traffic and parked cars of the REALISTIC look. With no ?cars the realistic look draws the BC fleet (cars/bc.cars: C's
+// street cars, with B's concept car as about one ordinary car in three); ?cars=none (or 0 / off) gives back the props.glb cars.
+// For QA: ?cars=A, B, C or BC (or a list, A,B,C: World.setCarSet(name) switches between the loaded ones).
+// The comic look never reaches this file: drive.js only loads car sets when the realistic look is up.
 //
 // A set is one file, public/drive/cars/<a|b|c>.cars (made by tools-cars/, see CREDITS.txt there): per body, three levels of
 // detail (L0 near ~25k tris with a real interior and a separate see-through glass mesh, L1 ~5k, L2 ~1k), plus small add-ons
@@ -18,10 +19,11 @@ import { propMaterial, shadowSplit } from './runner.js';
 
 const ROLES = ['sedan', 'suv', 'police', 'robotaxi'];
 
+export const DEFAULT_SET = 'BC';
 export function carSetsFromURL() {
   const q = new URLSearchParams(location.search).get('cars');
-  if (!q) return [];
-  return [...new Set(q.toUpperCase().split(/[,|]/).filter((s) => /^[ABC]$/.test(s)))];
+  if (q === null || q === '') return [DEFAULT_SET];                       // no ?cars: the BC fleet
+  return [...new Set(q.toUpperCase().split(/[,|]/).filter((s) => /^(A|B|C|BC)$/.test(s)))];   // ?cars=none / 0 / off (or anything else): no set
 }
 
 /** fetch + parse one .cars file (gzip when it starts with the gzip magic) */
@@ -130,13 +132,27 @@ function glassMaterial() {
 }
 function proxyMaterial() { return new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }); }
 
+/** a 32-bit integer hash (murmur3's finaliser): consecutive car numbers give uncorrelated results */
+const mix32 = (h) => { h = Math.imul(h ^ (h >>> 16), 0x85ebca6b); h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35); return (h ^ (h >>> 16)) >>> 0; };
+
+// three.js gives every object, material and geometry a uuid made with Math.random(). The drive is seeded for its tests and its planner and
+// traffic share Math.random(), so building a car set (a few hundred such objects) must not take draws from that stream: it would make
+// a different street whenever a car set is loaded. The set is built with a private generator of its own, then the page's is put back.
+let isoState = 0x2545f491;
+const isoRandom = () => { isoState ^= isoState << 13; isoState ^= isoState >>> 17; isoState ^= isoState << 5; return (isoState >>> 0) / 4294967296; };
+function isolated(fn) { const real = Math.random; Math.random = isoRandom; try { return fn(); } finally { Math.random = real; } }
+/** the factory World calls (runner.js) with its scene, its mesh table and its capacities */
+export const carSetFactory = (name, data) => (scene, meshes, caps) => isolated(() => new CarSet(name, data, scene, meshes, caps));
+
 export class CarSet {
   constructor(name, data, scene, meshes, caps) {
     this.name = name; this.data = data; const phone = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;   // phones switch to the lighter models sooner
     this.lod = (data.lod || [20, 56]).map((m) => m * (phone ? 0.75 : 1)); this.vehicle = data.vehicle || {};
     this.keys = {}; this.pairs = [];
+    this.mix = data.mix || {};   // { sedan: { alt: 'sedanB', every: 3 } }: about one `sedan` car in `every` is drawn as the role `alt` (pick)
     const mat = flatSafe(propMaterial()), gmat = glassMaterial(), pmat = proxyMaterial();
     const mat0 = flatSafe(propMaterial()); if (data.doubleL0) mat0.side = THREE.DoubleSide;   // (a source whose thin panels are single surfaces drawn from both sides)
+    let mat0d = null;   // (a role of its own on a set that mixes bodies: just that body's near level is double sided)
     const raw = data.raw, mk = (geo, cap, key, cast, m_ = mat) => {
       const im = new THREE.InstancedMesh(geo, m_, cap);
       im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
@@ -144,13 +160,13 @@ export class CarSet {
       if (cast) shadowSplit(im);
       meshes[key] = im; scene.add(im); return im;
     };
-    for (const role of ROLES) {
-      const r = data.roles[role]; if (!r) continue;
-      const cap = caps[role], tag = `${role}@${name}`, sc = r.scale || [1, 1, 1];
+    for (const role of Object.keys(data.roles)) {
+      const r = data.roles[role], capRole = r.as || role; if (!ROLES.includes(capRole)) continue;
+      const cap = caps[capRole], tag = `${role}@${name}`, sc = r.scale || [1, 1, 1];
       const names = (lv) => [`${r.body}.${lv}`, ...(r.addons || []).map((a) => `${a}.${lv}`)];
       const K = { lod: [`${tag}0`, `${tag}1`, `${tag}2`], shadow: `${tag}s`, glass: `${tag}g` };
       const g0 = assemble(raw, names('L0'), sc, r.livery, {}), g1 = assemble(raw, names('L1'), sc, r.livery, {}), g2 = assemble(raw, names('L2'), sc, r.livery, {});
-      const near = mk(g0, cap, K.lod[0], false, mat0); mk(g1, cap, K.lod[1], false); mk(g2, cap, K.lod[2], true);
+      const near = mk(g0, cap, K.lod[0], false, r.doubleL0 ? (mat0d ||= (() => { const m = flatSafe(propMaterial()); m.side = THREE.DoubleSide; return m; })()) : mat0); mk(g1, cap, K.lod[1], false); mk(g2, cap, K.lod[2], true);
       mk(g2, cap, K.shadow, true).material = pmat;
       if (raw[`${r.body}.L0g`]) {
         const gg = assemble(raw, [`${r.body}.L0g`], sc, null, {});
@@ -161,6 +177,13 @@ export class CarSet {
       this.keys[role] = K;
     }
     this.names = Object.keys(meshes).filter((k) => k.includes('@' + name));
+  }
+  /** the role's mesh keys for one car: with a `mix`, a car's number (World.add's counter, set once for its whole life) picks the body,
+   *  from a hash of that number alone: no random draw, no link to the paint colour, the same body at every distance and frame */
+  pick(type, cid) {
+    const m = this.mix[type];
+    if (m && cid !== undefined && this.keys[m.alt] && mix32(cid + 1) % m.every === 0) return this.keys[m.alt];
+    return this.keys[type];
   }
   /** which LOD mesh a car at this world position is drawn with */
   lodAt(x, y, z, cam) {
