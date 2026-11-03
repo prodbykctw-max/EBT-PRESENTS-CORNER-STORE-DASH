@@ -1,0 +1,22 @@
+The cars of the realistic look (public/drive/cars.js). Built by drive/tools/cars/.
+
+BC bc.cars  THE DEFAULT. C's street cars (sedan, SUV, police, robotaxi), with B's concept car as about one ordinary sedan-role car in three.
+            bc.cars carries B's body, so B's credit below applies to it: "Car Concept", Eric Chadwick, (c) 2024 Darmstadt Graphics Group
+            GmbH, CC BY 4.0. Built from b.cars + c.cars by build_bc.py; B's body is only scaled onto C's sedan footprint (see B's CHANGES).
+            With ?cars=none (or in the comic look) none of these files is loaded. ?cars=A|B|C load one option alone, for comparison.
+
+A  a.cars   The owner's own car.glb ("Crimson Demon X", already in this repo: public/drive/car.glb), decimated into three levels of detail
+            and recoloured per instance. Nothing outside the repo. The roof light bar and the robotaxi sensor are made in build_c.py.
+
+B  b.cars   "Car Concept" from KhronosGroup/glTF-Sample-Assets (Models/CarConcept), artist Eric Chadwick, (c) 2024 Darmstadt Graphics Group GmbH,
+            licensed CC BY 4.0: https://creativecommons.org/licenses/by/4.0/   Source: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept
+            (the asset itself was started from a public-domain concept-car model by "Unity Fan", per its README).
+            CHANGES MADE HERE: decimated into three levels of detail, textures dropped (flat per-material colours), paint made tintable,
+            scaled/stretched to this game's vehicle sizes, a roof light bar / sensor added. The licence plate (the only part that carried
+            the Khronos / 3D Commerce logos, which the licence excludes) was removed and replaced by a blank plate.
+            bc.cars (the default look) contains this body, so this notice must ship with it. Players see the credit on the title screen's credits
+            line (standalone/shell2.html: "Car model: Car Concept, Eric Chadwick / Darmstadt Graphics Group (CC BY 4.0), modified").
+
+C  c.cars   Modelled from scratch by drive/tools/cars/carbody.py + build_c.py (parametric lofted body, wheels, lamps, interior). No outside
+            model data and no real-brand shapes or badges. A GitHub search for CC0 / CC-BY street-car glTF/OBJ found only stylised toy kits
+            (Kenney Car Kit, CC0) and unlicensed re-uploads, so none was used.

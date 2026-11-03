@@ -1,0 +1,42 @@
+<!doctype html><meta charset="utf-8"><body style="margin:0;background:#000"><canvas id="c" width="900" height="560"></canvas>
+<script type="importmap">{"imports":{}}</script>
+<script type="module">
+import * as THREE from './vendor/three.module.min.js';
+import * as RL from './real.js';
+import { loadCarFile, CarSet } from './cars.js';
+RL.install();
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(900, 560, false); renderer.toneMapping = THREE.NeutralToneMapping;
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x9fb4c8);
+// procedural sky for reflections: blue zenith, pale horizon, warm ground
+const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256; const g = cv.getContext('2d');
+const gr = g.createLinearGradient(0, 0, 0, 256); gr.addColorStop(0, '#4f86c6'); gr.addColorStop(0.45, '#cfdcea'); gr.addColorStop(0.5, '#9a9488'); gr.addColorStop(1, '#4a463f');
+g.fillStyle = gr; g.fillRect(0, 0, 512, 256); g.fillStyle = '#fff'; g.beginPath(); g.arc(120, 70, 18, 0, 7); g.fill();
+const tex = new THREE.CanvasTexture(cv); tex.mapping = THREE.EquirectangularReflectionMapping; tex.colorSpace = THREE.SRGBColorSpace;
+const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromEquirectangular(tex).texture; scene.environmentIntensity = 0.9;
+const sun = new THREE.DirectionalLight(0xfff0dc, 3.2); sun.position.set(-6, 9, 5); scene.add(sun); scene.add(new THREE.HemisphereLight(0xe4e8ee, 0x8a7a64, 0.8));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0x3a3b3e, roughness: 0.9 })); ground.rotation.x = -Math.PI / 2; scene.add(ground);
+const cam = new THREE.PerspectiveCamera(34, 900 / 560, 0.1, 200);
+let cs = null, meshes = {};
+window.load = async (file, role) => {
+  const data = await loadCarFile(file);
+  meshes = {}; const caps = { sedan: 2, suv: 2, police: 2, robotaxi: 2 };
+  cs = new CarSet('X', data, scene, meshes, caps); window.cs = cs; window.data = data;
+  return Object.keys(data.roles);
+};
+window.view = (o) => {
+  const { role = 'sedan', lod = 0, yaw = 35, pitch = 12, dist = 8, tint = 0x7a1a1a, ty = 0.8, tx = 0, tz = 0, fov = 34 } = o;
+  for (const k in meshes) { meshes[k].count = 0; }
+  const K = cs.keys[role], im = meshes[K.lod[lod]];
+  const m = new THREE.Matrix4(); im.setMatrixAt(0, m); im.setColorAt(0, new THREE.Color(tint)); im.count = 1; im.instanceMatrix.needsUpdate = true; im.instanceColor.needsUpdate = true;
+  if (lod === 0) cs.sync();
+  const sh = meshes[K.shadow]; sh.count = 0;
+  cam.fov = fov; cam.updateProjectionMatrix();
+  const a = yaw * Math.PI / 180, p = pitch * Math.PI / 180;
+  cam.position.set(tx + Math.sin(a) * Math.cos(p) * dist, ty + Math.sin(p) * dist, tz + Math.cos(a) * Math.cos(p) * dist); cam.lookAt(tx, ty, tz);
+  renderer.render(scene, cam);
+  return { tris: renderer.info.render.triangles, calls: renderer.info.render.calls, url: canvas.toDataURL('image/jpeg', 0.9) };
+};
+window.ready = true;
+</script>
