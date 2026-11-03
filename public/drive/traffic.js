@@ -170,7 +170,7 @@ export class Traffic {
       const vd = sp * (-c * Math.sin(A) + sn * Math.cos(A));
       // where it is going to stop: a car holding for its stop line (runner.js: red, or the route not clear) does not carry on across for the next 1.8 s at
       // the speed it has now, it stops at its line, so the sideways distance it can still cover is the rest of the way to that line
-      const stopShift = a.apr && a.hold && sp > 0.1 ? Math.max(0, a.lineDist ?? 0) * (vd / sp) : undefined;
+      const stopShift = a.apr && a.lineHold && sp > 0.1 ? Math.max(0, a.lineDist ?? 0) * (vd / sp) : undefined;
       obs.push({ o: a, s: pr.s, d: pr.d, L: L0 * ct + W0 * st, W: L0 * st + W0 * ct, vs: sp * (c * Math.cos(A) + sn * Math.sin(A)), vd, stopShift, ped: false, veh: true, cross: true });
     }
     obs.push({ o: car, s: car.s, d: car.d, L: 2 * this.PLAYER.halfL, W: 2 * this.PLAYER.halfW, vs: car.v, vd: car.dv || 0, ped: false, veh: true, player: true, tgt: car.targetD });
@@ -330,7 +330,7 @@ export class Traffic {
     e.drv = newDriver(e.type);
     e.sp = e.dir === -1 ? -(e.v || 0) : e.v || 0;
     e.lane = e.dir === -1 ? 1 : 0; e.ref = e.ref || (e.lane ? 'l1' : 'l0');
-    e.pers = rnd(-0.2, 0.2); e.off = 0; e.dd = 0; e.aF = 0; e.stillT = 0; e.prof = null; e.lcT = -9; e.yawLat = 0;
+    e.pers = rnd(-0.2, 0.2); e.off = 0; e.dd = 0; e.aF = 0; e.stillT = 0; e.prof = null; e.lcT = -9; e.yawLat = 0; e.creepT = 0;
     e.d = this.refD(e.ref, e.s) + e.pers;   // (on its line from the first step: it was placed on route.lane, and its first move pushed it over to its own habit of riding a little to one side)
     if (!e.cruise) e.cruise = e.drv.v0;
   }
@@ -347,7 +347,11 @@ export class Traffic {
       e.revT = 0;
     }
     // still rolling backwards after that (the reversing ended, or something got in the way): rolls to a stop at the same pace, not in one step
-    if (e.v * dir < -0.02) { e.aF = 0; e.sp = 0; e.v += dir * Math.min(-e.v * dir, 2.5 * dt); e.stopT = 0; e.stillT = 0; return; }
+    // (and it looks behind it every step: with something within 1.5 m there, which is why the reversing ended or who has come up behind it since, it stops at 7 m/s^2, in about 0.3 m, not at the walking-pace rate)
+    if (e.v * dir < -0.02) {
+      const tg1 = this.refD(e.ref, e.s) + e.pers, rb = this.ahead(e, -dir, 0, 3, Math.min(e.d, tg1), Math.max(e.d, tg1), 12);
+      e.aF = 0; e.sp = 0; e.v += dir * Math.min(-e.v * dir, (rb && rb.gap <= 1.5 ? 7 : 2.5) * dt); e.stopT = 0; e.stillT = 0; return;
+    }
     let sp = dir === -1 ? -e.v : e.v; if (sp < 0) sp = 0;
     e.sp = sp;
     const two = !r.oneway(e.s);
@@ -591,7 +595,8 @@ export class Traffic {
 
   /** smooth the acceleration and step the speed */
   finish(e, dt, a, sp) {
-    if (e.creepT > 0) { e.creepT -= dt; a = Math.max(a, 1.2); }
+    // (the creep only lifts a plan that is not braking: the moment the plan asks for a < 0 (a runner in front, a leader, a red line) it is over)
+    if (e.creepT > 0) { if (a < 0) e.creepT = 0; else { e.creepT -= dt; a = Math.max(a, 1.2); } }
     // brake hard when you must, but ease off the brake and onto the gas (a firm 0.3 s filter: no jerk)
     const k = a < e.aF ? 1 - Math.exp(-dt / 0.12) : 1 - Math.exp(-dt / 0.35);
     e.aF += (a - e.aF) * k;
@@ -859,7 +864,7 @@ export class Traffic {
     return false;
   }
   unpark(o, ref) {
-    Object.assign(o, { src: 'unpark', parked: false, curb: false, dir: 1, drv: newDriver(o.type), occupied: false, lane: 0, sp: 0, v: 0, aF: 0, stillT: 0, pers: rnd(-0.15, 0.15), off: 0, dd: 0, prof: null, lcT: -9 });
+    Object.assign(o, { src: 'unpark', parked: false, curb: false, dir: 1, drv: newDriver(o.type), occupied: false, lane: 0, sp: 0, v: 0, aF: 0, stillT: 0, pers: rnd(-0.15, 0.15), off: 0, dd: 0, prof: null, lcT: -9, creepT: 0 });
     o.cruise = o.drv.v0;
     const T = 2.4;
     // the offset from the parking-lane line eases into the lane

@@ -27,7 +27,7 @@ import * as SkeletonUtils from './vendor/SkeletonUtils.js';
 import { makeBullyMaterial, makeRunClip, makeStandClip, MODEL_H, PLAYER_H, BULLY_H } from './people.js';
 
 const BASE = new URL('./', import.meta.url);
-const TIME_LIMIT = 70;   // real traffic (an oncoming stream, queues at work zones) costs ~10 s of waiting on a clean run
+const TIME_LIMIT = 70;   // the traffic (TRAFFIC = 0.25 of what it was: see traffic.js) costs the headless bot a few seconds on a clean run; it parks with about 21 s left (7.7 s with the full street, headless bot means)
 const REAR_AXLE = 1.45; // car.glb origin sits on the rear axle; the runner tracks the car's centre
 // Curbside parking space in front of the EBT Corner Store (world frame; the row faces north onto Auburn).
 const SPOT = { x: 0, y: 9.0, heading: Math.PI, len: 7.0, wid: 3.0 };
@@ -497,7 +497,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     hud.msg.classList.add('busted'); flash('BUSTED', 600000); setHint('');
     // the cruiser you hit stops and stays (traffic.js leaves it alone). A cross-street cruiser is moved by runner.js's ambient loop on vd (its pace)
     // and vs (its real speed), not on v, so both are zeroed: with vd at 0 the loop's target speed is 0 and nothing sets it going again
-    if (e.cross) { e.cross.v = e.cross.vd = e.cross.vs = 0; } else Object.assign(e, { v: 0, sp: 0, aF: 0, hold: true });
+    if (e.cross) { e.cross.v = e.cross.vd = e.cross.vs = e.cross.acc = 0; } else Object.assign(e, { v: 0, sp: 0, aF: 0, hold: true });
     lightsOn(poseOf(e));
     // backup rolls in from behind: from 60 m back, or the nearest spot behind that is clear (not on top of a car, and no car that can be seen is
     // ever removed to make room; one that can't be seen is)

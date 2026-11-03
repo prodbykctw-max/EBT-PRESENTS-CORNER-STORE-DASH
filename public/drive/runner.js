@@ -12,15 +12,17 @@ const pick = (arr) => arr[(Math.random() * arr.length) | 0];
 /** how many cars in a platoon of oncoming traffic (1-3). At TRAFFIC = 1 it is the old mix (60 % singles, 30 % pairs, 10 % threes); with less traffic the
  *  extra cars thin out in step with it, so a quarter of the traffic is not a quarter of the platoons but singles that are spread out, not bunched */
 const platoonSize = () => 1 + (Math.random() < 0.4 * TRAFFIC ? (Math.random() < 0.75 ? 1 : 2) : 0);
-/** the most cross-street vehicles (cars, buses, freeway-deck traffic) alive at once */
 /** the mean gap (m) between the cars going our way, and between oncoming platoons, at TRAFFIC = 1 (plan) */
 const GAP_SAME = 82.5, GAP_ONC = 90;
+/** the most cross-street vehicles (cars, buses, freeway-deck traffic) alive at once */
 const AMBIENT_CAP = Math.max(1, Math.round(14 * TRAFFIC));
 /** a cross-street driver at an unsignalised junction: how long the route has to stay clear before it goes, and blocked before it stops (s), and the hardest it will
  *  still stop for (m/s^2); how fast its acceleration may change (m/s^3) when braking comes on and when it lets go */
 const GO_AFTER = 0.4, STOP_AFTER = 0.25, COMFY_STOP = 4.0, CROSS_JERK_ON = 16, CROSS_JERK_OFF = 5;
 /** half the stretch of its mapped way (m) that a cross-street vehicle is drawn on the average of: the polyline's corners are sharp, a car's path is not */
 const PATH_SMOOTH = 4;
+/** ... but not near our road: within this many metres of the route (the hit test and what the route's cars see are on the polyline) the drawn pose is the logic pose, fading to the averaged one over the next 8 m, so what you see is what you hit */
+const SMOOTH_FROM = 16;
 
 // ---------------------------------------------------------------- route frame
 export class RouteFrame {
@@ -664,7 +666,7 @@ export class World {
         if (hold) vt = lineDist < 0.15 ? 0 : Math.min(a.vd, Math.sqrt(2 * 3.2 * lineDist));
       } else { a.held = undefined; a.rawHold = undefined; a.rawT = 0; }
       a.waiting = approach && hold && lineDist < 1.5;
-      a.hold = hold; a.apr = approach; a.lineDist = lineDist;   // (traffic.js: where this car will stop, not how far it would get at its present speed)
+      a.lineHold = hold; a.apr = approach; a.lineDist = lineDist;   // (traffic.js: where this car will stop, not how far it would get at its present speed)
       a.waitT = a.waiting && a.vs < 0.3 ? (a.waitT || 0) + dt : 0;
       // a way that dead-ends at our road and has nowhere to go: after a spell at the line it is gone once the player is well away from it
       a.stillT = a.vs < 0.3 ? (a.stillT || 0) + dt : 0;
@@ -733,7 +735,7 @@ export class World {
    *  stretch, with the heading eased (dt-correct) over a tenth of a second on top, for the join between one way and the next. */
   smoothPose(a, dt) {
     if (!a.pts[a.i + 1]) { a.rx = a.x; a.ry = a.y; a.rh ??= a.h; return; }   // (at the very end of its way: the next frame carries it on, or removes it)
-    const W = PATH_SMOOTH, pts = [-W, -W / 2, 0, W / 2, W].map((o) => this.pathPoint(a, o));
+    const W = PATH_SMOOTH * Math.max(0, Math.min(1, ((a.dPrev ?? 1e9) - SMOOTH_FROM) / 8)), pts = [-W, -W / 2, 0, W / 2, W].map((o) => this.pathPoint(a, o));
     a.rx = pts.reduce((v, q) => v + q[0], 0) / pts.length; a.ry = pts.reduce((v, q) => v + q[1], 0) / pts.length;
     const front = pts[4], back = pts[0], chord = Math.hypot(front[0] - back[0], front[1] - back[1]);
     const h = chord > 0.5 ? Math.atan2(front[1] - back[1], front[0] - back[0]) : a.h;
@@ -830,6 +832,7 @@ export class World {
 
   /** push every live entity into its InstancedMesh */
   render(car, t, dt = 0) {
+    if (dt > 0) this._rf = (this._rf || 0) + 1;   // (the frame count for settle)
     // Shadow split: every instance is drawn for the camera, but only the ones inside the sun's shadow box (the 220 m
     // square of shadow map that follows the car) can put a shadow anywhere, so those go first in each buffer and
     // the shadow pass draws just that leading run (shadowSplit). Instances outside it used to go through the shadow
@@ -890,7 +893,7 @@ export class World {
         z = e._seat.z; pitch = e._seat.pitch; roll = e._seat.roll;
         // a vehicle on the move is seated from four samples of the road surface under its wheels, every frame, with nothing between one frame and the next: a curb edge or a
         // junction patch under a wheel, or the fallback height where there is no surface at all, made its height, pitch and roll jump. Smoothed (critically damped, 0.12 s)
-        if (dt > 0 && !e.parked && e.drv && !e.flying) [z, pitch, roll] = settle(e, z, pitch, roll, dt);
+        if (dt > 0 && !e.parked && e.drv && !e.flying) [z, pitch, roll] = settle(e, z, pitch, roll, dt, this._rf);
       }
       if (e.hd !== undefined) yaw = p.a + e.hd;                 // people and dogs face where they're going
       else if (e.type === 'panhandler') yaw = p.a + Math.PI;
@@ -913,7 +916,7 @@ export class World {
       const expect = (px, py) => (a.deck ? deckTop(g, px, py, a.z) : g(px, py)) + LEVEL.ROAD;
       const on = (px, py) => this.surfAt(px, py, expect(px, py) + (a.deck ? 2.1 : 1.2)) ?? expect(px, py); // decks: merged surface up to 2 m
       const st = standOn(on, x, y, ah, hl, hw);
-      if (dt > 0) { const [z, pitch, roll] = settle(a, st.z, st.pitch, st.roll, dt); put(a.type, x, y, z, ah, a.color, roll, pitch); }
+      if (dt > 0) { const [z, pitch, roll] = settle(a, st.z, st.pitch, st.roll, dt, this._rf); put(a.type, x, y, z, ah, a.color, roll, pitch); }
       else put(a.type, x, y, st.z, ah, a.color, st.roll, st.pitch);
     }
     for (const k in this.meshes) {
@@ -950,7 +953,12 @@ function damp(o, k, target, T, dt, snap) {
 }
 /** the pose a moving vehicle is seated with (height, pitch, roll), smoothed over 0.12 s: see render */
 const SEAT_T = 0.12;
-const settle = (o, z, pitch, roll, dt) => [damp(o, 'z', z, SEAT_T, dt, 1.2), damp(o, 'p', pitch, SEAT_T, dt, 0.5), damp(o, 'r', roll, SEAT_T, dt, 0.5)];
+/** `frame` counts the frames drawn: a vehicle that was not settled on the frame before (culled, or just placed) starts from where it is now, not from where it was last seen */
+const settle = (o, z, pitch, roll, dt, frame) => {
+  if (o._sf !== frame - 1) o._fz = o._fp = o._fr = undefined;
+  o._sf = frame;
+  return [damp(o, 'z', z, SEAT_T, dt, 1.2), damp(o, 'p', pitch, SEAT_T, dt, 0.5), damp(o, 'r', roll, SEAT_T, dt, 0.5)];
+};
 
 /** The shadow pass draws only an instanced mesh's first `userData.shadowCount` instances (the ones that can cast a
  *  shadow into the shadow map: see World.render); the camera still draws all `count`. */
