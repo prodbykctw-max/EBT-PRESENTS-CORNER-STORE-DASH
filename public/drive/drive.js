@@ -42,6 +42,16 @@ const SKIPFOOT = QA && new URLSearchParams(location.search).has('skipfoot');
 // (he runs a touch slower than you: a clean run up the sidewalk gets away, but every person you run into lets him close)
 const FOOT = { run: 5.6, back: 2.2, bully: 5.3, bullyGo: 0.8, start: 14, carAhead: 30, bullyBehind: 8, stun: 0.9, reach: 0.9, pause: 1.1 };
 const RACE = { pace: 17, accel: 3.4, hop: 1.6, tail: 4.5, shake: 60, maxLead: 30 };   // 17 m/s: a good run beats him by ~6 s; an average one gets caught late
+// ?people=A|B|C: the alternative pedestrians (people-alt.js and the variant's file are only fetched when the parameter is there; any failure leaves the old people)
+const ALT_PEOPLE = /^[abc]$/i.test(new URLSearchParams(location.search).get('people') || '');
+async function loadAltPeople() {
+  const q = new URLSearchParams(location.search).get('people');
+  try {
+    const kind = q.toUpperCase(), alt = await import('./people-alt.js');
+    const variant = kind === 'A' ? (await import('./people-a.js')).makeA() : await (await import('./people-b.js')).makeB(kind);
+    return { AltPeople: alt.AltPeople, variant };
+  } catch (e) { console.warn('alternative people unavailable, drawing the usual ones:', e?.message || e); return null; }
+}
 const nextFrame = QA ? (f) => setTimeout(f, 16) : requestAnimationFrame;
 // screen-to-screen fades (the loader lifting, the fade to black at the end): the store page's SCREEN_FADE, one pace
 const SCREEN_FADE = 0.3;
@@ -50,6 +60,7 @@ const cancelFrame = QA ? clearTimeout : cancelAnimationFrame;
 export async function startDrive({ mount = document.body, muted = false, onDone = () => {}, onProgress = () => {}, look: lookOption } = {}) {
   // which look: the realistic look (the default) or the comic ink look (?look=comic, or startDrive({ look: 'comic' })); mode.js
   const REAL = resolveLook(lookOption);
+  const altReady = ALT_PEOPLE ? loadAltPeople() : null;   // ?people=A|B|C starts fetching its files now, alongside everything else
   // ---------- load (the game has no loader of its own, so the drive shows one) ----------
   if (!document.querySelector('link[data-drive-css]')) {
     const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = new URL('drive.css', BASE).href; l.dataset.driveCss = '';
@@ -234,8 +245,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     return a && b ? Math.max(a.y, b.y) : a ? a.y : b ? b.y : null;
   };
   world.footAt = footAt; world.feet = { surface: feetSurface, rebuild: () => (flat.length ? new TopSurface(flat, 8, nearTri) : null) };   // (rebuild: for measuring the load-time cost)
+  const altPeople = altReady ? await altReady : null;   // (without ?people= there is no await here at all)
   const crowd = world.crowd = new Crowd({
-    route, ground, surfAt, heightAt: footAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree,
+    route, ground, surfAt, heightAt: footAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree, alt: altPeople,
     walls: city.walls, heroWalls: heroSegments(hero.scene, ground(SPOT.x, SPOT.y)), roads: city.streets.index,
     furniture: { ...city.furniture, shelter: [...(city.furniture.shelter || []), ...trams.shelters] },   // riders wait at streetcar platforms too
     onRoute: (x, y) => onRouteRoad(x, y),
