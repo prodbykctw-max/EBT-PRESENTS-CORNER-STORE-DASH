@@ -486,7 +486,8 @@ export class World {
   }
   /** at the end of its way a vehicle carries on along the connecting way (same street first), like real traffic */
   continueAmbient(a) {
-    const o = this.nextWay(a); if (!o) return false;
+    const o = a.nextPick !== undefined ? a.nextPick : this.nextWay(a); a.nextPick = undefined; if (!o) return false;
+    a.prevPts = a.pts;   // (the way it has just left: the drawn pose is averaged over the join, see smoothPose)
     Object.assign(a, this.ambientOn(o.rd, o.pts, o.hs, a.type, 0, 0, a.color), { x: a.x, y: a.y, zAbs: a.zAbs, pitch: a.pitch });
     return true;
   }
@@ -629,6 +630,7 @@ export class World {
         }
       }
       if (a.through && !a.pts[a.i + 2] && a.t > 0.5 && a.x !== undefined && !this.visible(a.x, a.y, a.zAbs, a.type === 'bus' ? 7 : 3.5)) { a.dead = true; continue; }
+      if (a.nextPick === undefined && !a.pts[a.i + 2]) a.nextPick = this.nextWay(a);   // (on its last segment: where it goes next is decided now, so the corner at the join can be rounded; null = a dead end)
       const [p, q] = [a.pts[a.i], a.pts[a.i + 1]];
       const L = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
       // How a cross-street vehicle drives: it holds its pace (a.v), eases down to a stop at the line (3 m/s^2, harder
@@ -709,10 +711,19 @@ export class World {
 
   /** the point on a cross-street vehicle's way `off` metres along it from where it is (negative: behind it), not past the ends of the way */
   pathPoint(a, off) {
-    const P = a.pts, seg = (i) => Math.hypot(P[i + 1][0] - P[i][0], P[i + 1][1] - P[i][1]) || 1;
+    let P = a.pts; const seg = (i) => Math.hypot(P[i + 1][0] - P[i][0], P[i + 1][1] - P[i][1]) || 1;
     let i = a.i, L = seg(i), at = a.t * L + off;
-    while (at < 0 && i > 0) { i--; L = seg(i); at += L; }
-    while (at > L && P[i + 2]) { at -= L; i++; L = seg(i); }
+    // (and on along the way it will carry on to, or back along the way it came from: the join between two ways is a corner like any other)
+    while (at < 0) {
+      if (i > 0) { i--; L = seg(i); at += L; }
+      else if (P === a.pts && a.prevPts && a.prevPts.length > 1) { P = a.prevPts; i = P.length - 2; L = seg(i); at += L; }
+      else break;
+    }
+    while (at > L) {
+      if (P[i + 2]) { at -= L; i++; L = seg(i); }
+      else if (P === a.pts && a.nextPick) { at -= L; P = a.nextPick.pts; i = 0; L = seg(0); }
+      else break;
+    }
     const u = Math.max(0, Math.min(1, at / L));
     return [P[i][0] + (P[i + 1][0] - P[i][0]) * u, P[i][1] + (P[i + 1][1] - P[i][1]) * u];
   }
