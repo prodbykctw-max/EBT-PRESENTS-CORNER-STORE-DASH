@@ -22,10 +22,19 @@
 //
 // Constants are SI (m, s). The 25 mph downtown limit is 11.2 m/s; drivers want 5-30 % over it, like Atlanta drivers.
 export const LIMIT = 11.2;
+/** How much of the old traffic there is, 0..1. The owner asked for 75 % less, so 0.25. Every source of moving vehicles is scaled by it (runner.js plan(), the
+ *  oncoming feed, the cross streets' cap; feed() below) and nothing else is: parked cars, the streetcar and the BUSTED backup are not traffic in this sense. */
+export const TRAFFIC = 0.25;
+/** The cars joining from behind (feed) are limited by the 55 m gate around the spot they join at, not by how often they try: with the street emptier the gate
+ *  blocks far less, so cutting the tries to a quarter (TRAFFIC) left 57 % of the cars they used to add (measured, 12 runs), and 0.44 of that still 1.8 times too
+ *  many (40 runs). Calibrated by measurement: this share of TRAFFIC is the chance that a try goes ahead, which leaves them the quarter. */
+const FEED_SHARE = 0.25;
 const SPEED_OVER = [1.05, 1.3];
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+/** how fast a car's lane-change clock runs: a car that is hardly moving cannot slide sideways as fast as one at speed */
+const profRate = (sp) => clamp(0.4 + sp / 3, 0.4, 1);
 const hermite = (x0, v0, T, t) => {   // from (x0, v0) at t = 0 to (0, 0) at t = T: position and velocity
   const u = clamp(t / T, 0, 1), u2 = u * u, u3 = u2 * u;
   const h00 = 2 * u3 - 3 * u2 + 1, h10 = u3 - 2 * u2 + u, dh00 = (6 * u2 - 6 * u) / T, dh10 = (3 * u2 - 4 * u + 1);
@@ -35,10 +44,14 @@ const hermite = (x0, v0, T, t) => {   // from (x0, v0) at t = 0 to (0, 0) at t =
 /** IDM acceleration. v own speed, v0 desired speed, gap bumper-to-bumper to the leader (Infinity: none), vl leader
  *  speed along our direction (negative for head-on), p {a, b, T, s0, bmax} */
 export function idmAccel(v, v0, gap, vl, p) {
-  const free = 1 - Math.pow(Math.max(0, v) / Math.max(v0, 0.5), 4);
-  if (gap === Infinity) return p.a * free;
+  const vv = Math.max(0, v), vd = Math.max(v0, 0.5);
+  // The free-road term. Below the desired speed it is the classic one. ABOVE it (the desired speed has just dropped: a bend, a work zone,
+  // the end of a flee) the classic term is a*(1 - (v/v0)^4), which is unbounded: 12 m/s against 5.5 m/s asked for -54 m/s^2 on a free road.
+  // The bounded rule of the improved IDM (Treiber & Kesting 2013) eases off at about the comfortable braking b instead.
+  const aFree = vv <= vd ? p.a * (1 - Math.pow(vv / vd, 4)) : -p.b * (1 - Math.pow(vd / vv, 4 * p.a / p.b));
+  if (gap === Infinity) return aFree;
   const sStar = p.s0 + Math.max(0, v * p.T + v * (v - vl) / (2 * Math.sqrt(p.a * p.b)));
-  return Math.max(-p.bmax, p.a * (free - (sStar / Math.max(gap, 0.05)) ** 2));
+  return Math.max(-p.bmax, aFree - p.a * (sStar / Math.max(gap, 0.05)) ** 2);
 }
 
 /** a driver: desired speed over the limit, how brisk, how big a gap they keep */
@@ -57,11 +70,13 @@ const BACKUP = { a: 3, b: 4.5, T: 0.5, s0: 2, bmax: 9 };
 const TURN_MAX = 10, TURN_SOFT = 4;
 /** the watchdog: a car that has not moved for STUCK_T s (and is not waiting for a red light or a person) gets helped, one step at a time */
 const STUCK_T = 8;
+/** the speed through a work zone's coned-off lane */
+const WORKZONE_V = 8;
 
 export class Traffic {
   constructor(world, { PLAYER, CARS, ON_FOOT }) {
     Object.assign(this, { world, PLAYER, CARS, ON_FOOT, clock: 0, honkT: 0, curv: null });
-    this.stats = { evacuated: 0, evacFailed: 0, pulledOut: 0, passes: 0, unstuck: 0, honks: 0, runnerBrakes: 0, runnerHits: 0, lanechanges: 0, standoffs: 0, asides: 0, slowPasses: 0, forced: 0, helped: 0, reversed: 0, ghosted: 0, despawned: 0 };
+    this.stats = { evacuated: 0, evacFailed: 0, pulledOut: 0, passes: 0, unstuck: 0, honks: 0, runnerBrakes: 0, runnerHits: 0, lanechanges: 0, standoffs: 0, asides: 0, slowPasses: 0, forced: 0, helped: 0, reversed: 0, ghosted: 0, despawned: 0, fed: 0 };
   }
 
   // ------------------------------------------------------------------ the road ahead
@@ -77,14 +92,43 @@ export class Traffic {
     for (let i = Math.max(0, i0 - 6); i <= Math.min(r.n - 1, i0 + 14); i += 2) kmax = Math.max(kmax, this.curv[i]);
     return kmax < 0.004 ? 99 : Math.max(5.5, Math.sqrt(2.3 / kmax));
   }
+  /** The speed e may carry here, counting what is coming: a bend's speed (and a work zone's 8 m/s) is a TARGET to be reached by the time the car
+   *  gets there, braking at its own comfortable b, not a limit that applies the moment it is within a few metres (which asked for -54 m/s^2).
+   *  v_allow = the lowest of sqrt(v_there^2 + 2 b distance) over the next 60 m. */
+  vAllow(e, dir, b) {
+    const s0 = e.s + dir * ((e.L || 4.5) / 2);
+    let v = Infinity;
+    for (let k = 0; k <= 60; k += 5) {
+      const lim = this.curveV(s0 + dir * (k + 8));
+      if (lim < 90) v = Math.min(v, Math.sqrt(lim * lim + 2 * b * k));
+    }
+    for (const [a, c] of this.world.workZones || []) {
+      const entry = dir > 0 ? a - 8 : c + 8, dist = dir * (entry - s0);   // (the zone's first metre for a car going this way)
+      if (dist > 0 && dist < 60) v = Math.min(v, Math.sqrt(WORKZONE_V * WORKZONE_V + 2 * b * dist));
+    }
+    return v;
+  }
 
+  /** The street's half width at s, read BETWEEN the 1 m samples. route.hw() takes the nearest sample (the road ribbon and your lanes use it as it is),
+   *  so a lane line read through it moved in a step every metre, and a car that follows it was pushed sideways in a step every metre (its nose
+   *  flicked: yawLat). A car's lane line is read through this instead; hw() itself is unchanged. */
+  hwS(s) {
+    const r = this.world.route, f = clamp(s, 0, r.n - 1), i = Math.min(r.n - 2, Math.floor(f)), t = f - i;
+    return r.HW[i] + (r.HW[i + 1] - r.HW[i]) * t;
+  }
+  /** (the same lane arithmetic as route.lane / travel / parkD, on hwS) */
+  laneAt(s, k) { const hw = this.hwS(s), t = Math.min(hw, Math.max(3.45, hw - 2.4)); return k === 0 ? -t / 2 : t / 2; }
   refD(ref, s) {
-    const r = this.world.route;
     switch (ref) {
-      case 'l0': return r.lane(s, 0);
-      case 'l1': return r.lane(s, 1);
-      case 'pR': return r.parkD(s, -1) ?? r.lane(s, 0) - (r.travel(s) / 2 - 1.05);
-      default: return r.parkD(s, 1) ?? r.lane(s, 1) + (r.travel(s) / 2 - 1.05);
+      case 'l0': return this.laneAt(s, 0);
+      case 'l1': return this.laneAt(s, 1);
+      default: {
+        // the middle of the parking lane (route.parkD: only where it is 2 m wide or more). Where it narrows below that the line moves over to
+        // the travel lane's edge as it narrows (it used to jump 2 m sideways the moment parkD turned null)
+        const side = ref === 'pR' ? -1 : 1, hw = this.hwS(s), t = Math.min(hw, Math.max(3.45, hw - 2.4)), p = hw - t;
+        const park = side * (t + p / 2), inLane = this.laneAt(s, side < 0 ? 0 : 1) + side * (t / 2 - 1.05);
+        return p >= 2 ? park : inLane + (park - inLane) * clamp(p / 2, 0, 1);
+      }
     }
   }
   /** the lateral position the reference puts a car at, lateral extent for the free-space checks */
@@ -93,7 +137,9 @@ export class Traffic {
   /** swing e onto another reference line, easing the offset out with zero speed at the end */
   changeRef(e, ref, T) {
     const c = this.refD(ref, e.s);
-    e.ref = ref; e.prof = { t: 0, T, x0: e.d - c - e.pers - (e.room || 0), v0: e.dd };   // (e.d already includes the lean away from people (room): left in, the car jumped sideways by it the moment it changed lane)
+    // (v0 is in profile time, and a slow car runs the profile slower (move): the sideways speed it already has is v0 times that rate, so it is divided by it here, or the
+    // sideways speed jumped by that factor the moment the change began)
+    e.ref = ref; e.prof = { t: 0, T, x0: e.d - c - e.pers - (e.room || 0), v0: e.dd / profRate(e.sp) };   // (e.d already includes the lean away from people (room): left in, the car jumped sideways by it the moment it changed lane)
     e.refT = this.clock; this.stats.lanechanges++;
   }
 
@@ -121,7 +167,11 @@ export class Traffic {
       // across takes 2.55 m of the street's length and 12 m of its width), so its own length and width are turned by the
       // angle between its heading and the route's
       const bus = a.type === 'bus', L0 = bus ? 12 : 4.6, W0 = bus ? 2.55 : 1.9, ct = Math.abs(Math.cos(a.h - A)), st = Math.abs(Math.sin(a.h - A));
-      obs.push({ o: a, s: pr.s, d: pr.d, L: L0 * ct + W0 * st, W: L0 * st + W0 * ct, vs: sp * (c * Math.cos(A) + sn * Math.sin(A)), vd: sp * (-c * Math.sin(A) + sn * Math.cos(A)), ped: false, veh: true, cross: true });
+      const vd = sp * (-c * Math.sin(A) + sn * Math.cos(A));
+      // where it is going to stop: a car holding for its stop line (runner.js: red, or the route not clear) does not carry on across for the next 1.8 s at
+      // the speed it has now, it stops at its line, so the sideways distance it can still cover is the rest of the way to that line
+      const stopShift = a.apr && a.lineHold && sp > 0.1 ? Math.max(0, a.lineDist ?? 0) * (vd / sp) : undefined;
+      obs.push({ o: a, s: pr.s, d: pr.d, L: L0 * ct + W0 * st, W: L0 * st + W0 * ct, vs: sp * (c * Math.cos(A) + sn * Math.sin(A)), vd, stopShift, ped: false, veh: true, cross: true });
     }
     obs.push({ o: car, s: car.s, d: car.d, L: 2 * this.PLAYER.halfL, W: 2 * this.PLAYER.halfW, vs: car.v, vd: car.dv || 0, ped: false, veh: true, player: true, tgt: car.targetD });
     for (const q of W.others || []) if (q.o?.visible) obs.push(   // (the bully: a person in the street while he can be seen, whether or not you are on foot yourself: he runs on behind you for a bit after you get in)
@@ -146,7 +196,9 @@ export class Traffic {
       let gap = ds - (o.L + e.L) / 2; if (gap > look) continue;
       const vlu = dir * o.vs, tau = clamp(Math.max(gap, 0) / Math.max(1, sp - vlu), 0.3, o.ped ? 2.6 : 1.8);
       // its lateral extent now and where it's heading (people step into the road, cars change lane)
-      const pad = o.ped ? 0.42 : 0.12, shift = o.vd * tau;
+      let shift = o.vd * tau;
+      if (o.stopShift !== undefined && Math.abs(shift) > Math.abs(o.stopShift)) shift = o.stopShift;   // (a cross car holding for its line: only as far as the line)
+      const pad = o.ped ? 0.42 : 0.12;
       const oLo = o.d - o.W / 2 - pad + Math.min(0, shift), oHi = o.d + o.W / 2 + pad + Math.max(0, shift);
       // in the middle of a lane change what counts is where we will be when we get there, not the whole sweep
       let lo = lo0, hi = hi0;
@@ -278,7 +330,8 @@ export class Traffic {
     e.drv = newDriver(e.type);
     e.sp = e.dir === -1 ? -(e.v || 0) : e.v || 0;
     e.lane = e.dir === -1 ? 1 : 0; e.ref = e.ref || (e.lane ? 'l1' : 'l0');
-    e.pers = rnd(-0.2, 0.2); e.off = 0; e.dd = 0; e.aF = 0; e.stillT = 0; e.prof = null; e.lcT = -9;
+    e.pers = rnd(-0.2, 0.2); e.off = 0; e.dd = 0; e.aF = 0; e.stillT = 0; e.prof = null; e.lcT = -9; e.yawLat = 0; e.creepT = 0;
+    e.d = this.refD(e.ref, e.s) + e.pers;   // (on its line from the first step: it was placed on route.lane, and its first move pushed it over to its own habit of riding a little to one side)
     if (!e.cruise) e.cruise = e.drv.v0;
   }
 
@@ -289,8 +342,15 @@ export class Traffic {
     if (e.revT > 0) {
       e.revT -= dt;
       const tg0 = this.refD(e.ref, e.s) + e.pers, rb = this.ahead(e, -dir, 0, 3, Math.min(e.d, tg0), Math.max(e.d, tg0), 12);
-      if (!rb || rb.gap > 1.5) { e.aF = 0; e.sp = 0; e.v = -dir * 2.2; e.stopT = 0; e.stillT = 0; e.faceT = 0; return; }
+      // (it gets up to the walking pace at 2.5 m/s^2: it used to be there in one step)
+      if (!rb || rb.gap > 1.5) { e.aF = 0; e.sp = 0; e.v += clamp(-dir * 2.2 - e.v, -2.5 * dt, 2.5 * dt); e.stopT = 0; e.stillT = 0; e.faceT = 0; return; }
       e.revT = 0;
+    }
+    // still rolling backwards after that (the reversing ended, or something got in the way): rolls to a stop at the same pace, not in one step
+    // (and it looks behind it every step: with something within 1.5 m there, which is why the reversing ended or who has come up behind it since, it stops at 7 m/s^2, in about 0.3 m, not at the walking-pace rate)
+    if (e.v * dir < -0.02) {
+      const tg1 = this.refD(e.ref, e.s) + e.pers, rb = this.ahead(e, -dir, 0, 3, Math.min(e.d, tg1), Math.max(e.d, tg1), 12);
+      e.aF = 0; e.sp = 0; e.v += dir * Math.min(-e.v * dir, (rb && rb.gap <= 1.5 ? 7 : 2.5) * dt); e.stopT = 0; e.stillT = 0; return;
     }
     let sp = dir === -1 ? -e.v : e.v; if (sp < 0) sp = 0;
     e.sp = sp;
@@ -300,9 +360,10 @@ export class Traffic {
     // a standoff given up on (see standoff) ends the moment either car could be seen, unless the two are still inside each other: it is kept until they are not
     if (e.ghostUntil > this.clock && !e.ovT && (this.onScreen(e) || !e.ghostOf?.alive || this.onScreen(e.ghostOf))) e.ghostUntil = 0;
     // desired speed: the driver's, less for a bend and when the street is full of people
-    let v0 = Math.min(D.v0, this.curveV(e.s + (dir > 0 ? 8 : -8)));
-    if ((W.workZones || []).some(([a, b]) => e.s > a - 8 && e.s < b + 8)) v0 = Math.min(v0, 8);
-    else if (e.flee > this.clock) v0 = Math.max(v0, Math.min(sp + 4, D.v0 * 1.3, this.curveV(e.s + (dir > 0 ? 8 : -8))));
+    const va = this.vAllow(e, dir, D.b);
+    let v0 = Math.min(D.v0, va);
+    if ((W.workZones || []).some(([a, b]) => e.s > a - 8 && e.s < b + 8)) v0 = Math.min(v0, WORKZONE_V);
+    else if (e.flee > this.clock) v0 = Math.max(v0, Math.min(sp + 4, D.v0 * 1.3, va));
     if (e.backup) v0 = 20;
     e.v0now = v0;
     // the strip we occupy: from where we are to where we are heading (our lane's line plus our own habit of riding a little to one
@@ -534,6 +595,8 @@ export class Traffic {
 
   /** smooth the acceleration and step the speed */
   finish(e, dt, a, sp) {
+    // (the creep only lifts a plan that is not braking: the moment the plan asks for a < 0 (a runner in front, a leader, a red line) it is over)
+    if (e.creepT > 0) { if (a < 0) e.creepT = 0; else { e.creepT -= dt; a = Math.max(a, 1.2); } }
     // brake hard when you must, but ease off the brake and onto the gas (a firm 0.3 s filter: no jerk)
     const k = a < e.aF ? 1 - Math.exp(-dt / 0.12) : 1 - Math.exp(-dt / 0.35);
     e.aF += (a - e.aF) * k;
@@ -543,7 +606,7 @@ export class Traffic {
     e.stopT = sp < 0.3 ? (e.stopT || 0) + dt : 0;
     // never a car that sits still with nothing in the way: a gentle creep gets it going again
     e.stillT = sp < 0.3 && a > 0.2 ? e.stillT + dt : 0;
-    if (e.stillT > 5) { e.sp = 1.2; e.v = e.dir * 1.2; e.stillT = 0; this.stats.unstuck++; }   // (sp is the speed along its own direction, v the signed one)
+    if (e.stillT > 5) { e.creepT = 1.5; e.stillT = 0; this.stats.unstuck++; }   // (it used to be set to 1.2 m/s in one step; now it accelerates at 1.2 m/s^2 for a moment, and the following model takes over)
   }
 
   move(e, dt) {
@@ -552,13 +615,14 @@ export class Traffic {
     // lateral: reference lane + eased offset
     if (e.prof) {
       // (a car that is hardly moving cannot slide sideways as fast as one at speed: the change takes up to 2.5 times as long when it is stopped)
-      e.prof.t += dt * clamp(0.4 + e.sp / 3, 0.4, 1); const [x, v] = hermite(e.prof.x0, e.prof.v0, e.prof.T, Math.min(e.prof.t, e.prof.T));
+      e.prof.t += dt * profRate(e.sp); const [x, v] = hermite(e.prof.x0, e.prof.v0, e.prof.T, Math.min(e.prof.t, e.prof.T));
       e.off = x; if (e.prof.t >= e.prof.T) { e.prof = null; e.off = 0; }
     }
     const d0 = e.d, d1 = this.refD(e.ref, e.s) + e.pers + e.off + (e.room || 0);
     e.d = d1; e.dd = dt > 0 ? clamp((d1 - d0) / dt, -4, 4) : 0;
     // the nose follows the lane change a little
-    e.yawLat = e.dir * Math.atan2(e.dd, Math.max(e.sp, 3)) * 0.8;
+    // (low-passed: the nose turns into a lane change over a fifth of a second, it does not follow every little step of the sideways speed)
+    e.yawLat = (e.yawLat || 0) + (e.dir * Math.atan2(e.dd, Math.max(e.sp, 3)) * 0.8 - (e.yawLat || 0)) * (1 - Math.exp(-dt / 0.2));
   }
 
   // ------------------------------------------------------------------ lanes
@@ -755,6 +819,7 @@ export class Traffic {
     this.feedT = (this.feedT ?? 1) - dt;
     if (this.feedT > 0) return;
     this.feedT = rnd(1.2, 2.6);
+    if (Math.random() >= TRAFFIC * FEED_SHARE) return;   // (less traffic: most of the chances to join the street pass)
     // same direction: join near the start of the mapped street while the player is well past it; later behind the player
     const base = runner ? runner.s : car.s;
     const at = clamp(base - 110, 6, r.length - 40);
@@ -762,7 +827,7 @@ export class Traffic {
       const near = W.ents.some((o) => o.alive && !o.scenery && o.dir === 1 && !o.curb && Math.abs(o.s - at) < 55 && o.d < 0.5 + r.lane(o.s, 1));
       if (!near && !W.visible(...this.pt(at, r.lane(at, 0)), 5)) {
         const d = r.lane(at, 0);
-        W.add(W.carType(), { s: at, d, v: LIMIT * rnd(0.9, 1.1), color: W.paint(), dir: 1, flow: true });
+        W.add(W.carType(), { s: at, d, v: LIMIT * rnd(0.9, 1.1), color: W.paint(), dir: 1, flow: true, src: 'feed' }); this.stats.fed++;
       }
     }
   }
@@ -799,7 +864,7 @@ export class Traffic {
     return false;
   }
   unpark(o, ref) {
-    Object.assign(o, { parked: false, curb: false, dir: 1, drv: newDriver(o.type), occupied: false, lane: 0, sp: 0, v: 0, aF: 0, stillT: 0, pers: rnd(-0.15, 0.15), off: 0, dd: 0, prof: null, lcT: -9 });
+    Object.assign(o, { src: 'unpark', parked: false, curb: false, dir: 1, drv: newDriver(o.type), occupied: false, lane: 0, sp: 0, v: 0, aF: 0, stillT: 0, pers: rnd(-0.15, 0.15), off: 0, dd: 0, prof: null, lcT: -9, creepT: 0 });
     o.cruise = o.drv.v0;
     const T = 2.4;
     // the offset from the parking-lane line eases into the lane

@@ -54,7 +54,7 @@ obstacles and collisions line up exactly with what's painted on the road.
   traffic.
 - **Obstacles** (hitting one costs speed; big hits also cost 1 s):
   - **Slow cars** (20–29 mph) in your lane. Pass them when the oncoming lane is clear.
-  - **Oncoming traffic** every 5–9 s. It is never spawned so that it meets you beside a blocker.
+  - **Oncoming traffic**: a car or a small platoon every 200–520 m of road (`50–130 m / TRAFFIC`; it was 50–130 m, about every 5–9 s). It is never spawned so that it meets you beside a blocker.
   - **Parked cars** at the curb.
   - **Construction:** a ROAD WORK sign 38 m ahead, a cone taper, cones along the lane line and a
     barricade. The right lane is closed.
@@ -122,7 +122,7 @@ obstacles and collisions line up exactly with what's painted on the road.
   - Cross traffic never stops inside the route's road.
 - **Finish:** the car slows for the store by itself. Pull right to the curb into the P space.
   bonus = timeLeft × 50 + tokens × 25 + nearMisses × 50 + 500 (clean park) + 300 (no hits).
-- **Balance:** the QA bot parks clean with about 14 s left.
+- **Balance:** the QA bot parks clean with about 14 s left before the traffic was cut to a quarter. With `TRAFFIC = 0.25` the headless bot arrives with about 21 s left (7.7 s before, the means of 39 runs each, same harness and seeds; see "Less traffic, smoother traffic" below). `TIME_LIMIT`, `RACE.pace` and the scoring were not re-tuned for it.
 
 ## Traffic: how the cars drive (`traffic.js`)
 
@@ -133,8 +133,10 @@ cross streets) and calls `traffic.step()` every frame. Cars used to be steered b
 - **Speed.** The street limit is taken to be **25 mph (11.2 m/s)**: OpenStreetMap has no `maxspeed` for this route, so this
   is an assumption, not data. Each driver wants the limit plus 5 to 30 % (about 11.8 to 14.6 m/s; robotaxis 8 %, police 22 %), less in bends
   (`curveV`) and in work zones (8 m/s); cars that are free actually average about 12.3 m/s. Before, traffic wanted 9 to 13 m/s and spent
-  most of its time stopped.
-- **Following (IDM).** Each car follows the one in front with the Intelligent Driver Model (`idmAccel`): a time gap of 1.0 to 1.5 s, comfortable braking, a hard-braking limit when something appears close. Starts and stops are smooth (no jerk, no
+  most of its time stopped. A lower wanted speed ahead (a bend, the work zone) is a target the car reaches by braking in time
+  (`vAllow`: the lowest of `sqrt(curveV^2 + 2 b k)` over the next 60 m, and the work-zone speed), not a speed that drops under it at the line.
+- **Following (IDM).** Each car follows the one in front with the Intelligent Driver Model (`idmAccel`): a time gap of 1.0 to 1.5 s, comfortable braking, a hard-braking limit when something appears close. The free-road term is the bounded one (above the wanted speed a car
+  eases off at most at its comfortable braking, `b`; it used to be a power that braked hard the moment the wanted speed fell). Starts and stops are smooth (no jerk, no
   wobble); lateral moves use a Hermite curve that starts and ends with zero sideways speed.
 - **Lane changes (MOBIL-style).** A car passes only when the thing ahead is really in the way (a parked car in the lane, a cone,
   a stalled car, something much slower), never a queue that is just waiting its turn, and only when the other lane is clear
@@ -236,6 +238,59 @@ it to leave while it was waiting for the flagger).
 
 Oncoming traffic that is moving averages 8.6 m/s, lower than before (10 m/s), because it now queues at red lights and behind the streetcar
 instead of driving through them; the share of oncoming samples that are stopped is 15 %, down from 27 to 30 %.
+
+## Less traffic, smoother traffic (`TRAFFIC`, and why traffic no longer jerks)
+
+`export const TRAFFIC = 0.25` (in `traffic.js`, re-exported from `runner.js`) is the share of the moving traffic that is left: 75 % less. It is applied **per
+source**, and each one was calibrated by measurement (a headless bot run, vehicles within 150 m of the player, 39 valid runs of seeds 1 to 40 on each side),
+because the sources do not thin out in step when you scale one number:
+
+| Source | What `TRAFFIC` does there |
+| --- | --- |
+| Cars going our way (`plan`, `runner.js`) | the gap between them is `rnd(55,110) / TRAFFIC`; the first one starts a random part of one (longer) gap down the road, so the street does not begin with a car at the start line |
+| Oncoming (`plan`, and the feed in `update`) | platoons every `rnd(50,130) / TRAFFIC` m; a platoon is a single car unless a `0.4 * TRAFFIC` roll adds one or two (`platoonSize`), so a quarter of the traffic is spread-out singles, not a quarter of the platoons |
+| Parked cars that drive off (`plan`) | a car at the curb has a driver in it with chance `TRAFFIC`; with no parking lane a driving car is added with chance `TRAFFIC` |
+| Cars joining behind you and from the far end (`Traffic.feed`) | the chance that a try goes ahead is `TRAFFIC * FEED_SHARE`, with `FEED_SHARE = 0.25` (that source is limited by the gates and by what is already in the lane, so a plain `TRAFFIC` left 57 % of the cars it used to add, and `TRAFFIC * 0.44` still 1.8 times too many; measured, 12 and 40 runs) |
+| Cross streets and the freeway deck (`AMBIENT_CAP`) | one shared cap on how many are alive: `round(14 * TRAFFIC)` = 4 (it was 14) |
+
+Measured density near the player (mean number of moving vehicles within +-150 m of the car, 39 valid runs each of seeds 1 to 40; seed 8 on the old code and seed 19 on the new one never got off the pavement in the headless bot, an existing flake, and are left out):
+
+| | before | after | after / before |
+| --- | --- | --- | --- |
+| Route traffic (same direction + oncoming + pull-outs) | 6.11 | 1.52 | **0.25** |
+| of which same direction | 3.87 | 0.99 | 0.26 |
+| of which oncoming | 2.24 | 0.53 | 0.24 |
+| Cross-street vehicles | 0.388 | 0.101 | **0.26** (alive on the whole map: 9.7 to 2.6, 0.27) |
+| Freeway-deck vehicles overhead (counted apart) | 0.170 | 0.059 | 0.35 (the deck shares the cross-street cap, so it thinned a little less; it is overhead, not in the lane) |
+
+Parked cars, pedestrians, cyclists, the streetcar, the bus, panhandlers, work zones and the police are not traffic in this sense and were not touched.
+
+**Smoother.** Two kinds of rough: stop-and-go (a car brakes or speeds up for no visible reason) and shaky motion on screen (a car's pose jumps from one frame to the next). Found by instrumenting the real game (every vehicle's speed, height, pitch, roll, heading and position every frame) and fixed in this order, re-measured after each (12 seeds per step):
+
+1. **Free-road braking and lookahead** (`idmAccel`, `vAllow`, `traffic.js`). Above its wanted speed a car now eases off at its comfortable braking instead of at a power law that braked hard the moment the wanted speed dropped (a bend, the work zone), and a lower wanted speed ahead is reached by braking in time.
+2. **Speed jumps** (`traffic.js`). Reversing out of a space, and the watchdog that sets a stuck car going, changed speed in one step (to -2.2 m/s and to 1.2 m/s); they are ramps now (2.5 m/s^2, and 1.2 m/s^2 for 1.5 s). The creep only lifts a plan that is not braking: it ends the moment the plan asks to brake (a runner in front, a leader, a red line), and is cleared when a car is placed or unparked. A car still rolling back after reversing looks behind it every step and stops at 7 m/s^2 (instead of 2.5) when something is within 1.5 m there.
+3. **Lane lines read between the metres, and a lane change without a kick** (`hwS`, `laneAt`, `refD`, `changeRef`, `profRate`, `traffic.js`). The road half-width `HW` has one sample a metre and `hw()` rounds, so a car following a lane line had a step in its target every metre, and the parking-lane line fell back to a different line at some places (a jump of up to 2.06 m at 5 places on the route, measured with the old and the new code: now 0.03 m). Traffic reads between the samples now (`hw()`, which the player's car and the collisions use, is unchanged), the parking line blends to the lane edge where the parking lane runs out, and the nose yaw from the sideways speed is low-passed (0.2 s) and starts at 0. A lane change's curve runs on a clock that slows at low speed (`profRate`, up to 2.5 times as long when stopped) but its starting sideways speed was not rescaled to that clock, which kicked the sideways speed at the start of a change at low speed; it is now.
+4. **Cross-street cars** (`collect`, `ahead`, `traffic.js`; `runner.js`: `GO_AFTER`, `STOP_AFTER`, `COMFY_STOP`, `CROSS_JERK_ON/OFF`, `smoothPose`, `PATH_SMOOTH`). A cross-street car holding for its stop line was projected sideways across the route at its full speed for the whole look-ahead, so cars in the lane braked for a car that was about to stop at its line and never reach them: the projection stops at the line (`stopShift`). The hold was decided afresh every frame (a car could flicker between holding and going); now it must be clear for 0.4 s to go and blocked for 0.25 s to stop, a car that can no longer stop at 4 m/s^2 carries on across, and its acceleration is jerk-limited (16 m/s^3 when braking comes on, 5 when it lets go). Its heading used to snap at a polyline corner; it is drawn on the average of the way over +-4 m, pointing along the chord (its logic position, what the cars on the route see and what you hit, is on the polyline as before, so within 16 m of the route the drawn pose is the logic pose, fading to the averaged one over the next 8 m (`SMOOTH_FROM`): what you see is what you hit); the last commit takes that average across the join to the next way (`pathPoint`, `nextPick`: the way it has already chosen to go on to, and the one it came from). Its pitch filter is correct for any frame time (it was a fixed step per frame), and the filters are per second (`world.render(car, drove, dt)`, `drive.js`).
+5. **A critically damped seat** (`damp`, `settle`, `SEAT_T = 0.12` s, `runner.js`). The height, pitch and roll of every moving traffic vehicle came from four height samples of the surface under its wheels and changed from one frame to the next as a wheel crossed a seam or the frame time changed; they now go through a critically damped filter (about 0.12 s). Parked vehicles and the player's car are not filtered. A vehicle that was not drawn on the frame before (out of view, or just placed) starts from its true pose, not from where it was last seen (`settle`, the frame count `_rf`).
+
+Measured, headless (`?qa&bot`, a real run to the store, seeded `Math.random`, drawing off so each run takes about 25 s; the same bot, the same seeds 1 to 12 for the steps, and 39 valid runs of seeds 1 to 40 for before / after). A "snap" is a frame where the change in a pose from the frame before differs from the one before that by more than 0.02 rad in heading, 0.004 rad in pitch or roll, 0.006 m in height or 0.02 m in position (a second difference, so steady turning and driving do not count). Mean per run, route vehicles unless it says cross:
+
+| | before | density only | + 1 free road | + 2 ramps | + 3 lanes | + 4 cross cars | + 5 seat (all) | after, 39 runs (before, 39 runs) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Heading snaps | 1612 | 459 | 438 | 387 | **0** | 0.08 | 0.25 | 0.3 (1481) |
+| Position snaps | 156 | 37 | 43 | 35 | 0.8 | 0.3 | 0.7 | 0.5 (146) |
+| Pitch snaps | 579 | 174 | 165 | 152 | 11 | 6.6 | **0.08** | 0 (533) |
+| Roll snaps | 690 | 173 | 181 | 142 | 5.6 | 6.0 | **0** | 0 (628) |
+| Greatest jerk, m/s^3 | 1023 | 233 | 795 | 296 | 194 | 219 | 225 | 213 (1525) |
+| Speed jumps | 0.18 | 0 | 0.08 | 0 | 0 | 0 | 0 | 0 (0.28) |
+| Cross-street: greatest position second difference, m | 0.37 | 0.027 | 0.042 | 0.030 | 0.035 | 0.0003 | 0.0004 | 0.0003 (0.28) |
+| Route: time stopped, share of vehicle time | 10.8 % | 3.3 % | 3.9 % | 4.1 % | 3.4 % | 4.0 % | 2.8 % | 5.8 % (14.5 %) |
+
+(The step columns are on seeds 1 to 12 and the last on seeds 1 to 40, so the "after" figures differ a little from the "all" column.) What it does and does not show: nearly all of the shake is gone (headings, positions, pitch and roll no longer jump, and the cross-street cars no longer snap at a joint); the cars on the route spend 40 % as much of their time stopped (14.5 % to 5.8 %; stopped seconds per run, by cause, about 50 to 3.4, of which the work-zone wait went from 18 s to 0.6 s per run), though most of that is the street being emptier, not the fixes: the density-only step alone is at 3.3 %; but **hard braking per vehicle-second did not go down** (0.048 to 0.057): what is left of it is mostly cars braking for the player (2.5 of 3.8 hard brakes per run; it was 11 of 16), which is the car in front doing what it should, and that was not changed. The greatest single braking (24.7 to 8.2 m/s^2) and the greatest jerk (1525 to 213 m/s^3) fell. Cross-street cars at a stop line are no calmer per vehicle (they stop as often as before, 0.015 to 0.023 stops per vehicle-second, at a signal or a give-way). Not fixed: cross-street vehicles that arrive on a short way at the speed they left the last one at (about 27 m/s from the ramp) still change speed at a joint; a one-frame speed jump was seen once in 12 runs at the first step and in none of the 39 final runs, and was not traced (runs are not repeatable even with a seeded `Math.random`, so it could not be replayed); the freeway deck shares the cross-street cap and has no cap of its own.
+
+**What the quarter does to the rest of the game** (reported, not re-tuned; same bot and seeds as above): the headless bot parks with about 21 s left (7.7 s before; the 39-run means), the bully is about 18 s behind at the store (8.5 s before), hits on the bot fall from 5.8 to 2.7 a run and near misses (+50 each) from 4.2 to 1.2. `TIME_LIMIT` (`drive.js`), `RACE.pace` and the scoring were not changed; with the emptier street a player will have more time left and the bully will be further behind. If that is too easy, `TIME_LIMIT` and `RACE.pace` are the two numbers to look at.
+
+**How to see it.** Open `/drive/index.html` (add `?qa&bot` for the autopilot): the street has a car or two near you where there were six. Add `?look=comic` for the ink look; it is unchanged (no file of the look was touched; the bot parks at s = 1122 with 0 errors there too, seeds 1 and 2). Measuring it again: the numbers above come from wrapping `world.render`'s matrix writes and sampling `world.ents` / `world.ambient` every frame (a logic-only run, GL calls stubbed, with `window.__drive.manual`, `freezeClock` and `tick(dt)`); the probe scripts are not in the repository.
 
 Sizes: a sedan is 4.5 x 1.8 m, an SUV 4.75 x 1.95 m, the bus 12 x 2.55 m and the streetcar 24.8 x 2.65 m; the travel lanes are
 3.45 to 4.89 m wide (median 3.96 m), so the cars are not too big for the road; a lane is about twice a car's width, which is
