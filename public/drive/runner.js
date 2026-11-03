@@ -13,6 +13,8 @@ const pick = (arr) => arr[(Math.random() * arr.length) | 0];
  *  extra cars thin out in step with it, so a quarter of the traffic is not a quarter of the platoons but singles that are spread out, not bunched */
 const platoonSize = () => 1 + (Math.random() < 0.4 * TRAFFIC ? (Math.random() < 0.75 ? 1 : 2) : 0);
 /** the most cross-street vehicles (cars, buses, freeway-deck traffic) alive at once */
+/** the mean gap (m) between the cars going our way, and between oncoming platoons, at TRAFFIC = 1 (plan) */
+const GAP_SAME = 82.5, GAP_ONC = 90;
 const AMBIENT_CAP = Math.max(1, Math.round(14 * TRAFFIC));
 /** a cross-street driver at an unsignalised junction: how long the route has to stay clear before it goes, and blocked before it stops (s), and the hardest it will
  *  still stop for (m/s^2); how fast its acceleration may change (m/s^3) when braking comes on and when it lets go */
@@ -286,7 +288,7 @@ export class World {
     this.halo = new THREE.InstancedMesh(hg, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8 }), 200);
     this.halo.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(600).fill(1), 3);
     this.halo.count = 0; this.halo.frustumCulled = false; this.halo.renderOrder = 3; scene.add(this.halo);
-    this.nextOncoming = 2; this.ambient = [];
+    this.nextOncoming = 2 + rnd(0, 1) * (1 / TRAFFIC - 1) * GAP_ONC / LIMIT; this.ambient = [];   // (the first oncoming car arrives after a random part of a gap too)
     this.stats = { oncoming: 0 };   // QA: how much oncoming traffic a run actually got
     this.traffic = new Traffic(this, { PLAYER, CARS, ON_FOOT });   // how every car in the street drives (traffic.js)
     this.runner = null; this.runnerOn = false;   // the person on foot (drive.js sets these): cars see and avoid them
@@ -357,14 +359,16 @@ export class World {
     }
     // the traffic going our way: a car every 55-110 m all down the street, already up to speed (traffic.js keeps it going,
     // and feeds more in from behind). Not inside a work zone, not on top of anything.
-    for (let s1 = 62; s1 < sStop + 70; s1 += rnd(55, 110) / TRAFFIC) {
+    // (the first car is at a random point of the first gap, not always at 62: with a quarter of the traffic that one fixed car near the start would be a
+    // large share of what there is, and the street would be fuller near you at the start than the average over its length)
+    for (let s1 = 62 + rnd(0, 1) * GAP_SAME * (1 / TRAFFIC - 1); s1 < sStop + 70; s1 += rnd(55, 110) / TRAFFIC) {
       if ((this.workZones || []).some(([a, b]) => s1 > a - 25 && s1 < b + 25)) continue;
       const d1 = r.lane(s1, 0);
       if (this.ents.some((o) => o.alive && !o.scenery && o.solid && Math.abs(o.s - s1) < 18 && Math.abs(o.d - d1) < 2.4)) continue;
       this.add(carType(), { s: s1, d: d1, v: LIMIT * rnd(1.0, 1.2), color: pick(PAINT), dir: 1, flow: true, src: 'plan' });
     }
     // oncoming traffic already on the road, all the way down the far lane (fed from the far end in update)
-    for (let s1 = 60; s1 < r.length - 10; s1 += rnd(50, 130) / TRAFFIC) s1 = this.oncomingPlatoon(s1);
+    for (let s1 = 60 + rnd(0, 1) * GAP_ONC * (1 / TRAFFIC - 1); s1 < r.length - 10; s1 += rnd(50, 130) / TRAFFIC) s1 = this.oncomingPlatoon(s1);
     // cars parked along both curbs wherever there's a parking lane (~60 % full), clear of junctions and crosswalks
     const clearAt = (s1) => { for (let k = -8; k <= 8; k++) if (this.marks && this.marks[Math.round(s1) + k] === 0) return false; return true; };
     for (const side of [-1, 1]) for (let s1 = rnd(6, 12); s1 < r.length - 4; s1 += rnd(6.2, 7.2)) {

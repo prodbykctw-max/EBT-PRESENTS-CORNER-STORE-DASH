@@ -25,6 +25,10 @@ export const LIMIT = 11.2;
 /** How much of the old traffic there is, 0..1. The owner asked for 75 % less, so 0.25. Every source of moving vehicles is scaled by it (runner.js plan(), the
  *  oncoming feed, the cross streets' cap; feed() below) and nothing else is: parked cars, the streetcar and the BUSTED backup are not traffic in this sense. */
 export const TRAFFIC = 0.25;
+/** The cars joining from behind (feed) are limited by the 55 m gate around the spot they join at, not by how often they try: with the street emptier the gate
+ *  blocks far less, so cutting the tries to a quarter (TRAFFIC) left 57 % of the cars they used to add (measured, 12 runs), and 0.44 of that still 1.8 times too
+ *  many (40 runs). Calibrated by measurement: this share of TRAFFIC is the chance that a try goes ahead, which leaves them the quarter. */
+const FEED_SHARE = 0.25;
 const SPEED_OVER = [1.05, 1.3];
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -810,7 +814,7 @@ export class Traffic {
     this.feedT = (this.feedT ?? 1) - dt;
     if (this.feedT > 0) return;
     this.feedT = rnd(1.2, 2.6);
-    if (Math.random() >= TRAFFIC) return;   // (less traffic: most of the chances to join the street pass)
+    if (Math.random() >= TRAFFIC * FEED_SHARE) return;   // (less traffic: most of the chances to join the street pass)
     // same direction: join near the start of the mapped street while the player is well past it; later behind the player
     const base = runner ? runner.s : car.s;
     const at = clamp(base - 110, 6, r.length - 40);
