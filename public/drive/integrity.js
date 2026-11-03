@@ -4,6 +4,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { TopSurface } from './surface.js';
 import { deckTop } from './levels.js';
+import { VEHICLE } from './runner.js';
 
 const TOL = { wheel: 0.1, prop: 0.12 };
 
@@ -52,9 +53,16 @@ export function scanWorld(api) {
   };
   carRig.updateMatrixWorld(true);
   checkWheels('player', carRig.matrixWorld, [[0.86, 1.45], [-0.86, 1.45], [0.86, -1.5], [-0.86, -1.5]]);
-  for (const [type, [hw, hl]] of Object.entries({ sedan: [0.8, 1.36], suv: [0.86, 1.42], bus: [1.15, 3.6] })) {
-    const im = api.world.meshes[type]; if (!im) continue;
-    for (let i = 0; i < im.count; i++) { im.getMatrixAt(i, m4); checkWheels(`${type}#${i}`, m4, [[hw, hl], [-hw, hl], [hw, -hl], [-hw, -hl]]); }
+  // the props.glb cars (their sizes as they were); with a car set (cars.js) those meshes are empty, so its own meshes are checked at the sizes the world is using (VEHICLE)
+  const wheelMeshes = Object.entries({ sedan: [0.8, 1.36], suv: [0.86, 1.42], bus: [1.15, 3.6] }).map(([type, [hw, hl]]) => [type, type, hw, hl]);
+  const cs = api.world.carSet;
+  if (cs) for (const [role, K] of Object.entries(cs.keys)) {
+    const V = VEHICLE[role === 'sedanB' ? 'sedan' : role]; if (!V) continue;
+    K.lod.forEach((key, lod) => wheelMeshes.push([key, `${role}@${cs.name}L${lod}`, V[1], V[0]]));
+  }
+  for (const [key, label, hw, hl] of wheelMeshes) {
+    const im = api.world.meshes[key]; if (!im) continue;
+    for (let i = 0; i < im.count; i++) { im.getMatrixAt(i, m4); checkWheels(`${label}#${i}`, m4, [[hw, hl], [-hw, hl], [hw, -hl], [-hw, -hl]]); }
   }
 
   // 2b) obstacles standing in the street: cones, barricades, panhandlers, work signs on the road surface

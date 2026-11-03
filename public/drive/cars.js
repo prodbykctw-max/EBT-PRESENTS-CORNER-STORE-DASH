@@ -148,7 +148,7 @@ export class CarSet {
   constructor(name, data, scene, meshes, caps) {
     this.name = name; this.data = data; const phone = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;   // phones switch to the lighter models sooner
     this.lod = (data.lod || [20, 56]).map((m) => m * (phone ? 0.75 : 1)); this.vehicle = data.vehicle || {};
-    this.keys = {}; this.pairs = [];
+    this.keys = {}; this.pairs = []; this.proxies = [];
     this.mix = data.mix || {};   // { sedan: { alt: 'sedanB', every: 3 } }: about one `sedan` car in `every` is drawn as the role `alt` (pick)
     const mat = flatSafe(propMaterial()), gmat = glassMaterial(), pmat = proxyMaterial();
     const mat0 = flatSafe(propMaterial()); if (data.doubleL0) mat0.side = THREE.DoubleSide;   // (a source whose thin panels are single surfaces drawn from both sides)
@@ -167,7 +167,7 @@ export class CarSet {
       const K = { lod: [`${tag}0`, `${tag}1`, `${tag}2`], shadow: `${tag}s`, glass: `${tag}g` };
       const g0 = assemble(raw, names('L0'), sc, r.livery, {}), g1 = assemble(raw, names('L1'), sc, r.livery, {}), g2 = assemble(raw, names('L2'), sc, r.livery, {});
       const near = mk(g0, cap, K.lod[0], false, r.doubleL0 ? (mat0d ||= (() => { const m = flatSafe(propMaterial()); m.side = THREE.DoubleSide; return m; })()) : mat0); mk(g1, cap, K.lod[1], false); mk(g2, cap, K.lod[2], true);
-      mk(g2, cap, K.shadow, true).material = pmat;
+      const proxy = mk(g2, cap, K.shadow, true); proxy.material = pmat; proxy.visible = false; this.proxies.push(proxy);   // (shown only while the sun's shadow map is drawn: shadowOnly)
       if (raw[`${r.body}.L0g`]) {
         const gg = assemble(raw, [`${r.body}.L0g`], sc, null, {});
         const gl = new THREE.InstancedMesh(gg, gmat, cap); gl.instanceMatrix = near.instanceMatrix;   // the same cars, the same places
@@ -191,6 +191,14 @@ export class CarSet {
     return d2 < this.lod[0] * this.lod[0] ? 0 : d2 < this.lod[1] * this.lod[1] ? 1 : 2;
   }
   sync() { for (const [n, g] of this.pairs) g.count = n.count; }
+  /** The shadow proxies write no colour and no depth, but if they are visible three still runs their vertices through the camera's own pass and counts
+   *  their draws there. A layer can't keep them out of it: r186 tests an object's layers against the CAMERA's in the shadow pass too (WebGLShadowMap), so a
+   *  layer the camera doesn't see casts no shadow and one it does is drawn. So they are hidden, and shown only around the shadow map's own draw. */
+  shadowOnly(renderer) {
+    const sm = renderer.shadowMap, draw = sm.render, proxies = this.proxies;
+    sm.render = function (...a) { for (const p of proxies) p.visible = true; try { return draw.apply(this, a); } finally { for (const p of proxies) p.visible = false; } };
+    this.restoreShadow = () => { sm.render = draw; for (const p of proxies) p.visible = true; };   // (QA: the proxies as they were, drawn in both passes)
+  }
 }
 
 /** triangles of every LOD mesh of a set (for the report) */

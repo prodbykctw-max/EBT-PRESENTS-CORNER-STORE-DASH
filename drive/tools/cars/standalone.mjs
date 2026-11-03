@@ -9,7 +9,7 @@ try {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => logs.push('PAGEERROR ' + e.message));
   page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) logs.push(m.type().toUpperCase() + ' ' + m.text().slice(0, 300)); });
-  page.on('response', (r) => { if (/\.cars/.test(r.url())) reqs.push(r.status() + ' ' + r.url()); });
+  page.on('response', (r) => { if (/\.cars|\/cars\.js/.test(r.url())) reqs.push(r.status() + ' ' + r.url()); });
   await page.goto(`http://127.0.0.1:${PORT}/standalone.html?${Q}`);
   await page.click('#btnTitle'); await page.waitForSelector('#btnDrive', { state: 'visible' }); await page.click('#btnDrive');
   await page.waitForFunction(() => window.__drive && window.__drive.world && window.__drive.foot, null, { timeout: 900000, polling: 2000 });

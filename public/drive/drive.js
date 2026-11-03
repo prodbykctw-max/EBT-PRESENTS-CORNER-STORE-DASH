@@ -11,7 +11,6 @@ import { LEVEL, standOn } from './levels.js';
 import { CUT } from './roads.js';
 import { TopSurface } from './surface.js';
 import { RouteFrame, RunnerCar, World } from './runner.js';
-import { carSetsFromURL, loadCarFile, carSetFactory } from './cars.js';
 import { DriveAudio } from './audio.js';
 import { Crowd } from './crowd.js';
 import { heroSegments } from './corral.js';
@@ -73,12 +72,20 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
   const MOBILE = matchMedia('(pointer: coarse)').matches;
   const realReady = REAL ? import('./real.js').then(async (R) => ({ R, T: await R.loadTextures(BASE, { mobile: MOBILE }) })).catch((e) => { console.warn('realistic look unavailable, drawing the comic look:', e?.message || e); return null; }) : null;   // the realistic look's code and its 1K scans load alongside the rest
-  // the realistic look's cars (cars.js: cars/bc.cars unless ?cars= says otherwise) load alongside the rest. The comic look (REAL false) never
-  // starts this: no .cars file is requested. A file that fails to load only costs the new cars: the drive starts with the props.glb ones.
-  const carsReady = REAL ? Promise.all(carSetsFromURL().map(async (n) => {
-    try { const data = await loadCarFile(new URL(`cars/${n.toLowerCase()}.cars`, BASE).href); return [n, carSetFactory(n, data)]; }
-    catch (e) { console.warn('car set ' + n + ' unavailable, drawing the usual cars:', e?.message || e); return null; }
-  })) : null;
+  // the realistic look's cars (cars.js: cars/bc.cars unless ?cars= says otherwise). Nothing here is requested until the realistic look's own code and
+  // textures have loaded (realReady resolves with the pack): the comic look never loads cars.js or a .cars file, and a failed realistic look doesn't
+  // fetch them for nothing. A set that fails to load only costs the new cars: the drive starts with the props.glb ones (see CARS_WAIT_MS below).
+  const carsReady = realReady ? realReady.then(async (pack) => {
+    if (!pack) return null;
+    try {
+      const C = await import('./cars.js');
+      const sets = await Promise.all(C.carSetsFromURL().map(async (n) => {
+        try { return [n, C.carSetFactory(n, await C.loadCarFile(new URL(`cars/${n.toLowerCase()}.cars`, BASE).href))]; }
+        catch (e) { console.warn('car set ' + n + ' unavailable, drawing the usual cars:', e?.message || e); return null; }
+      }));
+      return sets.filter(Boolean);
+    } catch (e) { console.warn('car sets unavailable, drawing the usual cars:', e?.message || e); return null; }
+  }) : null;
   // motion (GSAP): the store page already carries it; on its own (/drive/index.html) the drive loads the same
   // vendored copy. Phones set to reduce motion, or no GSAP at all, keep the plain CSS behaviour.
   const gsapReady = window.gsap ? Promise.resolve(window.gsap) : new Promise((ok) => {
@@ -185,8 +192,15 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const spot = { s: spotS, d: route.parkD(spotS, -1) ?? route.lane(spotS, 0) - 0.35 };
   // car sets (cars.js): only with the realistic look (RL); the comic look, ?cars=none and a failed load draw the props.glb cars
   const carSets = {};
-  if (RL && carsReady) for (const r of await carsReady) if (r) carSets[r[0]] = r[1];
+  if (RL && carsReady) {
+    // the cars are an optional download: the drive waits for them only a few seconds after everything it needs has loaded, then starts with the old cars
+    const CARS_WAIT_MS = 8000; let timer;
+    const got = await Promise.race([carsReady, new Promise((ok) => { timer = setTimeout(() => { console.warn('car sets still loading, drawing the usual cars'); ok(null); }, CARS_WAIT_MS); })]);
+    clearTimeout(timer);
+    for (const r of got || []) carSets[r[0]] = r[1];
+  }
   const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks, carSets });
+  for (const cs of Object.values(world.carSets)) cs.shadowOnly(renderer);   // the cars' shadow proxies are drawn in the sun's shadow pass only
   // the sun's shadow box, so the props that can't cast a shadow into it skip the shadow pass (World.render)
   world.shadowBox = { dir: sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35), half: () => Math.max(sun.shadow.camera.right, sun.shadow.camera.top) };
   const car = new RunnerCar(route, 4);

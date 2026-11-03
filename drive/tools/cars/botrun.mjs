@@ -10,7 +10,7 @@ try {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => logs.push('PAGEERROR ' + e.message));
   page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) logs.push(m.type().toUpperCase() + ' ' + m.text().slice(0, 300)); });
-  page.on('request', (r) => { if (/\.cars/.test(r.url())) reqs.push(r.url()); });
+  page.on('request', (r) => { if (/\.cars|\/cars\.js/.test(r.url())) reqs.push(r.url()); });
   await page.goto(`http://127.0.0.1:${PORT}/drive/index.html?${Q}`);   // (?bot also stands the player's own steering aside)
   await page.waitForFunction(() => window.__drive && window.__drive.world && window.__drive.foot, null, { timeout: 900000, polling: 2000 });
   const res = await page.evaluate(async () => {

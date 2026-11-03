@@ -14,8 +14,8 @@ B  b.cars   "Car Concept" from KhronosGroup/glTF-Sample-Assets (Models/CarConcep
             CHANGES MADE HERE: decimated into three levels of detail, textures dropped (flat per-material colours), paint made tintable,
             scaled/stretched to this game's vehicle sizes, a roof light bar / sensor added. The licence plate (the only part that carried
             the Khronos / 3D Commerce logos, which the licence excludes) was removed and replaced by a blank plate.
-            bc.cars (the default look) contains this body, so this notice must ship with it; CC BY also wants the credit to be findable by
-            players, which a file in the deployed tree is not: an in-game credits line is still to be added (the title screen's credits line).
+            bc.cars (the default look) contains this body, so this notice must ship with it. Players see the credit on the title screen's credits
+            line (standalone/shell2.html: "Car model: Car Concept, Eric Chadwick / Darmstadt Graphics Group (CC BY 4.0), modified").
 
 C  c.cars   Modelled from scratch by drive/tools/cars/carbody.py + build_c.py (parametric lofted body, wheels, lamps, interior). No outside
             model data and no real-brand shapes or badges. A GitHub search for CC0 / CC-BY street-car glTF/OBJ found only stylised toy kits

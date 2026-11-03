@@ -248,7 +248,10 @@ const TYPES = {
   dog: { L: 0.8, W: 0.35, solid: 0.5 }, officer: { L: 0.5, W: 0.5, solid: 0 }, seller: { L: 0.6, W: 0.6, solid: 0.6 }, cooler: { L: 0.7, W: 0.45, solid: 0 },
 };
 // half wheelbase / half track used to seat each vehicle on the road
-const VEHICLE = { sedan: [1.35, 0.8], suv: [1.42, 0.86], bus: [3.6, 1.15], tram: [11, 1.3], police: [1.47, 0.82], robotaxi: [1.5, 0.83] };
+export const VEHICLE = { sedan: [1.35, 0.8], suv: [1.42, 0.86], bus: [3.6, 1.15], tram: [11, 1.3], police: [1.47, 0.82], robotaxi: [1.5, 0.83] };
+// the sizes above as they are at load. A car set (cars.js) swaps some of them while its drive runs; VEHICLE is module-wide, so every World puts the
+// defaults back first (setCarSet) and a second drive in the same page (the store starts one again after BUSTED) never inherits the last one's sizes
+const VEHICLE_BASE = Object.freeze(Object.fromEntries(Object.entries(VEHICLE).map(([k, v]) => [k, Object.freeze([...v])])));
 const CARS = new Set(['sedan', 'suv', 'police', 'robotaxi']);
 const ON_FOOT = new Set(['panhandler', 'seller', 'dog']);   // hit one and they leap clear: a scare, never an injury
 /** the traffic mix: mostly private cars, about one in ten a driverless robotaxi, one in twenty a police cruiser */
@@ -281,7 +284,7 @@ export class World {
       this.meshes[t] = im; scene.add(im);
     }
     // car sets (cars.js): drive.js passes the one(s) the realistic look loads (none for the comic look or ?cars=none); the props above stay as they are
-    this.carSet = null; this.carSets = {}; this._vehicle0 = null; this._cid = 0;
+    this.carSet = null; this.carSets = {}; this._cid = 0;
     if (carSets) for (const [name, mk] of Object.entries(carSets)) this.carSets[name] = mk(scene, this.meshes, CAP);
     this.setCarSet(Object.keys(this.carSets)[0] || null);
     // EBT tokens: gold discs with an emissive rim, spinning
@@ -303,9 +306,9 @@ export class World {
 
   /** draw the traffic and parked cars with a car-look option (cars.js), or with null the props.glb cars */
   setCarSet(name) {
-    if (this._vehicle0) { Object.assign(VEHICLE, this._vehicle0); this._vehicle0 = null; }
+    Object.assign(VEHICLE, VEHICLE_BASE);   // always from the defaults, then the set's own sizes on top (none for the old cars)
     this.carSet = name ? this.carSets[name] || null : null;
-    if (this.carSet && this.carSet.vehicle) { this._vehicle0 = {}; for (const k in this.carSet.vehicle) { this._vehicle0[k] = VEHICLE[k]; VEHICLE[k] = this.carSet.vehicle[k]; } }
+    if (this.carSet && this.carSet.vehicle) for (const k in this.carSet.vehicle) VEHICLE[k] = this.carSet.vehicle[k];
     this.carSetName = this.carSet ? name : null;
   }
 

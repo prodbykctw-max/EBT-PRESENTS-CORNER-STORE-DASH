@@ -13,7 +13,7 @@ try {
   page.on('pageerror', (e) => logs.push('PAGEERROR ' + e.message));
   page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) logs.push(m.type().toUpperCase() + ' ' + m.text().slice(0, 300)); });
   page.on('requestfailed', (r) => logs.push('REQFAILED ' + r.url()));
-  const reqs = []; page.on('request', (r) => { if (/\.cars/.test(r.url())) reqs.push(r.url()); });
+  const reqs = []; page.on('request', (r) => { if (/\.cars|\/cars\.js/.test(r.url())) reqs.push(r.url()); });
   const t0 = Date.now();
   await page.goto(`http://127.0.0.1:${PORT}/drive/index.html?qa&skipfoot${Q ? '&' + Q : ''}`);
   await page.waitForFunction(() => window.__drive && window.__drive.world && window.__drive.foot, null, { timeout: 900000, polling: 2000 });
