@@ -1438,6 +1438,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // only when the first park comes into view), which stalls that frame; send them all now
   const sent = new Set();
   scene.traverse((o) => { for (const m of [].concat(o.material || [])) for (const v of Object.values(m)) if (v?.isTexture && !sent.has(v)) { sent.add(v); try { renderer.initTexture(v); } catch {} } });
+  // (the new people's baked-animation textures are shader uniforms, not material properties, so the loop above cannot see them)
+  for (const l of world.crowd?.alt?.lods || []) for (const v of Object.values(l.uniforms || {})) if (v?.value?.isTexture && !sent.has(v.value)) { sent.add(v.value); try { renderer.initTexture(v.value); } catch {} }
   // The loader stays up until the first picture is actually on screen. That first frame is the slow one (the GPU
   // builds every shader and uploads every texture it needs), so it runs under the loader: placing you, the bully and
   // the camera, then drawing. Then two display frames for it to reach the screen, and only then the loader fades

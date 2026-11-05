@@ -6,7 +6,7 @@
 // person's phase / stride / lean / phone / startle, which crowd.js already computes, and the person's palette indices and accessory
 // bits that crowd.js already rolled (`m.pal`, `m.acc`), so the same person keeps the same skin, top, bottoms and cap/long hair/bag/hood.
 // Everything this file adds to a person (build, hair, outfit, shoes) comes from a hash of the person's index, NOT from Math.random,
-// so no random number is drawn here and the rest of the run is the same as with the old people.
+// so this file draws no number from the shared stream except the 4 that the old crowd's InstancedMesh took (see the constructor), and the rest of the run is the same as with the old people.
 //
 // Two draw calls per kind of person (near + far level of detail) instead of one, each one InstancedMesh; the default draws both kinds, half the crowd each
 // (person n is kind n % 2: the crowd was laid along the route in order, so a group's neighbours alternate):
@@ -18,19 +18,15 @@ import { uploadUsed, shadowSplit } from './runner.js';
 import { SKIN, TOPS, BOTTOMS, ACCENT } from './crowd.js';
 import { LEVEL } from './levels.js';
 
-/** three.js draws Math.random for the id of every geometry, material and texture it makes. The crowd's layout, the traffic and the planner share that
- *  one stream, so building the new people (and when, relative to the crowd) must not move it: everything that makes three.js objects here runs under
- *  this, which swaps in a private generator for the duration of the (synchronous) call. */
+/** three.js draws Math.random for the id of every geometry, material, texture and object it makes. The crowd's layout, the traffic and the planner share
+ *  that one stream, so building the new people (and when, relative to the crowd) must not move it: everything that makes three.js objects here runs
+ *  under this, which swaps in a private generator for the duration of the (synchronous) call. The generator's state lives at module level, so each
+ *  call (A, B, the AltPeople, a second drive in the same page) carries on where the last one stopped and the ids stay distinct (same idea as cars.js isolated()). */
+let isoState = 0x9e3779b1;
+const isoRandom = () => { isoState ^= isoState << 13; isoState ^= isoState >>> 17; isoState ^= isoState << 5; return (isoState >>> 0) / 4294967296; };
 export function withoutRandom(fn) {
-  const real = Math.random; let s = 2463534242;
-  Math.random = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+  const real = Math.random; Math.random = isoRandom;
   try { return fn(); } finally { Math.random = real; }
-}
-
-/** which option the page asked for: 'A' | 'B' | 'C' | null */
-export function peopleOption() {
-  const q = new URLSearchParams(location.search).get('people');
-  return q && /^[abc]$/i.test(q) ? q.toUpperCase() : null;
 }
 
 // ------------------------------------------------------------------ what a person wears (a hash of the index, no Math.random)
@@ -219,7 +215,12 @@ export class AltPeople {
   /** variants: one (?people=A / B) or several (the mix). Which variant a person is drawn with is decided once, from the person's index (no
    *  Math.random: the crowd's layout, the traffic and the planner share that stream), and alternates along the crowd's order, which is the
    *  order people were laid along the route, so a group's neighbours are a mix. */
-  constructor(o) { withoutRandom(() => this.init(o)); }
+  constructor(o) {
+    withoutRandom(() => this.init(o));
+    // The old crowd made one InstancedMesh here, whose id takes 4 draws from the shared stream; take the same 4 so everything after the crowd (traffic,
+    // behaviour) draws the same numbers as with ?people=none.
+    for (let i = 0; i < 4; i++) Math.random();
+  }
   init({ crowd, variants, variant, scene, mobile }) {
     this.crowd = crowd; this.vs = variants || [variant]; this.variant = this.vs[0];
     const people = crowd.people, NV = this.vs.length;
@@ -247,7 +248,7 @@ export class AltPeople {
         Object.assign(mesh, { name: 'crowd_' + name + (vx ? '_' + variant.name : ''), frustumCulled: false, castShadow: !mobile, receiveShadow: true, customDepthMaterial: depth, count: 0 });
         shadowSplit(mesh);
         scene.add(mesh);
-        this.lods.push({ mesh, attr, name, vx });
+        this.lods.push({ mesh, attr, name, vx, uniforms: def.uniforms });
       }
     });
     this.mesh = this.lods[0].mesh;   // what integrity.js and the QA tools look at

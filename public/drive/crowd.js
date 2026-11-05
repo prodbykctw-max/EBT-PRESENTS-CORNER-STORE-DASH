@@ -174,7 +174,8 @@ export class Crowd {
       s += g.members.length * this.spacing * rnd(0.6, 1.4);            // stratified: even overall, never regular
     }
     this.relocate();
-    // ?people=A|B|C (drive.js loads people-alt.js only then): someone else draws the same people (their positions, paths and behaviour are all above and unchanged)
+    // the realistic look's people (drive.js hands over `alt` from people-alt.js; null in the comic look and with ?people=none): someone else draws the same people
+    // (their positions, paths and behaviour are all above and unchanged; AltPeople takes the same 4 draws from Math.random that the InstancedMesh below takes)
     if (alt) { this.alt = new alt.AltPeople({ crowd: this, variants: alt.variants, scene, mobile }); this.mesh = this.alt.mesh; this.t = 0; return; }
     // one instance slot per person: whatever the camera sees can be drawn (only the drawn ones cost GPU time)
     const cap = this.people.length;
