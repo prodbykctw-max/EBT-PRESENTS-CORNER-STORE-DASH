@@ -21,6 +21,7 @@ import { haptic, HAP, tapHaptic } from './haptics.js';
 import { Look } from './look.js';
 import { resolveLook, fallbackToComic } from './mode.js';
 import { WIND, NEAR_CUT } from './landscape.js';
+import { Guide } from './guide.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
 import * as SkeletonUtils from './vendor/SkeletonUtils.js';
@@ -28,6 +29,13 @@ import { makeBullyMaterial, makeRunClip, makeStandClip, MODEL_H, PLAYER_H, BULLY
 
 const BASE = new URL('./', import.meta.url);
 const TIME_LIMIT = 70;   // the traffic (TRAFFIC = 0.25 of what it was: see traffic.js) costs the headless bot a few seconds on a clean run; it parks with about 21 s left (7.7 s with the full street, headless bot means)
+// The realistic look's chase camera (the comic look keeps its own: 8 m back and 3 m up, easing back with speed).
+// One place to change it: back = back + backV * speed metres behind the car's centre, h metres above the road under the car
+// (no speed term), `ahead` = how far down the road the camera points (only its direction is used), `aimD` = how much of the car's own
+// sideways position it points at (1 = the car stays centred; the comic camera uses 0.35), yCar = where the car's rear-bottom edge
+// (2.45 m behind its centre, 0.3 m up) lands on screen (0 top .. 1 bottom; the tyres and bumper hang a little lower, so the car's
+// lowest edge is about 0.06 below it), rear = how far that edge is behind the car's centre.
+const CAM_R = { back: 6.8, backV: 0.03, h: 2.8, ahead: 10, aimD: 1, yCar: 0.77, rear: 2.45 };
 const REAR_AXLE = 1.45; // car.glb origin sits on the rear axle; the runner tracks the car's centre
 // Curbside parking space in front of the EBT Corner Store (world frame; the row faces north onto Auburn).
 const SPOT = { x: 0, y: 9.0, heading: Math.PI, len: 7.0, wid: 3.0 };
@@ -128,11 +136,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   if (RL) RL.install();   // the realistic look's prop material and prop geometry hooks: before the city and the traffic are built
 
   const G = gsapLib && !matchMedia('(prefers-reduced-motion: reduce)').matches ? gsapLib : null;
+  if (RL) root.classList.add('real');   // drive.css: the realistic look's HUD (everything new is under .drive-root.real)
   if (G) root.classList.add('gs');   // drive.css: GSAP, not CSS transitions, moves the messages and pop-ups
   progress(0.7, 'Building the city');
 
   // ---------- renderer / scene ----------
-  root.insertAdjacentHTML('beforeend', HUD_HTML);
+  root.insertAdjacentHTML('beforeend', RL ? HUD_HTML_REAL : HUD_HTML);
   // antialias off on the CANVAS only: the scene is drawn (with MSAA) into the look pass's own target (look.js), and
   // the canvas only ever receives one full-screen quad, which multisampling can't change by a single pixel. A
   // multisampled canvas just cost a full-screen MSAA buffer and a resolve every frame.
@@ -307,6 +316,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const sp = route.at(spot.s, spot.d);
   spotGroup.position.copy(toV3(sp.x, sp.y, ground(sp.x, sp.y))); spotGroup.rotation.y = sp.a;   // box runs along the curb
   scene.add(spotGroup);
+  // red path lines + amber chevrons on the road ahead: the realistic look only (guide.js)
+  const guide = RL ? new Guide({ scene, route, ground, surfAt, spot }) : null;
 
   // ---------- input: you drive it (GTA Chinatown Wars layout) ----------
   // Phone: ◀ ▶ change lanes (bottom left), GAS, BRAKE (hold at a stop to reverse) and HORN (bottom right), all held
@@ -386,7 +397,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // a HUD line is only rewritten when its text changes: replacing an element's text, even with the same text, makes
   // the browser redo style and layout for it, and the HUD used to do that ~8 times every frame
   const setText = (el, txt) => { if (el.textContent !== txt) el.textContent = txt; };
-  const hud = { light: $('.drive-light'), lightDist: $('.drive-light b'), time: $('.drive-time'), speed: $('.drive-speed'), dist: $('.drive-dist'), tokens: $('.drive-tokens'), msg: $('.drive-msg'), hint: $('.drive-hint'), pop: $('.drive-pop') };
+  const hud = { light: $('.drive-light'), lightDist: $('.drive-light b'), time: $('.drive-time'), speed: $('.drive-speed'), dist: $('.drive-dist'), tokens: $('.drive-tokens'), msg: $('.drive-msg'), hint: $('.drive-hint'), pop: $('.drive-pop'), pos: $('.drive-pos'), cp: $('.drive-cp') };   // (pos, cp: the realistic look's HUD only)
   // the big centre message (3-2-1-GO!, CLEAN PARK!, −1s, TOO LATE, BUSTED) punches in big and settles, then fades
   const msgIn = () => { if (G) { G.killTweensOf(hud.msg); G.fromTo(hud.msg, { opacity: 0, scale: 1.7 }, { opacity: 1, scale: 1, duration: 0.34, ease: 'back.out(2.4)' }); } else hud.msg.classList.add('on'); };
   const msgOut = () => { if (G) G.to(hud.msg, { opacity: 0, scale: 1.08, duration: 0.22, ease: 'power1.in' }); else hud.msg.classList.remove('on'); };
@@ -401,7 +412,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   };
   // a HUD box gives a springy bump (the EBT count when you grab a token, the clock in the last ten seconds)
   const bump = (el, s = 1.18) => { if (G && el) G.fromTo(el, { scale: s }, { scale: 1, duration: 0.5, ease: 'elastic.out(1,0.5)', overwrite: 'auto' }); };
-  const tokBox = hud.tokens.closest('.drive-box'), timeBox = hud.time.closest('.drive-box');
+  const tokBox = hud.tokens.closest('.drive-box, .rb-cell'), timeBox = hud.time.closest('.drive-box, .rb-cell'), cpBox = hud.cp?.closest('.rb-cell'), posBox = hud.pos?.closest('.rb-cell');
   let lowSec = null;
   // the hint line under the car fades up whenever it changes
   const setHint = (txt) => { if (hud.hint.textContent === txt) return; hud.hint.textContent = txt; if (G && txt) G.fromTo(hud.hint, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.3, ease: 'power2.out' }); };
@@ -469,7 +480,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const api = { camOverride: null }; // test hooks (filled in below)
   // ---------- state ----------
   let t = TIME_LIMIT, drove = 0, hits = 0, tokens = 0, nearMisses = 0, state = SKIPFOOT ? 'countdown' : 'onfoot', countdown = 3, shake = 0, endT = 0;
-  const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3();
+  const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), tmp3 = new THREE.Vector3(), lastCar = new THREE.Vector3();
   const camV = { d: 0, px: 0, py: 0, pz: 0, lx: 0, ly: 0, lz: 0 }; let camD = null;   // on-foot camera follow (smoothDamp state)
   // ---------- stiff lane steering ----------
   // The car sits in one of four lanes, right to left: 0 the right parking lane, 1 your lane, 2 the oncoming lane,
@@ -494,6 +505,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     car.targetD = laneAt(car.s, laneK);
   }
   let camA = route.at(0).a, arrivalFrom = null;
+  let cpFrom = car.s, cpSeen = 0;   // the realistic HUD's CHECKPOINT: 11 points of progress from where you got into the car to the store
   const result = { arrived: false, parked: false, timeLeft: 0, cleanPark: false, hits: 0, tokens: 0, nearMisses: 0, bonus: 0 };
 
   function park() {
@@ -592,6 +604,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   if (homeS === null && bestS !== null && bestLie < 0.09) homeS = bestS;
   const inParkLane = homeS !== null;
   if (!inParkLane) homeS = firstS + 10;
+  guide?.buildChevrons(homeS);   // the bends between your car and the store (guide.js)
   const homeD = inParkLane ? route.parkD(homeS, -1) : route.lane(homeS, 0);
   // the driver's door: the street side of the car. You run up to it along the car's flank, so that line sits clear of
   // the car (its body and mirrors reach 1.08 m from its centre line; you are 0.38 m wide each side of yours). At 1.15 m
@@ -954,6 +967,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     state = 'driving'; world.runnerOn = false; gasLabel(false); me.o.visible = me.blob.visible = false; hazards.visible = false; markerSprite.visible = false;
     // you peel out: the car swings straight into the travel lane (the parking lane ahead is full of parked cars)
     laneK = 1; followLane(); if (BOT) car.targetD = route.lane(car.s, 0);
+    cpFrom = car.s;
     hud.pop.replaceChildren();   // a taunt still floating up would sit on top of GO! GO! GO!
     flash('GO! GO! GO!', 900); setHint(''); haptic(HAP.go); audio.chime();
     // he runs for his own ride (just behind where he's standing), then he's coming
@@ -1157,7 +1171,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       countdown -= dt;
       const cd = countdown > 0 ? String(Math.ceil(countdown)) : 'GO!';
       if (cd !== hud.msg.textContent) { hud.msg.textContent = cd; msgIn(); }   // each number punches in as it changes
-      if (countdown <= 0) { state = 'driving'; flash('GO!', 700); setHint(''); haptic(HAP.go); }
+      if (countdown <= 0) { state = 'driving'; cpFrom = car.s; flash('GO!', 700); setHint(''); haptic(HAP.go); }
     }
     if (state === 'onfoot' || (race && him.o.visible)) {
       // on foot: the same fixed 1/120 s steps as the car, drawn between the last two (a phone's frame times wobble
@@ -1281,6 +1295,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     fx.update(dt, camera, renderer);
     beacon.material.opacity = 0.12 + 0.08 * Math.sin(now / 250);
     spotGroup.visible = state === 'driving' || state === 'countdown';
+    // the lines follow the lane being steered to (a lane tap swings them across); with the autopilot, the line it is steering
+    if (guide) guide.update(state === 'driving', drawS, drawD, (ss) => { if (BOT) return car.targetD; let k = laneK; if (laneAt(ss, k) === null) k = k === 0 ? 1 : 2; return laneAt(ss, k); });
     // overpass cutaway follows the car (a soft hole in anything above it). Still needed from behind: the Connector's
     // deck underside is only ~2.1 m above the route around s=1056 m, so the chase camera passes through the slab, and
     // without the hole the deck walls off the view ahead (checked in the running game, same frame with and without).
@@ -1309,13 +1325,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // further ahead when you're going fast. 8 m keeps the rear bumper well past the camera's 4 m near plane (line 86),
     // so the car is never sliced.
     const v = Math.max(0, car.v);
-    const back = 8 + v * 0.12, h = 3 + v * 0.03;
+    // (the realistic look: CAM_R at the top of the file: closer and lower, and no growth with speed except a little distance)
+    const back = RL ? CAM_R.back + v * CAM_R.backV : 8 + v * 0.12, h = RL ? CAM_R.h : 3 + v * 0.03;
     // aim at a point ahead of the car and a little above the road, so the car sits in the lower part of the frame, the
     // street ahead (obstacles!) fills the middle and the horizon sits high; more lead in landscape, where the screen
     // is short
-    const ahead = (camera.aspect > 1 ? 18 : 14) + v * 0.5;
+    const ahead = RL ? CAM_R.ahead : (camera.aspect > 1 ? 18 : 14) + v * 0.5;
     camA += Math.atan2(Math.sin(route.at(car.s + 6).a - camA), Math.cos(route.at(car.s + 6).a - camA)) * Math.min(1, dt * 3);
-    const look = route.at(drawS + ahead, drawD * 0.35);
+    const look = route.at(drawS + ahead, drawD * (RL ? CAM_R.aimD : 0.35));
     let targetPos, targetLook;
     if (state === 'parked' || state === 'late') {
       // arrival: swing down to the street-level view of the storefronts (the intro's framing)
@@ -1344,6 +1361,18 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       const cx = p.x - Math.cos(camA) * back, cy = p.y - Math.sin(camA) * back;
       targetPos = toV3(cx, cy, Math.max(p.z + h, ground(cx, cy) + 2.5));
       targetLook = toV3(look.x, look.y, look.z + 1.2);
+      if (RL) {
+        // realistic: aim by where the car lands on screen, not at a point up the road. The car's rear-bottom edge is put at
+        // CAM_R.yCar of the screen height (the phone's view offset, which lifts the picture by a tenth, is allowed for), and
+        // the camera points along the road toward the point it used to look at.
+        const oy = coarse ? 0.1 : 0, tn = (2 * (CAM_R.yCar + oy) - 1) * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+        carRig.updateMatrixWorld(true);   // (the car's own pitch and roll on a hill: the rear edge is where the car really is)
+        const rear = tmp3.set(0, 0.3, CAM_R.rear).applyMatrix4(carRig.matrixWorld), rx = rear.x, rz = rear.z, ry = rear.y;
+        const beta = Math.atan2(targetPos.y - ry, Math.hypot(targetPos.x - rx, targetPos.z - rz));
+        const pitchDown = beta - Math.atan(tn);
+        let dx = look.x - targetPos.x, dz = -look.y - targetPos.z; const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+        targetLook = tmp2.set(targetPos.x + dx * 20, targetPos.y - 20 * Math.tan(pitchDown), targetPos.z + dz * 20);
+      }
     }
     if (!camPos.lengthSq()) { camPos.copy(targetPos); camLook.copy(targetLook); }
     if (state === 'parked' || state === 'late') { camPos.copy(targetPos); camLook.copy(targetLook); }
@@ -1356,7 +1385,17 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         camLook[c] = smoothDamp(camLook[c], targetLook[c], camV, 'l' + c, 0.13, dt);
       }
     }
-    else { camPos.lerp(targetPos, Math.min(1, dt * 6)); camLook.lerp(targetLook, Math.min(1, dt * 8)); }
+    else {
+      if (RL && lastCar.lengthSq()) {
+        // realistic: the follow below trails the car by speed / 6 m (a pull of 6 per second toward a target that moves at speed). Carry the
+        // camera along with the car's own forward movement first, so only sideways movement and the camera's own easing are left to smooth.
+        // (not when the car was put somewhere, a test hook's teleport)
+        const mx = carRig.position.x - lastCar.x, mz = carRig.position.z - lastCar.z;
+        if (Math.hypot(mx, mz) < 2) { const f = mx * Math.cos(camA) - mz * Math.sin(camA), fx = f * Math.cos(camA), fz = -f * Math.sin(camA); camPos.x += fx; camPos.z += fz; camLook.x += fx; camLook.z += fz; }
+      }
+      camPos.lerp(targetPos, Math.min(1, dt * 6)); camLook.lerp(targetLook, Math.min(1, dt * 8));
+    }
+    lastCar.copy(carRig.position);
     if (api.camOverride) { camPos.copy(api.camOverride.pos); camLook.copy(api.camOverride.look); } // QA: free camera
     camera.position.copy(camPos);
     if (shake > 0 && state === 'onfoot') {
@@ -1384,7 +1423,16 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // speed), so the much quicker lane change squeals the tyres no more than before, and not at all from a stop
     const sideSlip = Math.min(Math.abs(car.dv), 3 + Math.abs(car.v) * 0.6);
     audio.update(car.v, pedal, Math.min(1, sideSlip / 14 + (braking && car.v > 6 ? 0.6 : 0)), dt);
-    setText(hud.time, t.toFixed(1));
+    if (RL) {
+      // the realistic HUD: the clock as M:SS.ss, your place in the race (the bully is the other racer: red when he's within 2.5 s of you), and
+      // how far along the way to the store you are, in 11 steps (0/11 on foot, 11/11 parked)
+      const tt = Math.max(0, t), mm = Math.floor(tt / 60);
+      setText(hud.time, mm + ':' + (tt - mm * 60).toFixed(2).padStart(5, '0'));
+      setText(hud.pos, race ? (car.s >= race.s ? '1/2' : '2/2') : state === 'onfoot' ? (me.s >= him.s ? '1/2' : '2/2') : '—');
+      posBox.classList.toggle('hot', !raceBar.hidden && raceBar.classList.contains('hot'));
+      const cp = state === 'onfoot' ? 0 : state === 'parked' ? 11 : Math.min(10, Math.max(0, Math.floor((car.s - cpFrom) / Math.max(1, spot.s - cpFrom) * 11)));
+      setText(hud.cp, cp + '/11'); if (cp > cpSeen && state === 'driving') bump(cpBox, 1.14); cpSeen = cp;
+    } else setText(hud.time, t.toFixed(1));
     hud.time.classList.toggle('low', t < 10);
     if (t < 10 && state === 'driving') { const sec = Math.ceil(t); if (sec !== lowSec) { lowSec = sec; bump(timeBox, 1.14); } }   // last ten seconds: the clock pulses each second
     setText(hud.speed, Math.round(v * 2.237) + ' mph');
@@ -1451,11 +1499,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const go = () => { holding = false; last = performance.now(); };
   if (G) {   // the loading screen fades away; the HUD drops in from the top and the pedals rise from the bottom
     G.to(loadingScreen, { opacity: 0, duration: SCREEN_FADE, ease: 'power1.inOut', onComplete: () => { loadingScreen.remove(); go(); } });
-    G.from(root.querySelectorAll('.drive-hud > *'), { y: -24, opacity: 0, duration: 0.45, stagger: 0.07, delay: 0.15, ease: 'back.out(1.7)', clearProps: 'transform,opacity' });
+    G.from(root.querySelectorAll(RL ? '.drive-rbar > *, .drive-row2 > *' : '.drive-hud > *'), { y: -24, opacity: 0, duration: 0.45, stagger: 0.07, delay: 0.15, ease: 'back.out(1.7)', clearProps: 'transform,opacity' });
     G.from(root.querySelectorAll('.drive-pad'), { y: 40, opacity: 0, duration: 0.5, stagger: 0.08, delay: 0.2, ease: 'back.out(1.5)', clearProps: 'transform,opacity' });
   } else { loadingScreen.remove(); go(); }
   // test hooks (drive QA + screenshots)
-  Object.assign(api, { car, world, route, spot, keys, result, audio, fx, city, comic, adaptRes: { res, step: adaptRes, PR_MIN, PR_MAX },
+  Object.assign(api, { car, world, route, spot, keys, result, guide, camR: CAM_R, audio, fx, city, comic, adaptRes: { res, step: adaptRes, PR_MIN, PR_MAX },
     three: { scene, camera, carRig, THREE, renderer },
     ui: { flash, pop, bump, setHint, showBusted, gsap: G },   // the HUD's motion, for tests
     tick: (dt) => { tickDt = dt; try { frame(); } finally { tickDt = null; } },
@@ -1475,6 +1523,40 @@ function makeLabel(text, color) {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   return new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false }));
 }
+
+// The realistic look's racing bar: row 1 POSITION / TIME / CHECKPOINT, row 2 EBT, the race to the store (the bully's head and yours), SPEED and the distance
+// (STORE, or YOUR CAR on foot). Each number's label comes first in the markup and drive.css (column-reverse) puts it under the number.
+const HUD_HTML_REAL = `
+<div class="drive-rhud">
+  <div class="drive-rbar">
+    <div class="rb-cell"><span>POSITION</span><b class="drive-pos">—</b></div>
+    <div class="rb-cell rb-time"><span>TIME</span><b class="drive-time">1:10.00</b></div>
+    <div class="rb-cell"><span>CHECKPOINT</span><b class="drive-cp">0/11</b></div>
+  </div>
+  <div class="drive-row2">
+    <div class="rb-cell tok"><span>EBT</span><b class="drive-tokens">0</b></div>
+    <div class="drive-race" hidden><div class="track"><b class="flag">STORE</b><i class="hd him" aria-label="The bully"></i><i class="hd you" aria-label="You"></i></div><span class="gap"></span></div>
+    <div class="rb-cell"><span>SPEED</span><b class="drive-speed">0 mph</b></div>
+    <div class="rb-cell"><span>STORE</span><b class="drive-dist">—</b></div>
+  </div>
+</div>
+<div class="drive-light"><i></i><i></i><i></i><b></b></div>
+<div class="drive-msg"></div>
+<div class="drive-pop"></div>
+<div class="drive-hint"></div>
+<button class="drive-skip" data-skip aria-label="Skip the drive">SKIP ▸▸</button>
+<button class="drive-pausebtn" data-pause aria-label="Pause"><i></i><i></i></button>
+<div class="drive-paused" hidden><b>PAUSED</b><button type="button" data-resume>RESUME ▶</button><button type="button" class="alt" data-quit>SKIP DRIVE ▸▸</button></div>
+<div class="drive-pad drive-steerpad">
+  <button class="dp left" data-k="left" aria-label="Steer left"><svg viewBox="0 0 24 24"><path d="M15 4 7 12l8 8"/></svg></button>
+  <button class="dp right" data-k="right" aria-label="Steer right"><svg viewBox="0 0 24 24"><path d="M9 4l8 8-8 8"/></svg></button>
+</div>
+<div class="drive-pad drive-pedals">
+  <button class="dp horn" data-k="horn" aria-label="Horn"><svg viewBox="0 0 24 24"><path d="M4 10h3l6-4v12l-6-4H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg><b>HORN</b></button>
+  <button class="dp brake" data-k="down" aria-label="Brake, hold to reverse"><b>BRAKE</b><small>HOLD = REV</small></button>
+  <button class="dp gas" data-k="gas" aria-label="Gas"><b>GAS</b></button>
+</div>
+<div class="drive-osm">© OpenStreetMap contributors</div>`;
 
 const HUD_HTML = `
 <div class="drive-hud">
