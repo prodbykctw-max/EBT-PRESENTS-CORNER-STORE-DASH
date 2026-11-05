@@ -42,15 +42,19 @@ const SKIPFOOT = QA && new URLSearchParams(location.search).has('skipfoot');
 // (he runs a touch slower than you: a clean run up the sidewalk gets away, but every person you run into lets him close)
 const FOOT = { run: 5.6, back: 2.2, bully: 5.3, bullyGo: 0.8, start: 14, carAhead: 30, bullyBehind: 8, stun: 0.9, reach: 0.9, pause: 1.1 };
 const RACE = { pace: 17, accel: 3.4, hop: 1.6, tail: 4.5, shake: 60, maxLead: 30 };   // 17 m/s: a good run beats him by ~6 s; an average one gets caught late
-// ?people=A|B|C: the alternative pedestrians (people-alt.js and the variant's file are only fetched when the parameter is there; any failure leaves the old people)
-const ALT_PEOPLE = /^[abc]$/i.test(new URLSearchParams(location.search).get('people') || '');
-async function loadAltPeople() {
-  const q = new URLSearchParams(location.search).get('people');
+// the realistic look's pedestrians (people-alt.js, people-a.js, people-b.js, people-real/): by default a mix of two kinds of person (A: hand-built,
+// B: MakeHuman CC0), half and half. ?people=none|0|off draws the old box people; ?people=A, B or AB picks one kind or the mix (QA). The comic look
+// never loads any of it. Nothing is requested until the realistic look's own code and textures have loaded (see peopleReady in startDrive).
+function peopleKindsFromURL() {
+  const q = (new URLSearchParams(location.search).get('people') || 'ab').toLowerCase();
+  return /^(none|0|off|false|no)$/.test(q) ? '' : /^[ab]+$/.test(q) ? [...new Set(q)].sort().join('') : 'ab';
+}
+async function loadAltPeople(kinds) {
   try {
-    const kind = q.toUpperCase(), alt = await import('./people-alt.js');
-    const variant = kind === 'A' ? (await import('./people-a.js')).makeA() : await (await import('./people-b.js')).makeB(kind);
-    return { AltPeople: alt.AltPeople, variant };
-  } catch (e) { console.warn('alternative people unavailable, drawing the usual ones:', e?.message || e); return null; }
+    const alt = await import('./people-alt.js');
+    const variants = await Promise.all([...kinds].map(async (k) => (k === 'a' ? alt.withoutRandom((await import('./people-a.js')).makeA) : (await import('./people-b.js')).makeB(alt.withoutRandom))));
+    return { AltPeople: alt.AltPeople, variants };
+  } catch (e) { console.warn('realistic pedestrians unavailable, drawing the usual ones:', e?.message || e); return null; }
 }
 const nextFrame = QA ? (f) => setTimeout(f, 16) : requestAnimationFrame;
 // screen-to-screen fades (the loader lifting, the fade to black at the end): the store page's SCREEN_FADE, one pace
@@ -60,7 +64,6 @@ const cancelFrame = QA ? clearTimeout : cancelAnimationFrame;
 export async function startDrive({ mount = document.body, muted = false, onDone = () => {}, onProgress = () => {}, look: lookOption } = {}) {
   // which look: the realistic look (the default) or the comic ink look (?look=comic, or startDrive({ look: 'comic' })); mode.js
   const REAL = resolveLook(lookOption);
-  const altReady = ALT_PEOPLE ? loadAltPeople() : null;   // ?people=A|B|C starts fetching its files now, alongside everything else
   // ---------- load (the game has no loader of its own, so the drive shows one) ----------
   if (!document.querySelector('link[data-drive-css]')) {
     const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = new URL('drive.css', BASE).href; l.dataset.driveCss = '';
@@ -97,6 +100,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       return sets.filter(Boolean);
     } catch (e) { console.warn('car sets unavailable, drawing the usual cars:', e?.message || e); return null; }
   }) : null;
+  // the realistic look's pedestrians: same rule as the cars (nothing is requested before the realistic look has loaded; the comic look, ?people=none and a
+  // failed realistic look never fetch them; a failure only costs the new people, the drive starts with the old ones)
+  const peopleKinds = peopleKindsFromURL();
+  const peopleReady = realReady && peopleKinds ? realReady.then((pack) => (pack ? loadAltPeople(peopleKinds) : null)) : null;
   // motion (GSAP): the store page already carries it; on its own (/drive/index.html) the drive loads the same
   // vendored copy. Phones set to reduce motion, or no GSAP at all, keep the plain CSS behaviour.
   const gsapReady = window.gsap ? Promise.resolve(window.gsap) : new Promise((ok) => {
@@ -203,12 +210,16 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const spot = { s: spotS, d: route.parkD(spotS, -1) ?? route.lane(spotS, 0) - 0.35 };
   // car sets (cars.js): only with the realistic look (RL); the comic look, ?cars=none and a failed load draw the props.glb cars
   const carSets = {};
-  if (RL && carsReady) {
-    // the cars are an optional download: the drive waits for them only a few seconds after everything it needs has loaded, then starts with the old cars
-    const CARS_WAIT_MS = 8000; let timer;
-    const got = await Promise.race([carsReady, new Promise((ok) => { timer = setTimeout(() => { console.warn('car sets still loading, drawing the usual cars'); ok(null); }, CARS_WAIT_MS); })]);
-    clearTimeout(timer);
+  let altPeople = null;
+  if (RL && (carsReady || peopleReady)) {
+    // the cars and the pedestrians are optional downloads: the drive waits for them only a few seconds after everything it needs has loaded, then starts with
+    // the old ones. (One await for both, and no other await from here to the crowd below: whatever draws Math.random while the drive waits cannot
+    // interleave with the crowd's own draws, so the crowd's layout does not depend on whether the new people load.)
+    const WAIT_MS = 8000;
+    const within = (p, what) => { if (!p) return Promise.resolve(null); let timer; return Promise.race([p, new Promise((ok) => { timer = setTimeout(() => { console.warn(what + ' still loading, drawing the usual ones'); ok(null); }, WAIT_MS); })]).finally(() => clearTimeout(timer)); };
+    const [got, alt] = await Promise.all([within(carsReady, 'car sets'), within(peopleReady, 'pedestrians')]);
     for (const r of got || []) carSets[r[0]] = r[1];
+    altPeople = alt;
   }
   const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks, carSets });
   for (const cs of Object.values(world.carSets)) cs.shadowOnly(renderer);   // the cars' shadow proxies are drawn in the sun's shadow pass only
@@ -245,7 +256,6 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     return a && b ? Math.max(a.y, b.y) : a ? a.y : b ? b.y : null;
   };
   world.footAt = footAt; world.feet = { surface: feetSurface, rebuild: () => (flat.length ? new TopSurface(flat, 8, nearTri) : null) };   // (rebuild: for measuring the load-time cost)
-  const altPeople = altReady ? await altReady : null;   // (without ?people= there is no await here at all)
   const crowd = world.crowd = new Crowd({
     route, ground, surfAt, heightAt: footAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree, alt: altPeople,
     walls: city.walls, heroWalls: heroSegments(hero.scene, ground(SPOT.x, SPOT.y)), roads: city.streets.index,

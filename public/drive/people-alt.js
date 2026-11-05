@@ -1,5 +1,5 @@
-// Alternative pedestrians for the drive, behind ?people=A / ?people=B (see docs/PEOPLE.md). Without the parameter nothing in this
-// file is even loaded (drive.js imports it only when the parameter is there), and crowd.js draws the pedestrians exactly as before.
+// Realistic pedestrians for the drive (the default of the realistic look; ?people=none gives the old ones back; ?people=A|B|AB picks a kind). This file is imported only by the realistic look
+// (drive.js: after the look's own code has loaded, never in the comic look); crowd.js decides everything about the people and only hands the drawing over.
 //
 // What changes: the BODY and its walk. Everything the crowd decides (who stands where, who walks, who steps aside, the corral that keeps
 // them out of walls and roads) stays in crowd.js and runs unchanged; this module only draws what crowd.js decided. It reads each
@@ -8,7 +8,8 @@
 // Everything this file adds to a person (build, hair, outfit, shoes) comes from a hash of the person's index, NOT from Math.random,
 // so no random number is drawn here and the rest of the run is the same as with the old people.
 //
-// Two draw calls (near + far level of detail) instead of one, each one InstancedMesh for the whole crowd:
+// Two draw calls per kind of person (near + far level of detail) instead of one, each one InstancedMesh; the default draws both kinds, half the crowd each
+// (person n is kind n % 2: the crowd was laid along the route in order, so a group's neighbours alternate):
 //   A  people-a.js: a hand-built parametric person (about 1.4k triangles near), the walk done analytically in the vertex shader
 //   B  people-b.js: MakeHuman (CC0) bodies, decimated, with the walk baked into a vertex-animation texture
 // Both are painted by the same fragment code below (skin, hair, top, bottoms, shoes, face), from fields the geometry carries.
@@ -16,6 +17,15 @@ import * as THREE from './vendor/three.module.min.js';
 import { uploadUsed, shadowSplit } from './runner.js';
 import { SKIN, TOPS, BOTTOMS, ACCENT } from './crowd.js';
 import { LEVEL } from './levels.js';
+
+/** three.js draws Math.random for the id of every geometry, material and texture it makes. The crowd's layout, the traffic and the planner share that
+ *  one stream, so building the new people (and when, relative to the crowd) must not move it: everything that makes three.js objects here runs under
+ *  this, which swaps in a private generator for the duration of the (synchronous) call. */
+export function withoutRandom(fn) {
+  const real = Math.random; let s = 2463534242;
+  Math.random = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+  try { return fn(); } finally { Math.random = real; }
+}
 
 /** which option the page asked for: 'A' | 'B' | 'C' | null */
 export function peopleOption() {
@@ -206,49 +216,58 @@ const LOD_NEAR = 30;   // m: nearer than this the full model, beyond it the chea
 
 /** variant: { name, lods: [{ geo, uniforms, decl } near, far], face: Vector4[8], bodies, hf } (people-a.js / people-b.js) */
 export class AltPeople {
-  constructor({ crowd, variant, scene, mobile }) {
-    this.crowd = crowd; this.variant = variant;
-    const people = crowd.people, cap = people.length;
+  /** variants: one (?people=A / B) or several (the mix). Which variant a person is drawn with is decided once, from the person's index (no
+   *  Math.random: the crowd's layout, the traffic and the planner share that stream), and alternates along the crowd's order, which is the
+   *  order people were laid along the route, so a group's neighbours are a mix. */
+  constructor(o) { withoutRandom(() => this.init(o)); }
+  init({ crowd, variants, variant, scene, mobile }) {
+    this.crowd = crowd; this.vs = variants || [variant]; this.variant = this.vs[0];
+    const people = crowd.people, NV = this.vs.length;
+    this.vi = people.map((m, i) => (NV > 1 ? i % NV : 0));
     // static per-person traits, as flat arrays
-    this.tr = people.map((m, i) => traitsFor(m, i, variant.bodies, variant.hf !== false));
+    this.tr = people.map((m, i) => { const v = this.vs[this.vi[i]]; return traitsFor(m, i, v.bodies, v.hf !== false); });
     this.far2 = (mobile ? 22 : LOD_NEAR) ** 2;
-    const inst = (k) => { const a = new THREE.InstancedBufferAttribute(new Float32Array(cap * k), k); a.setUsage(THREE.DynamicDrawUsage); return a; };
-    this.lods = [];
-    for (const [li, name] of ['near', 'far'].entries()) {
-      const def = variant.lods[li];
-      const g = def.geo.clone();   // (the geometry is shared by nothing else, but keep the original clean for tests)
-      const attr = { iAnim: inst(4), iPose: inst(4), iPal: inst(4), iHair: inst(4), iOut: inst(4) };
-      for (const [k, a] of Object.entries(attr)) g.setAttribute(k, a);
-      const mat = new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0 });
-      mat.onBeforeCompile = (sh) => patch(sh, variant, def, true);
-      mat.customProgramCacheKey = () => 'people-' + variant.name + '-' + name;
-      const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
-      depth.onBeforeCompile = (sh) => patch(sh, variant, def, false);
-      depth.customProgramCacheKey = () => 'people-depth-' + variant.name + '-' + name;
-      const mesh = new THREE.InstancedMesh(g, mat, cap);
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      Object.assign(mesh, { name: 'crowd_' + name, frustumCulled: false, castShadow: !mobile, receiveShadow: true, customDepthMaterial: depth, count: 0 });
-      shadowSplit(mesh);
-      scene.add(mesh);
-      this.lods.push({ mesh, attr, name });
-    }
+    this.lods = [];   // k = variant * 2 + level of detail (0 near, 1 far)
+    this.vs.forEach((variant, vx) => {
+      const cap = Math.max(1, this.vi.filter((x) => x === vx).length);
+      const inst = (k) => { const a = new THREE.InstancedBufferAttribute(new Float32Array(cap * k), k); a.setUsage(THREE.DynamicDrawUsage); return a; };
+      for (const [li, name] of ['near', 'far'].entries()) {
+        const def = variant.lods[li];
+        const g = def.geo.clone();   // (the geometry is shared by nothing else, but keep the original clean for tests)
+        const attr = { iAnim: inst(4), iPose: inst(4), iPal: inst(4), iHair: inst(4), iOut: inst(4) };
+        for (const [k, a] of Object.entries(attr)) g.setAttribute(k, a);
+        const mat = new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0 });
+        mat.onBeforeCompile = (sh) => patch(sh, variant, def, true);
+        mat.customProgramCacheKey = () => 'people-' + variant.name + '-' + name;
+        const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+        depth.onBeforeCompile = (sh) => patch(sh, variant, def, false);
+        depth.customProgramCacheKey = () => 'people-depth-' + variant.name + '-' + name;
+        const mesh = new THREE.InstancedMesh(g, mat, cap);
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        Object.assign(mesh, { name: 'crowd_' + name + (vx ? '_' + variant.name : ''), frustumCulled: false, castShadow: !mobile, receiveShadow: true, customDepthMaterial: depth, count: 0 });
+        shadowSplit(mesh);
+        scene.add(mesh);
+        this.lods.push({ mesh, attr, name, vx });
+      }
+    });
     this.mesh = this.lods[0].mesh;   // what integrity.js and the QA tools look at
     // the per-person values that never change (palette, hair, outfit): written once into every slot the person could take
-    this.stat = new Float32Array(cap * 16);
+    this.stat = new Float32Array(people.length * 16);
     this.tr.forEach((t, i) => {
       this.stat.set([t.pal[0], t.pal[1], t.pal[2], t.pal[3], t.hair, t.shoe, t.masc, t.dress, t.sleeve, t.cover, t.jacket, t.tight, t.mask, t.variant, t.hf, t.belly], i * 16);
     });
   }
 
-  /** draw everyone the camera can see: the same placement, margin and shadow ordering as Crowd.render, split into near and far */
+  /** draw everyone the camera can see: the same placement, margin and shadow ordering as Crowd.render, split by variant and level of detail */
   render(car) {
     const cr = this.crowd, r = cr.route, people = cr.people, cam = cr.camera.position;
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), pos = new THREE.Vector3(), sc = new THREE.Vector3();
-    const M0 = this.lods[0].mesh, cap = M0.instanceMatrix.count;
+    const M0 = this.lods[0].mesh;
     const SB = M0.castShadow && car ? cr.shadowBox : null, cp = SB ? r.at(car.s, car.d) : null;
     let ax, ay, lim;
     if (SB) { const zA = new THREE.Vector3().copy(SB.dir).normalize(); ax = new THREE.Vector3(0, 1, 0).cross(zA).normalize(); ay = zA.clone().cross(ax); lim = SB.half() + 25; }
-    const lo = [0, 0], hi = [0, 0];
+    const lo = this.lods.map(() => 0), hi = this.lods.map(() => 0);
+    let drawn = 0;
     for (let n = 0; n < people.length; n++) {
       const m = people[n];
       if (m.dirty || m.x === undefined) {
@@ -257,14 +276,15 @@ export class AltPeople {
         m.dirty = false;
       }
       const dx = m.x - cam.x, dz = -m.y - cam.z, dy = m.z - cam.y, d2 = dx * dx + dy * dy + dz * dz, far = Math.sqrt(d2);
-      m.on = cr.visible(m.x, m.y, m.z + 0.9, 3 + far * 0.04) && lo[0] + hi[0] + lo[1] + hi[1] < cap;
+      m.on = cr.visible(m.x, m.y, m.z + 0.9, 3 + far * 0.04) && drawn < people.length;
       if (!m.on) continue;
-      const L = d2 > this.far2 ? 1 : 0, lod = this.lods[L];
+      drawn++;
+      const k = this.vi[n] * 2 + (d2 > this.far2 ? 1 : 0), lod = this.lods[k], cap = lod.mesh.instanceMatrix.count;
       let i;
       if (SB) {
         const rx = m.x - cp.x, ry = m.z - cp.z, rz = -m.y + cp.y;
-        i = Math.abs(rx * ax.x + ry * ax.y + rz * ax.z) <= lim && Math.abs(rx * ay.x + ry * ay.y + rz * ay.z) <= lim ? lo[L]++ : cap - 1 - hi[L]++;
-      } else i = lo[L]++;
+        i = Math.abs(rx * ax.x + ry * ax.y + rz * ax.z) <= lim && Math.abs(rx * ay.x + ry * ay.y + rz * ay.z) <= lim ? lo[k]++ : cap - 1 - hi[k]++;
+      } else i = lo[k]++;
       const t = this.tr[n], S = this.stat, o = n * 16, A = lod.attr;
       m4.compose(pos.set(m.x, m.z + (m.hop >= 0 ? 0.12 * Math.sin(Math.PI * m.hop) : 0), -m.y), q.setFromAxisAngle(up, m.yaw + Math.PI / 2), sc.set(m.w, m.h * t.hf, m.w));
       lod.mesh.setMatrixAt(i, m4);
@@ -274,15 +294,15 @@ export class AltPeople {
       A.iHair.setXYZW(i, S[o + 4], S[o + 5], S[o + 6], S[o + 7]);
       A.iOut.setXYZW(i, S[o + 8], S[o + 9], S[o + 10], S[o + 11]);
     }
-    for (let L = 0; L < 2; L++) {
-      const { mesh, attr } = this.lods[L];
-      if (hi[L]) {   // close the gap between the shadow-box people (front) and the rest (filled from the back)
-        mesh.instanceMatrix.array.copyWithin(lo[L] * 16, (cap - hi[L]) * 16, cap * 16);
-        for (const a of Object.values(attr)) a.array.copyWithin(lo[L] * a.itemSize, (cap - hi[L]) * a.itemSize, cap * a.itemSize);
+    this.lods.forEach(({ mesh, attr }, k) => {
+      const cap = mesh.instanceMatrix.count;
+      if (hi[k]) {   // close the gap between the shadow-box people (front) and the rest (filled from the back)
+        mesh.instanceMatrix.array.copyWithin(lo[k] * 16, (cap - hi[k]) * 16, cap * 16);
+        for (const a of Object.values(attr)) a.array.copyWithin(lo[k] * a.itemSize, (cap - hi[k]) * a.itemSize, cap * a.itemSize);
       }
-      const n = lo[L] + hi[L];
-      mesh.count = n; mesh.userData.shadowCount = lo[L]; uploadUsed(mesh.instanceMatrix, n);
+      const n = lo[k] + hi[k];
+      mesh.count = n; mesh.userData.shadowCount = lo[k]; uploadUsed(mesh.instanceMatrix, n);
       for (const a of Object.values(attr)) uploadUsed(a, n);
-    }
+    });
   }
 }

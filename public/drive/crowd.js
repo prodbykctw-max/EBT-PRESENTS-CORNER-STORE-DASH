@@ -175,7 +175,7 @@ export class Crowd {
     }
     this.relocate();
     // ?people=A|B|C (drive.js loads people-alt.js only then): someone else draws the same people (their positions, paths and behaviour are all above and unchanged)
-    if (alt) { this.alt = new alt.AltPeople({ crowd: this, variant: alt.variant, scene, mobile }); this.mesh = this.alt.mesh; this.t = 0; return; }
+    if (alt) { this.alt = new alt.AltPeople({ crowd: this, variants: alt.variants, scene, mobile }); this.mesh = this.alt.mesh; this.t = 0; return; }
     // one instance slot per person: whatever the camera sees can be drawn (only the drawn ones cost GPU time)
     const cap = this.people.length;
     const inst = (k) => { const a = new THREE.InstancedBufferAttribute(new Float32Array(cap * k), k); a.setUsage(THREE.DynamicDrawUsage); return a; };

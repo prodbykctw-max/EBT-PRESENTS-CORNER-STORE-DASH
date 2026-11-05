@@ -37,8 +37,12 @@ void pedPose(out vec3 pos, out vec3 nrm, out vec3 pedRest) {
 }
 `;
 
-export async function makeB() {
+export async function makeB(withoutRandom = (f) => f()) {
   const [meta, buf] = await Promise.all([fetch(new URL('people.json', BASE)).then((r) => r.json()), fetch(new URL('people.bin', BASE)).then((r) => r.arrayBuffer())]);
+  return withoutRandom(() => build(meta, buf));
+}
+
+function build(meta, buf) {
   const NV = meta.variants.length, FRM = meta.frames;
   const lods = meta.lods.map((m) => {
     const u16 = (s) => new Uint16Array(buf, s.offset, s.length / 2), f32 = (s) => new Float32Array(buf, s.offset, s.length / 4), u8 = (s) => new Uint8Array(buf, s.offset, s.length);
