@@ -1,0 +1,22 @@
+Option B pedestrians (?people=B): body shapes, skin weights and the walk are derived from MakeHuman data.
+
+Source:   https://github.com/makehumancommunity/makehuman   (commit a8bc2d54ff0ac92e78ff71431b1023eda42bf482)
+Licence:  CC0 1.0 Universal (public-domain dedication). Each file below carries the statement "This asset was explicitly released as CC0 in
+          september 2020" (the weights file says "license": "CC0"); the licence text is LICENSE.ASSETS.md in the repository's root.
+          https://creativecommons.org/publicdomain/zero/1.0/
+Copyright holders at the point of the release to CC0 (as stated in the files):
+          Data Collection AB (https://www.datacollection.se), Joel Palmius, Jonas Hauquier; the targets' original author was Manuel Bastioni (2014).
+          Credit is not required by CC0; it is given here anyway.
+
+Files used (all under makehuman/data/ in that repository):
+  3dobjs/base.obj                       the base body mesh (the "body" group only)
+  rigs/default.mhskel                   joint positions
+  rigs/default_weights.mhw              skin weights
+  targets/macrodetails/*.target         gender / age / weight / muscle shapes (blended into six body types)
+
+What is NOT from MakeHuman: the hair, caps, backpacks, hoods, skirts, the painted clothes and faces and the walk cycle itself. Those are made by this
+project (drive/tools/people/export_shells.mjs, drive/tools/people/build_people.py, public/drive/people-alt.js). Nothing here comes from Mixamo or
+any other download. MakeHuman's clothes, hair and skins were not used.
+
+people.json and people.bin are generated: python3 -I drive/tools/people/build_people.py --mh <checkout>/makehuman/data --out public/drive/people-real
+(needs numpy, scipy and bpy for Blender's decimate modifier; the build takes a few seconds).

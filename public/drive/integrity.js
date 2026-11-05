@@ -76,8 +76,8 @@ export function scanWorld(api) {
     }
   }
   // 2c) the crowd: every drawn person's feet on the sidewalk / crosswalk under them
-  const crowd = api.world.crowd?.mesh;
-  if (crowd) for (let i = 0; i < crowd.count; i++) {
+  const crowdMeshes = api.world.crowd?.alt ? api.world.crowd.alt.lods.map((l) => l.mesh) : api.world.crowd?.mesh ? [api.world.crowd.mesh] : [];   // (the mix: both kinds, near and far)
+  for (const crowd of crowdMeshes) for (let i = 0; i < crowd.count; i++) {
     crowd.getMatrixAt(i, m4); v.setFromMatrixPosition(m4);
     const h = ALL.top(v.x, v.z, v.y + 1.0); report.props.samples++;
     // lawns sit a few cm above the sidewalk plane; nobody may float or sink further than that

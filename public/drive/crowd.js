@@ -14,11 +14,11 @@ import { buildCorral, COL, F_CLOSED, F_MOUTH, F_HERO } from './corral.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 // palettes (sRGB); skin weighted to the neighbourhood
-const SKIN = [0x3a2219, 0x4a2c1e, 0x5c3824, 0x6e4430, 0x7d4f35, 0x8e5d3f, 0xa66f4b, 0xc48a65, 0xe0b08c];
-const TOPS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2b2b30, 0xeeeeea, 0x3d9a5b, 0x8e44ad, 0xff8c1a, 0x1abc9c, 0x7f8c8d,
+export const SKIN = [0x3a2219, 0x4a2c1e, 0x5c3824, 0x6e4430, 0x7d4f35, 0x8e5d3f, 0xa66f4b, 0xc48a65, 0xe0b08c];
+export const TOPS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2b2b30, 0xeeeeea, 0x3d9a5b, 0x8e44ad, 0xff8c1a, 0x1abc9c, 0x7f8c8d,
   0xc0392b, 0x16325c, 0xf4d8b0, 0x6b4f3a, 0xe84393, 0x0f0f12, 0x9aa5b1];
-const BOTTOMS = [0x1f2a44, 0x2b2b30, 0x3c4b63, 0x5a5048, 0x151518, 0x6e7b8b, 0xb8a98a, 0x4a3b2f, 0x273b2a];
-const ACCENT = [0x121212, 0x2a1a12, 0x3d2616, 0x7a1f1f, 0x1d3f8a, 0xe6e6e6, 0xd4a017, 0x2e7d32];
+export const BOTTOMS = [0x1f2a44, 0x2b2b30, 0x3c4b63, 0x5a5048, 0x151518, 0x6e7b8b, 0xb8a98a, 0x4a3b2f, 0x273b2a];
+export const ACCENT = [0x121212, 0x2a1a12, 0x3d2616, 0x7a1f1f, 0x1d3f8a, 0xe6e6e6, 0xd4a017, 0x2e7d32];
 const ACC = { cap: 1, long: 2, bag: 4, hood: 8 };
 const AHEAD = 3.5;         // m a walking group looks ahead along the corral
 const SIM = [-130, 380];   // route-space window around the car that is always simulated (plus anyone on screen)   // accessory bits (vertex attr aAcc, instance mask)
@@ -122,7 +122,7 @@ export class Crowd {
    * walls: the drawn buildings' wall segments · heroWalls: the hand-built row's wall slices · roads: the other roads (SegIndex)
    * heightAt(x,y,below): what a person's feet stand on: the road surface and the curbs (default: surfAt)
    */
-  constructor({ route, ground, surfAt, heightAt, onRoute, isFree, furniture, visible, camera, spot, mobile, scene, walls, heroWalls, roads }) {
+  constructor({ route, ground, surfAt, heightAt, onRoute, isFree, furniture, visible, camera, spot, mobile, scene, walls, heroWalls, roads, alt }) {
     Object.assign(this, { route, ground, surfAt, visible, camera });
     this.footAt = heightAt || surfAt;
     // the whole route is populated from the start (one person per ~5 m of sidewalk, 6.5 m on phones); only the
@@ -174,6 +174,9 @@ export class Crowd {
       s += g.members.length * this.spacing * rnd(0.6, 1.4);            // stratified: even overall, never regular
     }
     this.relocate();
+    // the realistic look's people (drive.js hands over `alt` from people-alt.js; null in the comic look and with ?people=none): someone else draws the same people
+    // (their positions, paths and behaviour are all above and unchanged; AltPeople takes the same 4 draws from Math.random that the InstancedMesh below takes)
+    if (alt) { this.alt = new alt.AltPeople({ crowd: this, variants: alt.variants, scene, mobile }); this.mesh = this.alt.mesh; this.t = 0; return; }
     // one instance slot per person: whatever the camera sees can be drawn (only the drawn ones cost GPU time)
     const cap = this.people.length;
     const inst = (k) => { const a = new THREE.InstancedBufferAttribute(new Float32Array(cap * k), k); a.setUsage(THREE.DynamicDrawUsage); return a; };
@@ -597,6 +600,7 @@ export class Crowd {
 
   /** draw everyone the camera can see (with a margin, so nobody pops in at the edge of the frame) */
   render(car) {
+    if (this.alt) return this.alt.render(car);
     const r = this.route, M = this.mesh, A = this.attr, m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0),
       pos = new THREE.Vector3(), sc = new THREE.Vector3(), cam = this.camera.position, cap = M.instanceMatrix.count;
     // where the crowd casts shadows (desktop), the people inside the sun's shadow box go first and the shadow pass draws
