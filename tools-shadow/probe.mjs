@@ -11,18 +11,17 @@ const r = await page.evaluate(() => {
   const d = window.__drive, T = d.three, THREE = T.THREE, cr = d.world.crowd; d.manual = true; d.freezeClock = true;
   for (let i = 0; i < 400 && d.state !== 'driving'; i++) d.tick(1 / 60);
   d.car.s = 420; d.car.v = 0; for (let i = 0; i < 90; i++) d.tick(1 / 60);
-  const blob = T.scene.getObjectByName('crowd_contact'), carPos = T.carRig.position, cam = T.camera;
-  const vis = cr.people.filter((m) => m.on && m.x !== undefined); const hd = (m) => Math.hypot(m.x - carPos.x, -m.y - carPos.z);
-  let best = null, bn = -1;
-  for (const m of vis) { const dd = hd(m); if (dd < 8 || dd > 40) continue; let n = 0; for (const o of vis) if (Math.hypot(o.x - m.x, o.y - m.y) < 3.5) n++; if (n > bn) { bn = n; best = m; } }
-  const near = vis.filter((o) => Math.hypot(o.x - best.x, o.y - best.y) < 3.5);
-  const cx = near.reduce((a, o) => a + o.x, 0) / near.length, cz = near.reduce((a, o) => a - o.y, 0) / near.length, cy = near.reduce((a, o) => a + o.z, 0) / near.length;
-  const dir = new THREE.Vector3(cx - carPos.x, 0, cz - carPos.z).normalize(), D = 3.75;
-  d.camOverride = { pos: new THREE.Vector3(cx - dir.x * D, cy + 1.7, cz - dir.z * D), look: new THREE.Vector3(cx, cy + 0.35, cz) };
-  const out = {};
-  for (const [name, f] of [['base', () => {}], ['lift15', () => { blob.position.y = 0.15; }], ['notest', () => { blob.position.y = 0; blob.material.depthTest = false; blob.material.needsUpdate = true; }]]) {
-    f(); for (let i = 0; i < 2; i++) d.tick(1 / 60); out[name] = d.snapshot(0.9);
+  const r = d.route, all = cr.people.map((m) => { const p = r.at(m.s, m.g.side * m.d), gz = cr.ground(p.x, p.y), z = Math.max(cr.footAt(p.x, p.y, gz + 1.2) ?? -Infinity, gz + 0.0);
+    let mn = 0, mxx = 0; for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4, h = cr.footAt(p.x + 0.6 * Math.cos(a), p.y + 0.6 * Math.sin(a), z + 1.2); const dz = h === null ? 0 : h - z; mn = Math.min(mn, dz); mxx = Math.max(mxx, dz); } return [m, mxx > 0.03 ? 0 : mn]; }).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  const out = { diffs: all.slice(0, 10).map(([m, v]) => [Math.round(m.s), +v.toFixed(3)]), over4: all.filter(([, v]) => Math.abs(v) > 0.04).length, total: all.length };
+  const cand = all.filter(([, v]) => v < -0.08 && v > -0.3).sort((a, b) => Math.abs(Math.abs(a[1]) - 0.15) - Math.abs(Math.abs(b[1]) - 0.15)); out.pick = [cand[0][0].s, cand[0][1], cand.length]; const m0 = cand[0][0]; d.car.s = m0.s - 14; d.car.v = 0; for (let i = 0; i < 90; i++) d.tick(1 / 60);
+  const blob = T.scene.getObjectByName('crowd_contact'), carPos = T.carRig.position;
+  out.on = m0.on; out.blobs = blob.count;
+  const dir = new THREE.Vector3(m0.x - carPos.x, 0, -m0.y - carPos.z).normalize();
+  for (const D of [3.0, 7]) {
+    d.camOverride = { pos: new THREE.Vector3(m0.x - dir.x * D, m0.z + 1.7, -m0.y - dir.z * D), look: new THREE.Vector3(m0.x, m0.z + 0.3, -m0.y) };
+    for (let i = 0; i < 2; i++) d.tick(1 / 60); out['curb' + (D === 3 ? '3.75' : '9')] = d.snapshot(0.92);
   }
   return out;
 });
-import fs from 'node:fs'; for (const [k, v] of Object.entries(r)) fs.writeFileSync(new URL(`./out/probe_${k}.jpg`, import.meta.url).pathname, Buffer.from(v.split(',')[1], 'base64')); console.log('ok'); await browser.close();
+import fs from 'node:fs'; console.log(JSON.stringify({ diffs: r.diffs, over4: r.over4, total: r.total, on: r.on, pick: r.pick, blobs: r.blobs })); for (const [k, v] of Object.entries(r).filter(([k]) => k.startsWith('curb'))) fs.writeFileSync(new URL(`./out/probe_${k}.jpg`, import.meta.url).pathname, Buffer.from(v.split(',')[1], 'base64')); console.log('ok'); await browser.close();

@@ -1,6 +1,5 @@
 // Phones: a cheap contact shadow under every pedestrian drawn (ContactBlobs). The crowd casts no sun shadow there (castShadow is !mobile: the shadow map is the
-// budget), so without this people look pasted onto the pavement. One InstancedMesh of flat quads (2 triangles each) with a radial-fade texture, drawn after
-// the opaque scene without writing depth: no shadow-map cost, one extra draw call. It is fed by whoever draws the people (people-alt.js render, or crowd.js
+// budget), so without this people look pasted onto the pavement. One InstancedMesh of flat quads (2 triangles each) with a radial-fade texture, drawn after the ground but BEFORE the people (opaque queue, renderOrder 1; the crowd meshes get 2), so the people paint over it, without writing depth: no shadow-map cost, one extra draw call. It is fed by whoever draws the people (people-alt.js render, or crowd.js
 // render for the old box people), from the same ground height the feet use (m.z), so it follows slopes and curbs. Realistic look + phones only (drive.js).
 import * as THREE from './vendor/three.module.min.js';
 import { uploadUsed } from './runner.js';
@@ -9,7 +8,7 @@ import { uploadUsed } from './runner.js';
 // must not move it (same idea as withoutRandom in people-alt.js, kept private here because ?people=none never loads people-alt.js)
 let st = 0x7f4a7c15;
 const iso = () => { st ^= st << 13; st ^= st >>> 17; st ^= st << 5; return (st >>> 0) / 4294967296; };
-const LIFT = 0.12;   // m above the person's ground height
+const LIFT = 0.10;   // m above the person's ground height
 const FADE0 = 40, FADE1 = 70;   // m from the camera: the blob shrinks to nothing between these (beyond that a person is a few pixels and the patch is invisible)
 
 export class ContactBlobs {
@@ -22,7 +21,7 @@ export class ContactBlobs {
       g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
       const tex = new THREE.CanvasTexture(c);
       const geo = new THREE.PlaneGeometry(1.35, 1.35); geo.rotateX(-Math.PI / 2);
-      const mat = new THREE.MeshBasicMaterial({ map: tex, color: 0x000000, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+      const mat = new THREE.MeshBasicMaterial({ map: tex, color: 0x000000, transparent: false, blending: THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendEquation: THREE.AddEquation, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
       this.mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, cap));
       this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       Object.assign(this.mesh, { name: 'crowd_contact', frustumCulled: false, castShadow: false, receiveShadow: false, count: 0, renderOrder: 1 });
@@ -36,7 +35,7 @@ export class ContactBlobs {
   add(m, dist) {
     if (this.n >= this.cap || dist >= FADE1) return;
     const k = dist <= FADE0 ? 1 : (FADE1 - dist) / (FADE1 - FADE0);
-    this.m4.compose(this.pos.set(m.x, m.z + LIFT, -m.y), this.q.identity(), this.sc.set(m.w * k, 1, m.w * k));   // (12 cm up: the drawn slabs rise above the walked height in places, and at 4 cm they hid the blob along their seams as a hard straight edge; measured with a cluster at 3.7 m)
+    this.m4.compose(this.pos.set(m.x, m.z + LIFT, -m.y), this.q.identity(), this.sc.set(m.w * k, 1, m.w * k));   // (10 cm up: the drawn slabs rise above the walked height in places, and at 4 cm they hid the blob along their seams as a hard straight edge; measured with a cluster at 3.7 m)
     this.mesh.setMatrixAt(this.n++, this.m4);
   }
   end() {

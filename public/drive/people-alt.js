@@ -245,7 +245,7 @@ export class AltPeople {
         depth.customProgramCacheKey = () => 'people-depth-' + variant.name + '-' + name;
         const mesh = new THREE.InstancedMesh(g, mat, cap);
         mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        Object.assign(mesh, { name: 'crowd_' + name + (vx ? '_' + variant.name : ''), frustumCulled: false, castShadow: !mobile, receiveShadow: true, customDepthMaterial: depth, count: 0 });
+        Object.assign(mesh, { name: 'crowd_' + name + (vx ? '_' + variant.name : ''), frustumCulled: false, castShadow: !mobile, receiveShadow: true, customDepthMaterial: depth, count: 0, renderOrder: crowd.blob ? 2 : 0 });   // (after the contact blobs, so people paint over them)
         shadowSplit(mesh);
         scene.add(mesh);
         this.lods.push({ mesh, attr, name, vx, uniforms: def.uniforms });

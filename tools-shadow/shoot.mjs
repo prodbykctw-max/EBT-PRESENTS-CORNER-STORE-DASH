@@ -12,7 +12,8 @@ const ctx = await browser.newContext(phone
   ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' }
   : { viewport: { width: 800, height: 450 }, deviceScaleFactor: 1 });
 const page = await ctx.newPage();
-const logs = [];
+const logs = [], reqs = [];
+page.on('request', (r) => { if (/contact\.js/.test(r.url())) reqs.push(r.url()); });
 page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) logs.push(m.type() + ': ' + m.text().slice(0, 200)); });
 page.on('pageerror', (e) => logs.push('PAGEERROR: ' + e.message));
 await page.route(/open-meteo\.com/, (r) => r.abort());
@@ -75,7 +76,7 @@ const res = await page.evaluate(async (mode) => {
   return { out, shots };
 }, mode);
 for (const [k, v] of Object.entries(res.shots)) save(k, v);
-res.out.boot = boot; res.out.console = logs.slice(0, 20);
+res.out.contactRequests = reqs.length; res.out.boot = boot; res.out.console = logs.slice(0, 20);
 fs.writeFileSync(`${OUT}${label}_${mode}.json`, JSON.stringify(res.out, null, 1));
 console.log(JSON.stringify({ ...res.out, fp0: undefined }));
 await browser.close();

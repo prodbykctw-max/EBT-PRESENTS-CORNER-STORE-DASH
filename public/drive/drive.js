@@ -111,6 +111,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // the realistic look's pedestrians: same rule as the cars (nothing is requested before the realistic look has loaded; the comic look, ?people=none and a
   // failed realistic look never fetch them; a failure only costs the new people, the drive starts with the old ones)
   const peopleKinds = peopleKindsFromURL();
+  // phones only: the contact shadow under each pedestrian (contact.js); desktop and the comic look never request it
+  const contactReady = MOBILE && realReady ? realReady.then((pack) => (pack ? import('./contact.js').then((m) => m.ContactBlobs).catch((e) => { console.warn('contact shadows unavailable:', e?.message || e); return null; }) : null)) : null;
   const peopleReady = realReady && peopleKinds ? realReady.then((pack) => (pack ? loadAltPeople(peopleKinds) : null)) : null;
   // motion (GSAP): the store page already carries it; on its own (/drive/index.html) the drive loads the same
   // vendored copy. Phones set to reduce motion, or no GSAP at all, keep the plain CSS behaviour.
@@ -219,16 +221,16 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const spot = { s: spotS, d: route.parkD(spotS, -1) ?? route.lane(spotS, 0) - 0.35 };
   // car sets (cars.js): only with the realistic look (RL); the comic look, ?cars=none and a failed load draw the props.glb cars
   const carSets = {};
-  let altPeople = null;
-  if (RL && (carsReady || peopleReady)) {
+  let altPeople = null, ContactBlobs = null;
+  if (RL && (carsReady || peopleReady || contactReady)) {
     // the cars and the pedestrians are optional downloads: the drive waits for them only a few seconds after everything it needs has loaded, then starts with
     // the old ones. (One await for both, and no other await from here to the crowd below: whatever draws Math.random while the drive waits cannot
     // interleave with the crowd's own draws, so the crowd's layout does not depend on whether the new people load.)
     const WAIT_MS = 8000;
     const within = (p, what) => { if (!p) return Promise.resolve(null); let timer; return Promise.race([p, new Promise((ok) => { timer = setTimeout(() => { console.warn(what + ' still loading, drawing the usual ones'); ok(null); }, WAIT_MS); })]).finally(() => clearTimeout(timer)); };
-    const [got, alt] = await Promise.all([within(carsReady, 'car sets'), within(peopleReady, 'pedestrians')]);
+    const [got, alt, blobs] = await Promise.all([within(carsReady, 'car sets'), within(peopleReady, 'pedestrians'), within(contactReady, 'contact shadows')]);
     for (const r of got || []) carSets[r[0]] = r[1];
-    altPeople = alt;
+    altPeople = alt; ContactBlobs = blobs;
   }
   const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks, carSets });
   for (const cs of Object.values(world.carSets)) cs.shadowOnly(renderer);   // the cars' shadow proxies are drawn in the sun's shadow pass only
@@ -266,7 +268,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   };
   world.footAt = footAt; world.feet = { surface: feetSurface, rebuild: () => (flat.length ? new TopSurface(flat, 8, nearTri) : null) };   // (rebuild: for measuring the load-time cost)
   const crowd = world.crowd = new Crowd({
-    route, ground, surfAt, heightAt: footAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree, alt: altPeople, blob: MOBILE && !!RL,
+    route, ground, surfAt, heightAt: footAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree, alt: altPeople, blob: ContactBlobs,
     walls: city.walls, heroWalls: heroSegments(hero.scene, ground(SPOT.x, SPOT.y)), roads: city.streets.index,
     furniture: { ...city.furniture, shelter: [...(city.furniture.shelter || []), ...trams.shelters] },   // riders wait at streetcar platforms too
     onRoute: (x, y) => onRouteRoad(x, y),

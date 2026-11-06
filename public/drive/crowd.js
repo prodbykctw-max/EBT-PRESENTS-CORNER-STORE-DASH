@@ -10,7 +10,6 @@ import * as THREE from './vendor/three.module.min.js';
 import { mergeGeometries } from './vendor/BufferGeometryUtils.js';
 import { LEVEL } from './levels.js';
 import { uploadUsed, shadowSplit } from './runner.js';
-import { ContactBlobs } from './contact.js';
 import { buildCorral, COL, F_CLOSED, F_MOUTH, F_HERO } from './corral.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -122,7 +121,7 @@ export class Crowd {
    * spot: parking space {s,d} (the corner store is on its side) · mobile: phone budget
    * walls: the drawn buildings' wall segments · heroWalls: the hand-built row's wall slices · roads: the other roads (SegIndex)
    * heightAt(x,y,below): what a person's feet stand on: the road surface and the curbs (default: surfAt)
-   * blob: phones, realistic look: a cheap round contact shadow under each person drawn (contact.js; the crowd casts no sun shadow there), whichever way they are drawn
+   * blob: the ContactBlobs class (contact.js; drive.js passes it on phones in the realistic look only, so nothing else downloads it): a cheap round contact shadow under each person drawn (contact.js; the crowd casts no sun shadow there), whichever way they are drawn
    */
   constructor({ route, ground, surfAt, heightAt, onRoute, isFree, furniture, visible, camera, spot, mobile, scene, walls, heroWalls, roads, alt, blob = false }) {
     Object.assign(this, { route, ground, surfAt, visible, camera });
@@ -176,7 +175,7 @@ export class Crowd {
       s += g.members.length * this.spacing * rnd(0.6, 1.4);            // stratified: even overall, never regular
     }
     this.relocate();
-    if (blob) this.blob = new ContactBlobs(scene, this.people.length);   // (built without drawing from Math.random)
+    if (blob) this.blob = new blob(scene, this.people.length);   // (built without drawing from Math.random)
     // the realistic look's people (drive.js hands over `alt` from people-alt.js; null in the comic look and with ?people=none): someone else draws the same people
     // (their positions, paths and behaviour are all above and unchanged; AltPeople takes the same 4 draws from Math.random that the InstancedMesh below takes)
     if (alt) { this.alt = new alt.AltPeople({ crowd: this, variants: alt.variants, scene, mobile }); this.mesh = this.alt.mesh; this.t = 0; return; }
@@ -187,7 +186,7 @@ export class Crowd {
     for (const [k, a] of Object.entries(this.attr)) geo.setAttribute(k, a);
     this.mesh = new THREE.InstancedMesh(geo, mat, cap);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    Object.assign(this.mesh, { name: 'crowd', frustumCulled: false, castShadow: !mobile, receiveShadow: true, customDepthMaterial: depth, count: 0 });
+    Object.assign(this.mesh, { name: 'crowd', frustumCulled: false, castShadow: !mobile, receiveShadow: true, customDepthMaterial: depth, count: 0, renderOrder: this.blob ? 2 : 0 });   // (after the contact blobs, so people paint over them)
     shadowSplit(this.mesh);
     scene.add(this.mesh);
     this.t = 0;
