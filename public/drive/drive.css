@@ -142,7 +142,12 @@
 .drive-root.real .drive-light { top: calc(max(10px, env(safe-area-inset-top)) + 112px); }
 .drive-root.real.driving .drive-hint { bottom: auto; top: 50%; }   /* the closer camera puts the car where the hint used to sit (driving only: on foot the camera is unchanged and the hint stays at bottom: 120px) */
 @media (max-height: 430px) { .drive-root.real.driving .drive-hint { top: 60%; } }   /* short landscape: clear of the message (38%) */
-@media (max-height: 430px) { .drive-root.real .drive-rhud { width: min(560px, calc(100% - 236px)); } }   /* short landscape: a smaller side reserve (SKIP is about 105 px wide), so SPEED and STORE fit at 568 px */
+/* short landscape: the HUD sits between SKIP (left, about 105 px) and the pedal column (right: the horn's left edge is about 206 px in from the screen's right edge), so no cell is under a button */
+@media (max-height: 430px) { .drive-root.real .drive-rhud { left: 118px; transform: none; width: min(560px, calc(100% - 330px)); } }
+@media (max-height: 430px) and (max-width: 649px) {   /* ...and where that leaves under about 340 px, the race strip goes on its own row, as on a narrow portrait phone */
+  .drive-root.real .drive-row2 { flex-wrap: wrap; }
+  .drive-root.real .drive-row2 .drive-race { flex: 1 1 100%; order: 9; min-height: 42px; }
+}
 @media (max-width: 560px) {
   .drive-root.real .drive-rhud { top: calc(max(10px, env(safe-area-inset-top)) + 42px); left: 12px; right: 12px; width: auto; transform: none; }
   .drive-root.real .drive-light { top: calc(max(10px, env(safe-area-inset-top)) + 150px); }
