@@ -105,7 +105,7 @@ export function addArmSwing(clip, root, opt) {
   const real = Math.random; Math.random = privateRandom;
   try { return armSwing(clip, root, opt); } finally { Math.random = real; }
 }
-function armSwing(clip, root, { swing = 24, bend = 10, pump = 14, out = 4, shoulder = 0.4 } = {}) {
+function armSwing(clip, root, { swing = 15, bend = 14, pump = 26, out = -2, shoulder = 0.4 } = {}) {   // defaults = ARMS.walk
   const o = root.clone(true);     // plain clone: posing only needs the bones, not the skinning
   const mixer = new THREE.AnimationMixer(o); mixer.clipAction(clip).play();
   const get = (n) => o.getObjectByName(n);
@@ -113,14 +113,19 @@ function armSwing(clip, root, { swing = 24, bend = 10, pump = 14, out = 4, shoul
   const track = (n) => tracks.find((t) => t.name === n + '.quaternion');
   const D = THREE.MathUtils.DEG2RAD;
   const fwd = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), side = new THREE.Vector3(), w = new THREE.Vector3(), w2 = new THREE.Vector3();
-  // forward: the way the toes point, measured at the first frame
-  mixer.setTime(0); o.updateMatrixWorld(true);
-  get('L_ToeBase').getWorldPosition(w); get('L_Foot').getWorldPosition(w2); fwd.subVectors(w, w2).setY(0).normalize();
+  // forward: the way both feet point, averaged over the clip (one toe alone is ~11 degrees off: the left points 10.6
+  // degrees one way, the right 18 the other, so a swing about one of them crossed one arm over the body)
+  const at = (t) => mixer.setTime(Math.min(t, clip.duration - 1e-4));   // the last key sits on the loop point: sample just before it
+  for (let i = 0; i <= 24; i++) {
+    at(clip.duration * i / 24); o.updateMatrixWorld(true);
+    for (const S of ['L', 'R']) { get(S + '_ToeBase').getWorldPosition(w); get(S + '_Foot').getWorldPosition(w2); fwd.add(w.sub(w2).setY(0).normalize()); }
+  }
+  fwd.normalize();
   side.crossVectors(fwd, up).normalize();                                   // turning +angle about this swings a hanging hand forward
   for (const S of ['L', 'R']) {
     const O = S === 'L' ? 'R' : 'L';
     const tu = track(S + '_Upperarm'), tf = track(S + '_Forearm'), tc0 = track(S + '_Clavicle');
-    if (!tu || !tf || !tc0) continue;
+    if (!tu || !tf || !tc0 || tf.times.length !== tu.times.length) continue;   // both arm tracks are sampled together
     const times = tu.times, n = times.length;
     // the clavicle's own track is a constant (2 keys): resample it on the arm's times so it can move
     const tc = new THREE.QuaternionKeyframeTrack(tc0.name, Array.from(times), new Array(n * 4).fill(0));
@@ -128,18 +133,17 @@ function armSwing(clip, root, { swing = 24, bend = 10, pump = 14, out = 4, shoul
     // the opposite foot's distance in front of the hips, per sample, scaled to -1..1
     const ph = [];
     for (let i = 0; i < n; i++) {
-      mixer.setTime(times[i]); o.updateMatrixWorld(true);
+      at(times[i]); o.updateMatrixWorld(true);
       get(O + '_Foot').getWorldPosition(w); get('Hip').getWorldPosition(w2); ph.push(w.sub(w2).dot(fwd));
     }
     const mid = (Math.max(...ph) + Math.min(...ph)) / 2, amp = (Math.max(...ph) - Math.min(...ph)) / 2 || 1;
-    if (tf.times.length !== n) continue;                                    // both tracks are sampled together
     // which way is "away from the body" for this arm
-    mixer.setTime(0); o.updateMatrixWorld(true);
+    at(0); o.updateMatrixWorld(true);
     get(S + '_Hand').getWorldPosition(w); get('Spine02').getWorldPosition(w2);
     const outSign = Math.sign(w.sub(w2).dot(side)) || 1;
     const Ps = new THREE.Quaternion(), Wc = new THREE.Quaternion(), Pc = new THREE.Quaternion(), Pc2 = new THREE.Quaternion(), Lu = new THREE.Quaternion(), Lf = new THREE.Quaternion(), Wu = new THREE.Quaternion(), Wf = new THREE.Quaternion(), R = new THREE.Quaternion(), R2 = new THREE.Quaternion();
     for (let i = 0; i < n; i++) {
-      mixer.setTime(times[i]); o.updateMatrixWorld(true);
+      at(times[i]); o.updateMatrixWorld(true);
       const cl = get(S + '_Clavicle');
       cl.parent.getWorldQuaternion(Ps); cl.getWorldQuaternion(Pc);
       const s = (ph[i] - mid) / amp;                                          // +1: this arm's front of the swing

@@ -19,11 +19,28 @@ def _about(m, r):
     h = m.to_translation()
     return M.Translation(h) @ r @ M.Translation(-h) @ m
 
-def add_arm_swing(arm, fwd, frames, swing=15, bend=14, pump=26, out=1, shoulder=0.4):
+def add_arm_swing(arm, fwd, frames, swing=15, bend=14, pump=26, out=-2, shoulder=0.4):   # defaults = WALK
+    """`fwd` is not used for the swing: forward is measured here the same way as in people.js (both feet, averaged)"""
     sc = bpy.context.scene; pb = arm.pose.bones; MW = arm.matrix_world; MWi = MW.inverted()
-    up = V((0, 0, 1)); fwd = V((fwd.x, fwd.y, 0)).normalized(); side = fwd.cross(up).normalized()
+    ad = arm.animation_data
+    assert ad and ad.action, "the armature has no walk action"
+    assert getattr(ad, "action_slot", True) is not None, "the walk action has no slot: keys would land in a new one and freeze the legs"
+    for n in ("Clavicle", "Upperarm", "Forearm"):
+        for S in "LR":
+            b = pb[S + "_" + n]
+            assert b.parent and b.bone.use_inherit_rotation and b.bone.inherit_scale == "FULL" and not b.constraints, S + "_" + n
+    # the meshes don't move the bones: switch their modifiers off while the poses are read (every frame change would
+    # otherwise re-run the 1.9M-triangle scan's decimate and skin), and back on after
+    muted = [m for o in bpy.data.objects if o.type == "MESH" for m in o.modifiers if m.show_viewport]
+    for m in muted: m.show_viewport = False
     W = lambda n: MW @ pb[n].matrix                                   # a bone's world matrix in the current frame
     head = lambda n: W(n).to_translation()
+    up = V((0, 0, 1)); fwd = V((0, 0, 0))
+    for f in frames[::max(1, len(frames) // 24)]:                     # forward: the way both feet point, averaged
+        sc.frame_set(f)
+        for S in "LR":
+            d = head(S + "_ToeBase") - head(S + "_Foot"); d.z = 0; fwd += d.normalized()
+    fwd.normalize(); side = fwd.cross(up).normalized()
     rot = lambda deg, axis: M.Rotation(math.radians(deg), 4, axis)
     def basis(name, pose, parent_pose):
         """pose (armature space) -> the bone's matrix_basis, given its parent's pose"""
@@ -55,5 +72,9 @@ def add_arm_swing(arm, fwd, frames, swing=15, bend=14, pump=26, out=1, shoulder=
     for (name, f), q in keys.items():
         b = pb[name]; b.rotation_mode = "QUATERNION"; b.rotation_quaternion = q
         b.keyframe_insert("rotation_quaternion", frame=f)
+    # the legs must still walk (keys in a new slot would have frozen them)
+    sc.frame_set(frames[0]); a0 = head("L_Foot").copy(); sc.frame_set(frames[len(frames) // 4]); a1 = head("L_Foot").copy()
+    assert (a1 - a0).length > 1e-3, "the legs stopped walking after the arm keys were written"
+    for m in muted: m.show_viewport = True
     sc.frame_set(frames[0])
-    return len(keys)
+    return len(keys), [round(x, 3) for x in fwd]

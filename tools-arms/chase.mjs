@@ -1,9 +1,9 @@
 // Boot the drive (phone size), hold GAS through the on-foot chase on fixed ticks, and report: Math.random calls at
 // boot, where you and the bully are after each block of ticks, errors, and snapshots of the chase camera.
-import { chromium } from '/home/claude/wt-real/node_modules/playwright-core/index.mjs';
+import { chromium } from 'playwright-core';
 import fs from 'fs';
 const [url, tag] = process.argv.slice(2);
-const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] });
+const b = await chromium.launch({ executablePath: process.env.CHROME || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] });
 const p = await b.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
 const errs = []; p.on('pageerror', (e) => errs.push(e.message)); p.on('console', (m) => { if (m.type() === 'error' && !/open-meteo|ERR_FAILED/.test(m.text())) errs.push(m.text().slice(0, 160)); });
 await p.route(/open-meteo/, (r) => r.abort());
