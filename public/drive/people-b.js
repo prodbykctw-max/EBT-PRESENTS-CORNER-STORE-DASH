@@ -1,5 +1,5 @@
-// Option B: MakeHuman (CC0) bodies with the walk baked into vertex-animation textures. The bodies, the walk frames, the phone and hands-up poses
-// and the parts a person may wear (hair, cap, backpack, hood, skirt) are all made offline by drive/tools/people/build_people.py into
+// Option B: MakeHuman (CC0) bodies with the walk baked into vertex-animation textures. The bodies, the walk frames, the phone and hands-up poses,
+// the parts a person may wear (hair, cap, backpack, hood, skirt) and the three shoes (sneaker, dress shoe, ankle boot, skinned to the feet) are all made offline by drive/tools/people/build_people.py into
 // people-real/people.json + people.bin. Here the vertex shader only reads them:
 //   tStand  the standing pose of each body (float16 position and normal per vertex)
 //   tAnim   every other frame of each body as an 8-bit delta from the standing pose (12 walk frames, the phone pose, the hands-up pose)
@@ -55,8 +55,8 @@ function build(meta, buf) {
     g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
     g.setAttribute('aInfo', new THREE.BufferAttribute(f32(m.info).slice(), 4));
     g.setAttribute('aReg', new THREE.BufferAttribute(f32(m.reg).slice(), 4));
-    const r2 = f32(m.reg2), a2 = new Float32Array(nv * 4);
-    for (let i = 0; i < nv; i++) a2[i * 4] = r2[i];
+    const r2 = f32(m.reg2), a2 = new Float32Array(nv * 4);   // x: along the arm; y, z: on a shoe the height above the sole and the distance forward of the heel (m)
+    for (let i = 0; i < nv; i++) a2.set([r2[i * 3], r2[i * 3 + 1], r2[i * 3 + 2]], i * 4);
     g.setAttribute('aReg2', new THREE.BufferAttribute(a2, 4));
     g.setIndex(new THREE.BufferAttribute(u16(m.index).slice(), 1));
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.2);

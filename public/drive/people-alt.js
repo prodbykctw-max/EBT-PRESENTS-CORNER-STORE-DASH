@@ -1,4 +1,4 @@
-// Realistic pedestrians for the drive (the default of the realistic look; ?people=none gives the old ones back; ?people=A|B|AB picks a kind). This file is imported only by the realistic look
+// Realistic pedestrians for the drive (the default of the realistic look; ?people=none gives the old ones back; ?people=A|B|AB picks a kind for QA). This file is imported only by the realistic look
 // (drive.js: after the look's own code has loaded, never in the comic look); crowd.js decides everything about the people and only hands the drawing over.
 //
 // What changes: the BODY and its walk. Everything the crowd decides (who stands where, who walks, who steps aside, the corral that keeps
@@ -8,10 +8,12 @@
 // Everything this file adds to a person (build, hair, outfit, shoes) comes from a hash of the person's index, NOT from Math.random,
 // so this file draws no number from the shared stream except the 4 that the old crowd's InstancedMesh took (see the constructor), and the rest of the run is the same as with the old people.
 //
-// Two draw calls per kind of person (near + far level of detail) instead of one, each one InstancedMesh; the default draws both kinds, half the crowd each
-// (person n is kind n % 2: the crowd was laid along the route in order, so a group's neighbours alternate):
+// Two draw calls per kind of person (near + far level of detail) instead of one, each one InstancedMesh. The default draws one kind, B: every person is
+// a realistic MakeHuman body (six body types, varied outfits, hair and shoes). A is the older hand-built person, loaded only for ?people=A or ?people=AB
+// (person n is then kind n % 2, so a group's neighbours alternate):
 //   A  people-a.js: a hand-built parametric person (about 1.4k triangles near), the walk done analytically in the vertex shader
-//   B  people-b.js: MakeHuman (CC0) bodies, decimated, with the walk baked into a vertex-animation texture
+//   B  people-b.js: MakeHuman (CC0) bodies, decimated, with the walk baked into a vertex-animation texture, real shoes skinned to the feet, and the hair / caps /
+//      bags / hoods / skirts baked into the same mesh (built offline by drive/tools/people/build_people.py; nothing of A is loaded at run time)
 // Both are painted by the same fragment code below (skin, hair, top, bottoms, shoes, face), from fields the geometry carries.
 import * as THREE from './vendor/three.module.min.js';
 import { uploadUsed, shadowSplit } from './runner.js';
@@ -32,8 +34,15 @@ export function withoutRandom(fn) {
 // ------------------------------------------------------------------ what a person wears (a hash of the index, no Math.random)
 export const HAIR = [0x0e0e10, 0x15100c, 0x1b120c, 0x2c1a10, 0x3d2616, 0x5a3a22, 0x7a4a24, 0x8a2a1a, 0xb08d57, 0xd0b27a, 0xc9c9c4, 0x6b6f75];
 export const SHOE = [0xf2f2f0, 0x15151a, 0x4a3b2f, 0xc0392b, 0x3b6fb6, 0x7f8c8d, 0xd9c7a0, 0x222a44];
+// which SHOE colours each kind of B shoe comes in: [index into SHOE, weight]
+const SHOE_COLOURS = [
+  [[0, 0.30], [1, 0.20], [3, 0.10], [4, 0.10], [5, 0.10], [7, 0.08], [6, 0.06], [2, 0.06]],   // sneaker: white, black, red, blue, grey, navy, sand, brown
+  [[1, 0.55], [2, 0.40], [7, 0.05]],                                                          // dress shoe: black, brown, navy
+  [[2, 0.45], [1, 0.35], [6, 0.20]],                                                          // boot: brown, black, sand (work boot)
+];
 // accessory bits (instance mask, vertex attribute aInfo.w holds the bit a part belongs to; 0 = always drawn)
-export const BIT = { cap: 1, crop: 2, long: 4, bun: 8, tail: 16, afro: 32, locs: 64, pack: 128, hood: 256, skirt: 512 };
+export const BIT = { cap: 1, crop: 2, long: 4, bun: 8, tail: 16, afro: 32, locs: 64, pack: 128, hood: 256, skirt: 512, sneaker: 1024, dress: 2048, boot: 4096 };
+const SHOE_BITS = [BIT.sneaker, BIT.dress, BIT.boot];   // the three B shoes (people-b.js): which one a person wears is a mask bit, like the hair
 // outfits: sleeve length (0 none … 1 wrist), how much of the leg the bottoms cover (1 full length, .4 shorts), jacket (a heavier torso),
 // tights, dress (the top colour carries on below the waist), hood, skirt
 const OUTFITS = [
@@ -56,8 +65,9 @@ function hash(i, k) {
 }
 const pick = (table, r) => { let a = 0; for (const [v, w] of table) { a += w; if (r < a) return v; } return table[table.length - 1][0]; };
 
-/** everything a person is made of that crowd.js doesn't decide: gender, build, hair, outfit, shoes (deterministic per index) */
-export function traitsFor(m, i, bodyVariants = 1, heightByGender = true) {
+/** everything a person is made of that crowd.js doesn't decide: gender, build, hair, outfit, shoes (deterministic per index).
+ *  `prev` (B people only): the traits of the person before, so that two neighbours never share a body type or an outfit. */
+export function traitsFor(m, i, bodyVariants = 1, heightByGender = true, prev = null) {
   const fem = hash(i, 1) < 0.5, h = (k) => hash(i, k);
   const ACC = { cap: 1, long: 2, bag: 4, hood: 8 };   // crowd.js's own bits (m.acc)
   const masc = fem ? 0.05 + h(2) * 0.3 : 0.65 + h(2) * 0.35;
@@ -78,18 +88,38 @@ export function traitsFor(m, i, bodyVariants = 1, heightByGender = true) {
   if (m.acc & ACC.cap) mask = (mask & ~(BIT.afro)) | BIT.cap | (mask & BIT.afro ? BIT.crop : 0);   // a cap over short hair (an afro under a cap shrinks to a crop)
   if (m.acc & ACC.bag) mask |= BIT.pack;
   // outfit
-  let o = pick(fem ? OUTFIT_F : OUTFIT_M, h(7));
+  const table = fem ? OUTFIT_F : OUTFIT_M;
+  let o = pick(table, h(7));
   if (m.acc & ACC.hood) o = 3;
+  else if (prev && prev.outfit === o) { o = pick(table, h(15)); if (o === prev.outfit) o = table[(table.findIndex((e) => e[0] === o) + 1) % table.length][0]; }   // (a neighbour never dresses the same)
   const O = OUTFITS[o];
   if (O.hood) mask |= BIT.hood;
   if (O.skirt) mask |= BIT.skirt;
-  const variant = bodyVariants > 1 ? Math.min(bodyVariants - 1, (fem ? 0 : 1) + 2 * ((h(8) * Math.ceil(bodyVariants / 2)) | 0)) : 0;
+  let variant = 0;
+  if (bodyVariants > 1) {
+    const nBt = Math.ceil(bodyVariants / 2), vOf = (bt) => Math.min(bodyVariants - 1, (fem ? 0 : 1) + 2 * bt);
+    let bt = (h(8) * nBt) | 0;
+    if (prev && prev.variant === vOf(bt)) bt = (bt + 1 + (h(14) < 0.5 ? 0 : 1)) % nBt;      // (a neighbour never has the same body type)
+    variant = vOf(bt);
+  }
   let hairOut = hairCol;
   if (bodyVariants > 4 && variant >= 4) hairOut = h(11) < 0.75 ? 10 : 11;                // the two older bodies: grey hair
+  // shoes. A draws its own (the colour index is all it uses); B wears one of three real shoes: sneakers on most people, dress shoes and boots more on the
+  // older bodies and the business jackets, and with dresses and skirts
+  let shoe = (h(9) * SHOE.length) | 0;
+  if (bodyVariants > 1) {
+    const old = variant >= 4, biz = o === 4, g = h(12);
+    const kind = old || biz ? (g < 0.35 ? 0 : g < 0.75 ? 1 : 2)
+      : o === 5 || o === 6 ? (g < 0.5 ? 0 : g < 0.7 ? 1 : 2)
+      : fem ? (g < 0.78 ? 0 : g < 0.86 ? 1 : 2)
+      : (g < 0.68 ? 0 : g < 0.84 ? 1 : 2);
+    shoe = pick(SHOE_COLOURS[kind], h(13));
+    mask |= SHOE_BITS[kind];
+  }
   return {
     fem, masc, mask, variant, style, outfit: o,
     pal: m.pal,                                              // skin, top, bottoms, accent (crowd.js's own roll)
-    hair: hairOut, shoe: (h(9) * SHOE.length) | 0, belly: Math.pow(h(10), 2),
+    hair: hairOut, shoe, belly: Math.pow(h(10), 2),
     sleeve: O.sleeve, cover: O.cover, jacket: O.jacket || 0, tight: O.tight || 0, dress: O.dress || 0,
     hf: heightByGender ? 0.95 + 0.06 * masc : 1,             // women are a little shorter than men on average (the MakeHuman bodies already are)
   };
@@ -105,23 +135,63 @@ attribute vec4 iPose;   // x phone-in-hand 0/1 · y startle 0..1 · z body varia
 attribute vec4 iPal;    // skin, top, bottoms, accent (palette indices)
 attribute vec4 iHair;   // hair colour, shoe colour, masculinity 0..1, dress flag
 attribute vec4 iOut;    // sleeve, cover, jacket, tights
-varying vec3 vRest; varying vec4 vReg; varying float vArmS;
-flat varying vec4 vInfo; flat varying vec4 vPal; flat varying vec4 vHair; flat varying vec4 vOut; flat varying float vVar;
+varying vec3 vRest; varying vec4 vReg; varying float vArmS; varying vec2 vShoeHF;
+flat varying vec4 vInfo; flat varying vec4 vPal; flat varying vec4 vHair; flat varying vec4 vOut; flat varying float vVar; flat varying float vShoeT;
 bool pedHidden() { return aInfo.w > 0.5 && mod(floor(iAnim.z / aInfo.w + 0.001), 2.0) < 0.5; }
 mat3 pedRotX(float a) { float c = cos(a), s = sin(a); return mat3(1.0, 0.0, 0.0, 0.0, c, s, 0.0, -s, c); }
 mat3 pedRotY(float a) { float c = cos(a), s = sin(a); return mat3(c, 0.0, -s, 0.0, 1.0, 0.0, s, 0.0, c); }
 `;
 const PAINT_SET_V = /* glsl */`
 vRest = pedRest; vReg = aReg; vArmS = aReg2.x; vInfo = aInfo; vPal = iPal; vHair = iHair; vOut = iOut; vVar = iPose.z;
+vShoeHF = aReg2.yz;   // a shoe vertex: height above the sole, distance forward of the heel (m)
+{ float sb = floor(iAnim.z / 1024.0 + 0.001); vShoeT = mod(sb, 2.0) > 0.5 ? 0.0 : (mod(floor(sb / 2.0), 2.0) > 0.5 ? 1.0 : 2.0); }   // which shoe (mask bits 1024 / 2048 / 4096): sneaker, dress shoe, boot
+`;
+const SHOE_GLSL = /* glsl */`
+#define SHOE_CUFF_SNEAKER 0.112
+#define SHOE_CUFF_DRESS 0.118
+#define SOLE_SNEAKER 0.030
+#define SOLE_DRESS 0.016
+#define SOLE_BOOT 0.024
 `;
 const PAINT_FRAG = /* glsl */`
-varying vec3 vRest; varying vec4 vReg; varying float vArmS;
-flat varying vec4 vInfo; flat varying vec4 vPal; flat varying vec4 vHair; flat varying vec4 vOut; flat varying float vVar;
+varying vec3 vRest; varying vec4 vReg; varying float vArmS; varying vec2 vShoeHF;
+flat varying vec4 vInfo; flat varying vec4 vPal; flat varying vec4 vHair; flat varying vec4 vOut; flat varying float vVar; flat varying float vShoeT;
 uniform vec3 uSkin[${SKIN.length}]; uniform vec3 uTop[${TOPS.length}]; uniform vec3 uBot[${BOTTOMS.length}]; uniform vec3 uAcc[${ACCENT.length}];
 uniform float uSole; uniform vec3 uHair[${HAIR.length}]; uniform vec3 uShoe[${SHOE.length}];
 uniform vec4 uFace[8];   // per body variant: eye height, half eye spacing, mouth height, head front z (all as fractions of standing height)
 float pedEllipse(vec2 d, vec2 r) { return 1.0 - smoothstep(0.55, 1.0, length(d / r)); }
+float pedGloss;   // how shiny this fragment is (polished leather), set by pedColor and read after it by the roughness
+// B's real shoes (slot 6): h above the sole and f forward of the heel, both in metres, from the geometry (baked in build_people.py), so the paint is crisp at any triangle count.
+// vShoeT: 0 sneaker, 1 dress shoe, 2 boot. Above the shoe's collar the geometry is a sock (shorts, skirts, tights) or the trouser leg falling over the shoe (long trousers).
+vec3 pedShoe(vec3 shoe, vec3 bot, float cover, float dress) {
+  float h = vShoeHF.x, f = vShoeHF.y, t = vShoeT;
+  float cuff = t < 0.5 ? SHOE_CUFF_SNEAKER : t < 1.5 ? SHOE_CUFF_DRESS : 9.0;
+  if (h > cuff) {
+    if (cover > 0.9 && dress < 0.5) return bot * (h > cuff + 0.004 ? 1.0 : 0.82);
+    return dot(shoe, vec3(0.333)) < 0.1 ? vec3(0.10) : vec3(0.90);                // sock: dark with dark shoes, white otherwise
+  }
+  if (t > 1.5 && h > 0.15 && cover > 0.9 && dress < 0.5) return bot;                // boot-cut: the trouser leg hangs over the top of the boot
+  vec3 c = shoe;
+  float lace = step(0.5, fract(f * 90.0));
+  if (t < 0.5) {                                                                      // sneaker: white rubber sole with a grey outsole, toe cap, laces, heel tab
+    if (h < SOLE_SNEAKER) return h < 0.008 ? vec3(0.26) : vec3(0.64);
+    if (f > 0.205 && h < 0.07) c = mix(c, vec3(0.64), 0.65);
+    if (f < 0.04 && h > 0.05) c *= 0.62;
+    if (f > 0.09 && f < 0.16 && h > 0.07) c = mix(c, vec3(0.64), 0.5 * lace + 0.1);
+  } else if (t < 1.5) {                                                               // dress shoe: thin dark sole, polished leather, laces
+    if (h < SOLE_DRESS) { pedGloss = 0.3; return h < 0.005 ? vec3(0.025) : vec3(0.07, 0.055, 0.05); }
+    pedGloss = 0.7;
+    if (f > 0.085 && f < 0.15 && h > 0.05) c *= 1.0 - 0.4 * lace;
+  } else {                                                                            // boot: dark rubber sole, a lighter welt, leather
+    if (h < SOLE_BOOT) return h < 0.012 ? vec3(0.05) : vec3(0.09, 0.08, 0.07);
+    if (h < SOLE_BOOT + 0.004) return vec3(0.42, 0.30, 0.18);
+    pedGloss = 0.25;
+    if (h > 0.185) c *= 0.78;
+  }
+  return c * 0.74;
+}
 vec3 pedColor() {
+  pedGloss = 0.0;
   vec3 skin = uSkin[int(vPal.x + 0.5)], top = uTop[int(vPal.y + 0.5)], bot = uBot[int(vPal.z + 0.5)], acc = uAcc[int(vPal.w + 0.5)];
   vec3 hair = uHair[int(vHair.x + 0.5)], shoe = uShoe[int(vHair.y + 0.5)];
   float slot = vInfo.x, sleeve = vOut.x, cover = vOut.y, jacket = vOut.z, tight = vOut.w, dress = vHair.w;
@@ -131,7 +201,8 @@ vec3 pedColor() {
     if (slot < 2.5) return acc;                                    // cap
     if (slot < 3.5) return uAcc[int(mod(vPal.w + 3.0, 8.0))] * 0.9; // backpack
     if (slot < 4.5) return top * 0.92;                             // hood
-    return dress > 0.5 ? top : bot;                                // skirt / dress
+    if (slot < 5.5) return dress > 0.5 ? top : bot;                // skirt / dress
+    return pedShoe(shoe, bot, cover, dress);                       // B's shoes
   }
   vec3 c = skin;
   bool isArm = vReg.x > 0.5, isLeg = vReg.y > 0.5;
@@ -200,8 +271,9 @@ function patch(shader, variant, lod, colour) {
     shader.uniforms.uFace = { value: variant.face };
     shader.uniforms.uSole = { value: variant.sole ?? 1 };
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\n' + PAINT_FRAG)
-      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= pedColor();');
+      .replace('#include <common>', '#include <common>\n' + SHOE_GLSL + PAINT_FRAG)
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= pedColor();')
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.32, pedGloss);');
   } else {
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', call + 'vec3 transformed = pedP;\n');
   }
@@ -226,7 +298,8 @@ export class AltPeople {
     const people = crowd.people, NV = this.vs.length;
     this.vi = people.map((m, i) => (NV > 1 ? i % NV : 0));
     // static per-person traits, as flat arrays
-    this.tr = people.map((m, i) => { const v = this.vs[this.vi[i]]; return traitsFor(m, i, v.bodies, v.hf !== false); });
+    const lastB = {};   // the person before, per kind: B people (bodies > 1) avoid their neighbour's body type and outfit
+    this.tr = people.map((m, i) => { const v = this.vs[this.vi[i]], t = traitsFor(m, i, v.bodies, v.hf !== false, v.bodies > 1 ? lastB[v.name] : null); lastB[v.name] = t; return t; });
     this.far2 = (mobile ? 22 : LOD_NEAR) ** 2;
     this.lods = [];   // k = variant * 2 + level of detail (0 near, 1 far)
     this.vs.forEach((variant, vx) => {

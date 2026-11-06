@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Option B pedestrians: MakeHuman (CC0) bodies, decimated, with a walk cycle baked into vertex-animation textures.
 
-  python3 -I drive/tools/people/build_people.py --mh <makehuman checkout>/makehuman/data --out public/drive/people-real
+  python3 -I drive/tools/people/fetch_shoes.py --out <shoe dir>            (the three CC0 shoes, about 1 MB, see shoes.py)
+  python3 -I drive/tools/people/build_people.py --mh <makehuman checkout>/makehuman/data --shoes <shoe dir> --out public/drive/people-real
 
 Inputs (all CC0 1.0, https://github.com/makehumancommunity/makehuman, see public/drive/people-real/CREDITS.txt):
   3dobjs/base.obj                 the base mesh (group "body": 13378 quads, 13380 vertices; the other groups are fitting helpers and are not used)
   rigs/default.mhskel             joint definitions (a joint is the centroid of a vertex list)
   rigs/default_weights.mhw        skin weights for the 163-bone default rig
   targets/macrodetails/*.target   gender / ethnicity / age / muscle / weight shapes (vertex deltas)
+plus the shoes (CC0 MakeHuman clothes; fit and skinned in shoes.py): a sneaker, a lace-up dress shoe and an ankle boot.
 Needs numpy, scipy and bpy (Blender as a module: only for its Decimate modifier).
 
 What it does
@@ -16,7 +18,8 @@ What it does
      the shapes share one topology; each decimated vertex takes its shape deltas and skin weights from its nearest source vertices;
   3. folds the 163-bone rig into 19 bones (pelvis, spine, chest, neck, head, clavicles, arms, legs, feet) and poses it with linear blend skinning:
      a standing pose (arms down, legs together, feet flat), 12 walk frames, a phone-in-hand pose and a hands-up pose;
-  4. adds the parts a person may or may not wear (hair in several styles, cap, backpack, hood, skirt), fitted to each body's head and torso;
+  4. adds the parts a person may or may not wear (hair in several styles, cap, backpack, hood, skirt), fitted to each body's head and torso, and the three
+     shoes (fitted to each body's feet, skinned to the same bones; the body's own feet under them are dropped);
   5. writes people.json (what is where) and people.bin: indices and per-vertex fields per level of detail, positions as float16 and normals
      as 8 bit per frame per variant (the "vertex animation texture" the vertex shader fetches from).
 The walk is the same gait as people-a.js (hip, knee, ankle, arm swing, elbow, shoulder counter-rotation, head nod, lowest foot on the ground).
@@ -27,6 +30,7 @@ from scipy.spatial import cKDTree
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--mh', required=True, help='makehuman/data directory of a checkout')
+ap.add_argument('--shoes', required=True, help='directory fetch_shoes.py wrote (shoes01, shoes02, toigo_ankle_boots_male)')
 ap.add_argument('--out', required=True)
 ap.add_argument('--near', type=int, default=2600, help='triangles of the near body (before the hair etc.)')
 ap.add_argument('--far', type=int, default=640)
@@ -209,6 +213,26 @@ def orient(verts, faces):
     return faces if vol > 0 else faces[:, ::-1].copy()
 
 
+import os as _os
+sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))   # (python3 -I does not put the script's folder on the path)
+import shoes as shoe_lib
+SHOES, SHOE_GROUND, SHOE_HIDDEN = shoe_lib.build(args.shoes, [(V + d) * 10 for _, d in VARIANTS], (V + NEUTRAL) * 10, (V + NEUTRAL)[:NB], SW)
+HIDDEN = np.zeros(len(V) + 1, bool)
+HIDDEN[sorted(h for h in SHOE_HIDDEN if h < len(V))] = True
+HIDE_BELOW = 0.10   # m above the soles: the body's own feet and ankles below this are inside the shoes
+
+
+def drop_under_shoes(verts, faces, nb, wts):
+    """remove the body vertices that every shoe hides (their nearest source vertices are in the shoes' delete lists) and are low enough to be inside a shoe"""
+    gone = (HIDDEN[nb].sum(1) >= 3) & (verts[:, 1] - SHOE_GROUND < HIDE_BELOW)
+    faces = faces[~gone[faces].any(1)]
+    used = np.unique(faces)
+    remap = -np.ones(len(verts), int)
+    remap[used] = np.arange(len(used))
+    print('  dropped', int(len(verts) - len(used)), 'body vertices under the shoes')
+    return verts[used], remap[faces], nb[used], wts[used]
+
+
 LODS = {}
 for lod, ntri in (('near', args.near), ('far', args.far)):
     verts, faces = decimate(ntri)
@@ -217,6 +241,7 @@ for lod, ntri in (('near', args.near), ('far', args.far)):
     dist, nb = tree.query(verts, k=4)
     wts = 1 / (dist + 1e-4)
     wts /= wts.sum(1, keepdims=True)
+    verts, faces, nb, wts = drop_under_shoes(verts, faces, nb, wts)
     LODS[lod] = dict(verts=verts, faces=faces, nb=nb, wts=wts)
     print(lod, 'body: ', len(verts), 'verts', len(faces), 'tris')
 
@@ -446,26 +471,36 @@ for li, lod in enumerate(('near', 'far')):
     SWd /= np.maximum(SWd.sum(1, keepdims=True), 1e-9)
     frames_pos, frames_nor = [], []
     shell_faces = None
+    SH = [(e, e[lod]) for e in SHOES if lod in e]   # the shoes drawn at this level of detail
     for vi, (vname, delta) in enumerate(VARIANTS):
         rig = rigs[vi]
         Pb = L['verts'] + ((delta - NEUTRAL)[L['nb']] * L['wts'][:, :, None]).sum(1)     # the decimated body, this shape
         Pb = flatten_chest(Pb, L['faces'], SWd)
         sp, sinfo, swb = map_shell(SHELL[li], SRC[vi], SW, rig)
-        X = np.vstack([Pb, sp])
-        W = np.vstack([SWd, swb])
+        shoe_pos = np.vstack([d['pos'][vi] for _, d in SH])
+        shoe_W = np.vstack([d['W'] for _, d in SH])
+        X = np.vstack([Pb, sp, shoe_pos])
+        W = np.vstack([SWd, swb, shoe_W])
         F = np.vstack([L['faces'], np.array(SHELL[li]['idx']).reshape(-1, 3) + nbody])
+        nshell = len(sp)
+        sf, off_v = [], nbody + nshell
+        for _, d in SH:
+            sf.append(d['faces'] + off_v)
+            off_v += d['verts']
+        F = np.vstack([F] + sf)
+        gi = np.r_[0:nbody, nbody + nshell:len(X)]   # what stands on the ground: the body and the shoes
         shell_faces = F
         poses = [gait_extra(0, 0.0)] + [gait_extra(TAU * k / N, 1.0) for k in range(N)] + [gait_extra(0, 0.0, 'phone'), gait_extra(0, 0.0, 'startle')]
         # stand first: it defines the ground and the origin
         stand = rig.skin(X, W, poses[0])
-        soles = stand[:nbody, 1].min()
+        soles = stand[gi, 1].min()
         z0 = rig.posed(poses[0], 0)[1]['pelvis'][2]
         off = np.array([0.0, -soles, -z0])
         pos_f, nor_f = [], []
         for fi, ex in enumerate(poses):
             Pf = rig.skin(X, W, ex)
             if 1 <= fi <= N:   # the lowest part of the body is on the ground
-                Pf = Pf + np.array([0.0, -Pf[:nbody, 1].min(), -z0])
+                Pf = Pf + np.array([0.0, -Pf[gi, 1].min(), -z0])
             else:
                 Pf = Pf + off
             pos_f.append(Pf)
@@ -494,8 +529,16 @@ for li, lod in enumerate(('near', 'far')):
     mv = meta_variants[0]
     reg2[:nbody, 0] = np.clip((mv['shoulderY'] - P[0, 0, :nbody, 1]) / (mv['shoulderY'] - mv['wristY']), 0, 1)
     info = np.zeros((nv, 4))
-    info[nbody:] = sinfo * np.array([1, 0, 0, 1])   # slot and bit only
-    lod_out.append(dict(name=lod, nbody=nbody, verts=nv, faces=shell_faces, info=info, reg=reg, reg2=reg2, pos=P, nor=Nn))
+    info[nbody:nbody + nshell] = sinfo * np.array([1, 0, 0, 1])   # slot and bit only
+    # shoes: slot 6, the accessory bit of the shoe (people-alt.js BIT; the far level of detail has one shoe shape that everyone wears, bit 0), and for the paint
+    # the height above the sole and the distance forward of the heel (metres) in reg2 y / z
+    o = nbody + nshell
+    for e, d in SH:
+        info[o:o + d['verts']] = [6, 0, 0, e['bit'] if lod == 'near' else 0]
+        reg2[o:o + d['verts'], 1] = d['h']
+        reg2[o:o + d['verts'], 2] = d['f']
+        o += d['verts']
+    lod_out.append(dict(name=lod, nbody=nbody, nshell=nshell, nshoe=sum(d['tris'] for _, d in SH), verts=nv, faces=shell_faces, info=info, reg=reg, reg2=reg2, pos=P, nor=Nn))
     print(lod, 'total', nv, 'verts', len(shell_faces), 'tris (', nbody, 'body verts )')
 
 # ---------------------------------------------------------------------------------------------------------------------------------------
@@ -536,11 +579,11 @@ for L in lod_out:
     m['index'] = put(L['faces'].reshape(-1), np.uint16)
     m['info'] = put(L['info'], np.float32)
     m['reg'] = put(L['reg'], np.float32)
-    m['reg2'] = put(L['reg2'][:, :1], np.float32)
+    m['reg2'] = put(L['reg2'][:, :3], np.float32)   # x: along the arm; y, z: shoes (height above the sole, distance forward of the heel)
     m['stand'] = put(stand.view(np.uint16), np.uint16)
     m['anim'] = put(anim, np.uint8)
     lods_meta.append(m)
-meta = dict(version=1, source='MakeHuman base mesh, rig and macro targets (CC0 1.0), https://github.com/makehumancommunity/makehuman', frames=dict(walk=N, perVariant=FR, stand=0, phone=N + 1, startle=N + 2),
+meta = dict(version=2, source='MakeHuman base mesh, rig and macro targets (CC0 1.0), https://github.com/makehumancommunity/makehuman', frames=dict(walk=N, perVariant=FR, stand=0, phone=N + 1, startle=N + 2),
             variants=meta_variants, lods=lods_meta)
 open(args.out.rstrip('/') + '/people.json', 'w').write(json.dumps(meta, separators=(',', ':')))
 open(args.out.rstrip('/') + '/people.bin', 'wb').write(blob)

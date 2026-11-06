@@ -2,12 +2,12 @@
 <style>html,body{margin:0;background:#8b9aa6}canvas{display:block}</style>
 <script type="module">
 // Dev preview of the alternative pedestrians without booting the whole drive (software GL needs minutes for that).
-//   serve the repo root (python3 -m http.server) and open /drive/tools/people/preview.html?v=A&view=front|side|grid|far&seed=1
+//   serve the repo root (python3 -m http.server) and open /drive/tools/people/preview.html?v=A|B&view=front|side|grid|far|walk|feet&seed=1&ph=0
 import * as THREE from '/public/drive/vendor/three.module.min.js';
 const q = new URLSearchParams(location.search), V = (q.get('v') || 'A').toUpperCase(), view = q.get('view') || 'grid';
 const W = +(q.get('w') || 1200), Ht = +(q.get('h') || 700);
 const alt = await import('/public/drive/people-alt.js');
-const variant = V === 'A' ? (await import('/public/drive/people-a.js')).makeA() : await (await import('/public/drive/people-b.js')).makeB(V);
+const variant = V === 'A' ? alt.withoutRandom((await import('/public/drive/people-a.js')).makeA) : await (await import('/public/drive/people-b.js')).makeB(alt.withoutRandom);
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setSize(W, Ht); document.body.appendChild(renderer.domElement);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -20,11 +20,11 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), new THREE.MeshSta
 const camera = new THREE.PerspectiveCamera(30, W / Ht, 0.1, 200);
 // people
 const hs = (i, k) => { let x = (Math.imul(i + 1, 2246822519) + Math.imul(k + 3, 3266489917)) | 0; x = Math.imul(x ^ (x >>> 15), 2654435761); x ^= x >>> 13; return (x >>> 0) / 4294967296; };
-const seed = +(q.get('seed') || 0), count = view === 'grid' || view === 'far' ? 40 : view === 'walk' ? 6 : 8;
+const seed = +(q.get('seed') || 0), count = view === 'grid' || view === 'far' ? 40 : view === 'walk' || view === 'feet' ? 6 : 8;
 const people = [];
 for (let i = 0; i < count; i++) {
   const k = i + seed * 100;
-  const ph = view === 'walk' ? (i * Math.PI / 3 + +(q.get('ph') || 0)) : hs(k, 20) * 6.28;
+  const ph = view === 'walk' || view === 'feet' ? (i * Math.PI / 3 + +(q.get('ph') || 0)) : hs(k, 20) * 6.28;
   const stride = view === 'stand' ? 0.05 : 1.0;
   people.push({ pal: [Math.floor(hs(k, 1) * 9), Math.floor(hs(k, 2) * 17), Math.floor(hs(k, 3) * 9), Math.floor(hs(k, 4) * 8)],
     acc: (hs(k, 5) < 0.22 ? 1 : 0) | (hs(k, 6) < 0.25 ? 2 : 0) | (hs(k, 7) < 0.2 ? 4 : 0) | (hs(k, 8) < 0.18 ? 8 : 0),
@@ -34,17 +34,18 @@ const cols = view === 'far' ? 8 : 10;
 people.forEach((m, i) => {
   // (crowd.js convention: x east, y north (the world's -z), z up)
   if (view === 'grid' || view === 'far') { m.x = (i % cols - (cols - 1) / 2) * (view === 'far' ? 3 : 1.15); m.y = Math.floor(i / cols) * (view === 'far' ? 8 : 1.4); m.yaw = -Math.PI / 2 + (hs(i, 30) - 0.5) * 0.9; }
-  else { m.x = (i - (count - 1) / 2) * (view === 'walk' ? 1.1 : 1.0); m.y = 0; m.yaw = view === 'side' || view === 'walk' ? 0 : -Math.PI / 2; }
+  else { m.x = (i - (count - 1) / 2) * (view === 'walk' ? 1.1 : 1.0); m.y = 0; m.yaw = view === 'side' || view === 'walk' || view === 'feet' ? 0 : -Math.PI / 2; }
   m.z = 0;
 });
 if (view === 'far') { people.forEach((m, i) => { m.y += 10 + (i % 3) * 14; }); }
 const crowd = { people, camera, route: { at: () => ({ x: 0, y: 0 }) }, ground: () => 0, footAt: () => 0, visible: () => true, shadowBox: null };
-const ap = new alt.AltPeople({ crowd, variant, scene, mobile: false });
+const ap = new alt.AltPeople({ crowd, variants: [variant], scene, mobile: false });
 for (const l of ap.lods) l.mesh.castShadow = true;
 ap.far2 = (view === 'far' ? 12 : 1000) ** 2;
 const place = () => {
   if (view === 'front') camera.position.set(0, 1.2, 9.5), camera.lookAt(0, 0.95, 0);
   else if (view === 'side' || view === 'walk') camera.position.set(0, 1.1, 9.0), camera.lookAt(0, 0.9, 0);
+  else if (view === 'feet') camera.position.set(+(q.get('cx') || 0.2), 0.5, +(q.get('cz') || 3.4)), camera.lookAt(+(q.get('cx') || 0.2), 0.3, 0);   // the legs and shoes of a row of walkers, side-on, mid-stride
   else if (view === 'grid') camera.position.set(0, 3.2, 16), camera.lookAt(0, 0.8, -1.5);
   else if (view === 'far') camera.position.set(0, 4.5, 8), camera.lookAt(0, 0.8, -40);
   else camera.position.set(0, 1.2, 8), camera.lookAt(0, 0.95, 0);
