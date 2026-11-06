@@ -245,7 +245,7 @@ export class AltPeople {
         depth.customProgramCacheKey = () => 'people-depth-' + variant.name + '-' + name;
         const mesh = new THREE.InstancedMesh(g, mat, cap);
         mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-        Object.assign(mesh, { name: 'crowd_' + name + (vx ? '_' + variant.name : ''), frustumCulled: false, castShadow: !mobile, receiveShadow: true, customDepthMaterial: depth, count: 0 });
+        Object.assign(mesh, { name: 'crowd_' + name + (vx ? '_' + variant.name : ''), frustumCulled: false, castShadow: !mobile, receiveShadow: true, customDepthMaterial: depth, count: 0, renderOrder: crowd.blob ? 2 : 0 });   // (after the contact blobs, so people paint over them)
         shadowSplit(mesh);
         scene.add(mesh);
         this.lods.push({ mesh, attr, name, vx, uniforms: def.uniforms });
@@ -267,7 +267,8 @@ export class AltPeople {
     const SB = M0.castShadow && car ? cr.shadowBox : null, cp = SB ? r.at(car.s, car.d) : null;
     let ax, ay, lim;
     if (SB) { const zA = new THREE.Vector3().copy(SB.dir).normalize(); ax = new THREE.Vector3(0, 1, 0).cross(zA).normalize(); ay = zA.clone().cross(ax); lim = SB.half() + 25; }
-    const lo = this.lods.map(() => 0), hi = this.lods.map(() => 0);
+    const lo = this.lods.map(() => 0), hi = this.lods.map(() => 0), BL = cr.blob;
+    if (BL) BL.begin();
     let drawn = 0;
     for (let n = 0; n < people.length; n++) {
       const m = people[n];
@@ -280,6 +281,7 @@ export class AltPeople {
       m.on = cr.visible(m.x, m.y, m.z + 0.9, 3 + far * 0.04) && drawn < people.length;
       if (!m.on) continue;
       drawn++;
+      if (BL) BL.add(m, far);   // phones: the contact shadow under every person drawn, either kind, either level of detail (contact.js)
       const k = this.vi[n] * 2 + (d2 > this.far2 ? 1 : 0), lod = this.lods[k], cap = lod.mesh.instanceMatrix.count;
       let i;
       if (SB) {
@@ -295,6 +297,7 @@ export class AltPeople {
       A.iHair.setXYZW(i, S[o + 4], S[o + 5], S[o + 6], S[o + 7]);
       A.iOut.setXYZW(i, S[o + 8], S[o + 9], S[o + 10], S[o + 11]);
     }
+    if (BL) BL.end();
     this.lods.forEach(({ mesh, attr }, k) => {
       const cap = mesh.instanceMatrix.count;
       if (hi[k]) {   // close the gap between the shadow-box people (front) and the rest (filled from the back)
