@@ -13,3 +13,5 @@ tools-arms/chase.mjs runs against the real drive (no copy needed):
       phone-size, seeded Math.random, GAS held through the on-foot chase on fixed ticks; prints Math.random calls,
       your and the bully's positions, errors; writes tools-arms/out/<tag>_<k>.jpg. Run it on main and on a branch to
       prove a change leaves the chase itself alone (the call count wobbles by 1-3 between two runs of main too).
+tools-arms/store.mjs plays the store run (?nodrive, phone size), walks the shopper up/right/down/left and saves
+  tools-arms/out/<tag>_store_<k>.png:  node tools-arms/store.mjs http://localhost:5173/standalone.html <tag>
