@@ -50,12 +50,12 @@ const SKIPFOOT = QA && new URLSearchParams(location.search).has('skipfoot');
 // (he runs a touch slower than you: a clean run up the sidewalk gets away, but every person you run into lets him close)
 const FOOT = { run: 5.6, back: 2.2, bully: 5.3, bullyGo: 0.8, start: 14, carAhead: 30, bullyBehind: 8, stun: 0.9, reach: 0.9, pause: 1.1 };
 const RACE = { pace: 17, accel: 3.4, hop: 1.6, tail: 4.5, shake: 60, maxLead: 30 };   // 17 m/s: a good run beats him by ~6 s; an average one gets caught late
-// the realistic look's pedestrians (people-alt.js, people-a.js, people-b.js, people-real/): by default a mix of two kinds of person (A: hand-built,
-// B: MakeHuman CC0), half and half. ?people=none|0|off draws the old box people; ?people=A, B or AB picks one kind or the mix (QA). The comic look
-// never loads any of it. Nothing is requested until the realistic look's own code and textures have loaded (see peopleReady in startDrive).
+// the realistic look's pedestrians (people-alt.js, people-b.js, people-real/): by default every person is a B body (MakeHuman CC0, six body types, real
+// shoes); people-a.js (the hand-built A person) is NOT loaded unless asked for. ?people=none|0|off draws the old box people; ?people=A or AB picks A or the
+// A+B mix (QA; B alone is the default). The comic look never loads any of it. Nothing is requested until the realistic look's own code and textures have loaded (see peopleReady in startDrive).
 function peopleKindsFromURL() {
-  const q = (new URLSearchParams(location.search).get('people') || 'ab').toLowerCase();
-  return /^(none|0|off|false|no)$/.test(q) ? '' : /^[ab]+$/.test(q) ? [...new Set(q)].sort().join('') : 'ab';
+  const q = (new URLSearchParams(location.search).get('people') || 'b').toLowerCase();
+  return /^(none|0|off|false|no)$/.test(q) ? '' : /^[ab]+$/.test(q) ? [...new Set(q)].sort().join('') : 'b';
 }
 async function loadAltPeople(kinds) {
   try {
