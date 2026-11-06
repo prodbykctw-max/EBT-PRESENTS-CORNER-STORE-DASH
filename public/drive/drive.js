@@ -1391,9 +1391,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         // camera along with the car's own forward movement first, so only sideways movement and the camera's own easing are left to smooth.
         // (not when the car was put somewhere, a test hook's teleport)
         const mx = carRig.position.x - lastCar.x, mz = carRig.position.z - lastCar.z;
-        if (Math.hypot(mx, mz) < 2) { const f = mx * Math.cos(camA) - mz * Math.sin(camA), fx = f * Math.cos(camA), fz = -f * Math.sin(camA); camPos.x += fx; camPos.z += fz; camLook.x += fx; camLook.z += fz; }
+        if (Math.hypot(mx, mz) < 2) { const f = mx * Math.cos(camA) - mz * Math.sin(camA), fx = f * Math.cos(camA), fz = -f * Math.sin(camA); camPos.x += fx; camPos.z += fz; camLook.x += fx; camLook.z += fz; const my = carRig.position.y - lastCar.y; camPos.y += my; camLook.y += my; }   // (and its climb or fall: on a hill the lag would eat into the 2.5 m of air under the camera)
       }
       camPos.lerp(targetPos, Math.min(1, dt * 6)); camLook.lerp(targetLook, Math.min(1, dt * 8));
+      // realistic: the 2.5 m of air under the camera is re-applied where the camera really is after the easing (the target above only
+      // knows the ground under where the camera is heading; on the Luckie St climb the eased camera was 1.8 m up at 20 m/s)
+      if (RL) camPos.y = Math.max(camPos.y, ground(camPos.x, -camPos.z) + 2.5);
     }
     lastCar.copy(carRig.position);
     if (api.camOverride) { camPos.copy(api.camOverride.pos); camLook.copy(api.camOverride.look); } // QA: free camera
@@ -1426,8 +1429,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (RL) {
       // the realistic HUD: the clock as M:SS.ss, your place in the race (the bully is the other racer: red when he's within 2.5 s of you), and
       // how far along the way to the store you are, in 11 steps (0/11 on foot, 11/11 parked)
-      const tt = Math.max(0, t), mm = Math.floor(tt / 60);
-      setText(hud.time, mm + ':' + (tt - mm * 60).toFixed(2).padStart(5, '0'));
+      const cs = Math.round(Math.max(0, t) * 100), mm = Math.floor(cs / 6000);   // (hundredths first, so 59.996 s reads 1:00.00, never 0:60.00)
+      setText(hud.time, mm + ':' + ((cs % 6000) / 100).toFixed(2).padStart(5, '0'));
+      root.classList.toggle('driving', state !== 'onfoot');   // drive.css: the hint moves up only while driving; on foot the camera is unchanged
       setText(hud.pos, race ? (car.s >= race.s ? '1/2' : '2/2') : state === 'onfoot' ? (me.s >= him.s ? '1/2' : '2/2') : '—');
       posBox.classList.toggle('hot', !raceBar.hidden && raceBar.classList.contains('hot'));
       const cp = state === 'onfoot' ? 0 : state === 'parked' ? 11 : Math.min(10, Math.max(0, Math.floor((car.s - cpFrom) / Math.max(1, spot.s - cpFrom) * 11)));

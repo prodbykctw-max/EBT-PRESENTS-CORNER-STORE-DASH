@@ -443,7 +443,7 @@ view. It follows each lane change.
 
 The realistic look (the default) has its own, closer and lower chase camera (`CAM_R` at the top of `drive.js`: 6.8 m behind
 the car's centre plus 0.03 m per m/s, 2.8 m up with no speed term). It is aimed by where the car lands on screen (the car's
-rear-bottom edge sits at 84% of the screen height) instead of at a point up the road, and it carries along with the car's
+rear-bottom edge sits 77% of the way down the screen, `CAM_R.yCar`; on phones the view offset's tenth is allowed for, so the car sits there on screen too) instead of at a point up the road, and it carries along with the car's
 own forward movement each frame, so the follow's usual lag (speed / 6 m) is gone and the car stays the same size at any
 speed. The comic look keeps the 8 m / 3 m camera above, untouched.
 

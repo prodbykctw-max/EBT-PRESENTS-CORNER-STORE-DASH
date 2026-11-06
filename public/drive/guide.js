@@ -1,5 +1,5 @@
-// Racing guide for the realistic look only (drive.js builds it only when the realistic look is on, so the comic
-// look never loads or draws any of this):
+// Racing guide for the realistic look only (drive.js imports this file for both looks, but builds a Guide only when the
+// realistic look is on, so the comic look never builds, updates or draws any of this):
 //  * two red lines on the road ahead of the car, one each side of it, that follow the lane you are steering to
 //    (a lane tap swings them across) and, near the store, bend in to the parking space;
 //  * amber chevrons laid on the road through the one real bend of the route;
