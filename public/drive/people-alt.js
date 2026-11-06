@@ -66,7 +66,7 @@ function hash(i, k) {
 const pick = (table, r) => { let a = 0; for (const [v, w] of table) { a += w; if (r < a) return v; } return table[table.length - 1][0]; };
 
 /** everything a person is made of that crowd.js doesn't decide: gender, build, hair, outfit, shoes (deterministic per index).
- *  `prev` (B people only): the traits of the person before, so that two neighbours never share a body type or an outfit. */
+ *  `prev` (B people only): the traits of the person before, so that two neighbours never share a body type, and never an outfit except two hooded people in a row (the hood forces the hoodie). */
 export function traitsFor(m, i, bodyVariants = 1, heightByGender = true, prev = null) {
   const fem = hash(i, 1) < 0.5, h = (k) => hash(i, k);
   const ACC = { cap: 1, long: 2, bag: 4, hood: 8 };   // crowd.js's own bits (m.acc)
@@ -160,6 +160,7 @@ uniform vec3 uSkin[${SKIN.length}]; uniform vec3 uTop[${TOPS.length}]; uniform v
 uniform float uSole; uniform vec3 uHair[${HAIR.length}]; uniform vec3 uShoe[${SHOE.length}];
 uniform vec4 uFace[8];   // per body variant: eye height, half eye spacing, mouth height, head front z (all as fractions of standing height)
 float pedEllipse(vec2 d, vec2 r) { return 1.0 - smoothstep(0.55, 1.0, length(d / r)); }
+float pedMatte;   // 1 = chalky matte (canvas, rubber, socks): no specular highlight
 float pedGloss;   // how shiny this fragment is (polished leather), set by pedColor and read after it by the roughness
 // B's real shoes (slot 6): h above the sole and f forward of the heel, both in metres, from the geometry (baked in build_people.py), so the paint is crisp at any triangle count.
 // vShoeT: 0 sneaker, 1 dress shoe, 2 boot. Above the shoe's collar the geometry is a sock (shorts, skirts, tights) or the trouser leg falling over the shoe (long trousers).
@@ -167,17 +168,20 @@ vec3 pedShoe(vec3 shoe, vec3 bot, float cover, float dress) {
   float h = vShoeHF.x, f = vShoeHF.y, t = vShoeT;
   float cuff = t < 0.5 ? SHOE_CUFF_SNEAKER : t < 1.5 ? SHOE_CUFF_DRESS : 9.0;
   if (h > cuff) {
+    pedMatte = 1.0;
     if (cover > 0.9 && dress < 0.5) return bot * (h > cuff + 0.004 ? 1.0 : 0.82);
-    return dot(shoe, vec3(0.333)) < 0.1 ? vec3(0.10) : vec3(0.90);                // sock: dark with dark shoes, white otherwise
+    return dot(shoe, vec3(0.333)) < 0.1 ? vec3(0.10) : vec3(0.38);                // sock: dark with dark shoes, white otherwise
   }
   if (t > 1.5 && h > 0.15 && cover > 0.9 && dress < 0.5) return bot;                // boot-cut: the trouser leg hangs over the top of the boot
   vec3 c = shoe;
-  float lace = step(0.5, fract(f * 90.0));
+  float lx = f * 90.0, lw = fwidth(lx);                                              // lace stripes (1.1 cm): a soft-edged triangle wave that fades to its mean once a stripe is about a pixel, so it can't shimmer at a distance
+  float lace = mix(smoothstep(0.5 - lw, 0.5 + lw, abs(fract(lx) - 0.5) * 2.0), 0.5, smoothstep(0.25, 0.6, lw));
   if (t < 0.5) {                                                                      // sneaker: white rubber sole with a grey outsole, toe cap, laces, heel tab
-    if (h < SOLE_SNEAKER) return h < 0.008 ? vec3(0.26) : vec3(0.64);
-    if (f > 0.205 && h < 0.07) c = mix(c, vec3(0.64), 0.65);
+    if (h < SOLE_SNEAKER) { pedMatte = 1.0; return h < 0.008 ? vec3(0.17) : vec3(0.36); }
+    if (f > 0.205 && h < 0.07) c = mix(c, vec3(0.36), 0.65);
     if (f < 0.04 && h > 0.05) c *= 0.62;
-    if (f > 0.09 && f < 0.16 && h > 0.07) c = mix(c, vec3(0.64), 0.5 * lace + 0.1);
+    if (f > 0.09 && f < 0.16 && h > 0.07) c = mix(c, vec3(0.36), 0.5 * lace + 0.1);
+    pedMatte = 1.0;
   } else if (t < 1.5) {                                                               // dress shoe: thin dark sole, polished leather, laces
     if (h < SOLE_DRESS) { pedGloss = 0.3; return h < 0.005 ? vec3(0.025) : vec3(0.07, 0.055, 0.05); }
     pedGloss = 0.7;
@@ -188,10 +192,10 @@ vec3 pedShoe(vec3 shoe, vec3 bot, float cover, float dress) {
     pedGloss = 0.25;
     if (h > 0.185) c *= 0.78;
   }
-  return c * 0.74;
+  return min(c * 0.74, vec3(0.36));   // nothing on a shoe is brighter than 0.36 albedo (measured: 0.5 still saturated the lit top of a toe to flat white under the sun): the sun on an up-facing white surface would otherwise cross the bloom threshold
 }
 vec3 pedColor() {
-  pedGloss = 0.0;
+  pedGloss = 0.0; pedMatte = 0.0;
   vec3 skin = uSkin[int(vPal.x + 0.5)], top = uTop[int(vPal.y + 0.5)], bot = uBot[int(vPal.z + 0.5)], acc = uAcc[int(vPal.w + 0.5)];
   vec3 hair = uHair[int(vHair.x + 0.5)], shoe = uShoe[int(vHair.y + 0.5)];
   float slot = vInfo.x, sleeve = vOut.x, cover = vOut.y, jacket = vOut.z, tight = vOut.w, dress = vHair.w;
@@ -257,7 +261,7 @@ function patch(shader, variant, lod, colour) {
   Object.assign(shader.uniforms, lod.uniforms);
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\n' + PAINT_DECL_V + lod.decl);
-  const call = 'vec3 pedP, pedN, pedRest; pedPose(pedP, pedN, pedRest);\nif (pedHidden()) { pedP = vec3(0.0, 1.1, 0.0); }\n';
+  const call = 'vec3 pedP = vec3(0.0, 1.1, 0.0), pedN = vec3(0.0, 1.0, 0.0), pedRest = vec3(0.0);\nif (!pedHidden()) pedPose(pedP, pedN, pedRest);   // an unworn part is collapsed to a point and never pays for the pose reads\n';
   if (colour) {
     shader.vertexShader = shader.vertexShader
       .replace('#include <beginnormal_vertex>', call + 'vec3 objectNormal = pedN;\n#ifdef USE_TANGENT\nvec3 objectTangent = vec3(tangent.xyz);\n#endif')
@@ -273,7 +277,7 @@ function patch(shader, variant, lod, colour) {
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\n' + SHOE_GLSL + PAINT_FRAG)
       .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= pedColor();')
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.32, pedGloss);');
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.32, pedGloss);\nroughnessFactor = mix(roughnessFactor, 1.0, pedMatte);');
   } else {
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', call + 'vec3 transformed = pedP;\n');
   }

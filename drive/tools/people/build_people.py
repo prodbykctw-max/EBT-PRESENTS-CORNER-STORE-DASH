@@ -20,7 +20,7 @@ What it does
      a standing pose (arms down, legs together, feet flat), 12 walk frames, a phone-in-hand pose and a hands-up pose;
   4. adds the parts a person may or may not wear (hair in several styles, cap, backpack, hood, skirt), fitted to each body's head and torso, and the three
      shoes (fitted to each body's feet, skinned to the same bones; the body's own feet under them are dropped);
-  5. writes people.json (what is where) and people.bin: indices and per-vertex fields per level of detail, positions as float16 and normals
+  5. writes people2.json (what is where) and people2.bin: indices and per-vertex fields per level of detail, positions as float16 and normals
      as 8 bit per frame per variant (the "vertex animation texture" the vertex shader fetches from).
 The walk is the same gait as people-a.js (hip, knee, ankle, arm swing, elbow, shoulder counter-rotation, head nod, lowest foot on the ground).
 """
@@ -585,8 +585,8 @@ for L in lod_out:
     lods_meta.append(m)
 meta = dict(version=2, source='MakeHuman base mesh, rig and macro targets (CC0 1.0), https://github.com/makehumancommunity/makehuman', frames=dict(walk=N, perVariant=FR, stand=0, phone=N + 1, startle=N + 2),
             variants=meta_variants, lods=lods_meta)
-open(args.out.rstrip('/') + '/people.json', 'w').write(json.dumps(meta, separators=(',', ':')))
-open(args.out.rstrip('/') + '/people.bin', 'wb').write(blob)
-print('wrote', len(blob), 'bytes of people.bin')
+open(args.out.rstrip('/') + '/people2.json', 'w').write(json.dumps(meta, separators=(',', ':')))
+open(args.out.rstrip('/') + '/people2.bin', 'wb').write(blob)
+print('wrote', len(blob), 'bytes of people2.bin')
 if args.preview:
     np.savez(args.preview, **{f'{L["name"]}_{k}': L[k] for L in lod_out for k in ('pos', 'nor', 'faces', 'info', 'reg')})

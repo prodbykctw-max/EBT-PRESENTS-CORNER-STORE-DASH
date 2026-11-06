@@ -1,6 +1,6 @@
 // Option B: MakeHuman (CC0) bodies with the walk baked into vertex-animation textures. The bodies, the walk frames, the phone and hands-up poses,
 // the parts a person may wear (hair, cap, backpack, hood, skirt) and the three shoes (sneaker, dress shoe, ankle boot, skinned to the feet) are all made offline by drive/tools/people/build_people.py into
-// people-real/people.json + people.bin. Here the vertex shader only reads them:
+// people-real/people2.json + people2.bin. Here the vertex shader only reads them:
 //   tStand  the standing pose of each body (float16 position and normal per vertex)
 //   tAnim   every other frame of each body as an 8-bit delta from the standing pose (12 walk frames, the phone pose, the hands-up pose)
 // A person's phase picks two walk frames to blend, their stride scales the walk's delta (a standing person gets none), the phone and the startle
@@ -38,11 +38,20 @@ void pedPose(out vec3 pos, out vec3 nrm, out vec3 pedRest) {
 `;
 
 export async function makeB(withoutRandom = (f) => f()) {
-  const [meta, buf] = await Promise.all([fetch(new URL('people.json', BASE)).then((r) => r.json()), fetch(new URL('people.bin', BASE)).then((r) => r.arrayBuffer())]);
+  // people2.*: the data with the shoes. The names changed with the code (the older people.* stay put), so cached code never meets data from another build.
+  const [meta, buf] = await Promise.all([fetch(new URL('people2.json', BASE)).then((r) => r.json()), fetch(new URL('people2.bin', BASE)).then((r) => r.arrayBuffer())]);
   return withoutRandom(() => build(meta, buf));
 }
 
 function build(meta, buf) {
+  // a wrong or truncated file throws here and the caller keeps the box people
+  if (meta.version !== 2) throw new Error('people data: version ' + meta.version);
+  let end = 0;
+  for (const m of meta.lods) {
+    if (m.reg2.count !== m.verts * 3) throw new Error('people data: reg2 is not 3 floats per vertex');
+    for (const b of Object.values(m)) if (b && typeof b === 'object' && 'offset' in b && 'length' in b) end = Math.max(end, b.offset + b.length);
+  }
+  if (buf.byteLength < end) throw new Error('people data: people2.bin is short');
   const NV = meta.variants.length, FRM = meta.frames;
   const lods = meta.lods.map((m) => {
     const u16 = (s) => new Uint16Array(buf, s.offset, s.length / 2), f32 = (s) => new Float32Array(buf, s.offset, s.length / 4), u8 = (s) => new Uint8Array(buf, s.offset, s.length);

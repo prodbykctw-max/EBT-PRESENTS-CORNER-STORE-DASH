@@ -27,7 +27,7 @@ What is NOT from MakeHuman: the hair, caps, backpacks, hoods, skirts, the painte
 project (drive/tools/people/export_shells.mjs, drive/tools/people/build_people.py, public/drive/people-alt.js). Nothing here comes from Mixamo or
 any other download. MakeHuman's hair and skins were not used, and of its clothes only the three shoes above.
 
-people.json and people.bin are generated:
+people2.json and people2.bin are generated (people.json and people.bin are the previous build, kept unchanged so a tab still running the old code finds its matching data):
   python3 -I drive/tools/people/fetch_shoes.py --out <shoe dir>
   python3 -I drive/tools/people/build_people.py --mh <checkout>/makehuman/data --shoes <shoe dir> --out public/drive/people-real
 (needs numpy, scipy and bpy for Blender's decimate modifier; the build takes a few seconds).
