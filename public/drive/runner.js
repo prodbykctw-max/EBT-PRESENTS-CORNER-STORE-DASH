@@ -686,7 +686,9 @@ export class World {
       a.waitT = a.waiting && a.vs < 0.3 ? (a.waitT || 0) + dt : 0;
       // a way that dead-ends at our road and has nowhere to go: after a spell at the line it is gone once the player is well away from it
       a.stillT = a.vs < 0.3 ? (a.stillT || 0) + dt : 0;
-      if (a.dead_end && a.stillT > 15 && Math.hypot(cx - car.pose.x, cy - car.pose.y) > 55) { a.dead = true; continue; }
+      // (and only once it is out of sight: it used to go whether or not it was on screen, and a car waiting at a junction ahead is in view from
+      // far down the street, so it blinked out. If it is in view it simply stays at the line)
+      if (a.dead_end && a.stillT > 15 && Math.hypot(cx - car.pose.x, cy - car.pose.y) > 55 && (a.x === undefined || !this.visible(a.x, a.y, a.zAbs, a.type === 'bus' ? 7 : 3.5))) { a.dead = true; continue; }
       for (const b of this.ambient) {   // the vehicle ahead on the same street
         if (b === a || b.dead || b.x === undefined || b.road !== a.road || Math.cos(a.h - b.h) < 0.3) continue;   // (one going the other way on that road is not in front of us: two of them head to head each waited for the other for the whole run)
         const ox = b.x - cx, oy = b.y - cy, al = ox * Math.cos(a.h) + oy * Math.sin(a.h);
