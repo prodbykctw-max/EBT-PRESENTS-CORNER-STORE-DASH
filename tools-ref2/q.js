@@ -1,0 +1,1 @@
+return await p.evaluate(() => [...document.querySelectorAll('.drive-rhud, .drive-rbar, .drive-row2, .drive-row2 > *')].map((e) => { const r = e.getBoundingClientRect(), c = getComputedStyle(e); return [e.className, Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height), c.opacity, c.display, e.hidden]; }));

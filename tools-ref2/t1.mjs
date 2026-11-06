@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+import { open, ticks, place, measure, shot } from './lib.mjs';
+const which = process.argv[2] || 'branch';
+const t0 = Date.now();
+const { b, p } = await open({ which });
+console.log('boot', (Date.now() - t0) / 1000);
+await ticks(p, 200);
+await place(p, { s: 600 });
+console.log(JSON.stringify(await measure(p)));
+await shot(p, `out/t1_${which}.png`);
+console.log('done', (Date.now() - t0) / 1000);
+await b.close();

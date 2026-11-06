@@ -441,6 +441,23 @@ The camera sits behind the car (rear third-person chase view): about 8 m behind 
 and up with speed, aimed ahead of the car so the car sits in the lower part of the screen with the street ahead in
 view. It follows each lane change.
 
+The realistic look (the default) has its own, closer and lower chase camera (`CAM_R` at the top of `drive.js`: 6.8 m behind
+the car's centre plus 0.03 m per m/s, 2.8 m up with no speed term). It is aimed by where the car lands on screen (the car's
+rear-bottom edge sits 77% of the way down the screen, `CAM_R.yCar`; on phones the view offset's tenth is allowed for, so the car sits there on screen too) instead of at a point up the road, and it carries along with the car's
+own forward movement each frame, so the follow's usual lag (speed / 6 m) is gone and the car keeps nearly the same size at
+any speed (the 0.03 m per m/s of `backV` puts the camera about 7.6 m back at top speed, so the car shrinks about 10%). The
+camera is carried up and down with the road's height under the car as well (the route's ground height at the car's drawn
+position, not the car's own body height, which would pass every curb and seam into the frame), and after the easing the 2.5 m
+of air under the camera is applied again where the camera really is (on the Luckie St climb at 20 m/s it measured 1.8 m
+without that and 2.5 m with it). The comic look keeps the 8 m / 3 m camera above, untouched.
+
+Realistic look only (`guide.js`, built only when the realistic look loaded): two red lines on the road ahead of the car,
+one each side of it, that follow the lane you are steering to (a lane tap swings them across) and bend in to the parking
+space for the last 45 m; amber chevrons through the route's one real bend (about s 150-225); and, behind the `?pullin`
+flag (off by default), three pull-in chevrons before the space. The HUD is a racing bar (`HUD_HTML_REAL`, CSS under
+`.drive-root.real`): POSITION / TIME / CHECKPOINT on top; EBT, the race to the store, SPEED and the distance below. The comic
+HUD markup is unchanged.
+
 (Code: `drive.js` laneAt / laneShift / followLane and the camera rig; `runner.js` Car.step's lateral path.)
 
 | Phone | Keyboard | Action |
