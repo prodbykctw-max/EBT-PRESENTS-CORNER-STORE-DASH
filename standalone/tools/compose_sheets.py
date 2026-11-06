@@ -10,7 +10,7 @@ import base64, colorsys, io, os
 from PIL import Image
 
 CHAR_DIR = os.environ.get("CSD_CHAR_DIR", r"C:\Users\Owner\Desktop\corner-store-dash-character")
-RENDERS = os.environ.get("CSD_RENDERS", "renders3")      # renders3: the walk with the arm swing (bake_characters.py); renders2: the old one
+RENDERS = os.environ.get("CSD_RENDERS", "renders2")      # renders2: the shipped sheets; renders3: the walk with the drive's arm swing (CSD_ARMS=1)
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FRAMES, CELL = 8, 96
 

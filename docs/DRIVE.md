@@ -433,7 +433,8 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   toe alone points ~11 degrees off). Measured on the arm joints at the bully's size: sideways 0.377 m in the run (0.401
   before), front/back of the hip 0.420 m in the run (0.366 before) and 0.383 m in the walk (0.222), so `BODY` (0.42 m,
   which also pads the obstacle boxes along the street) still holds (`tools-arms/width.mjs`). It runs on a private random generator, so the traffic's shared `Math.random` stream is unchanged.
-  The store's sprite sheets carry the same swing on the walk (`standalone/tools/arm_swing.py`). The bully is the same model recoloured in the shader exactly as the
+  The store's sprite sheets keep the walk as it is (the owner judged them fine); a bake with the same swing exists
+  (`standalone/tools/arm_swing.py`, `CSD_ARMS=1`). The bully is the same model recoloured in the shader exactly as the
   store's sprite sheet is (white tee -> red, denim -> charcoal, red kicks -> black) and drawn taller.
 - **The race.** When you get in he runs for his own ride (1.6 s), then comes after you at 17 m/s, shown only on the bar
   at the top (`.drive-race`: your head, his head, the STORE flag; `heads.png`). If he gets within 4.5 m he's **on your

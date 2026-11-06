@@ -1,5 +1,6 @@
 """The arm swing on the store characters' walk, in Blender: the same motion the drive adds in three.js
-(public/drive/people.js addArmSwing, ARMS.walk), so you swing your arms the same way in the store and in the chase.
+(public/drive/people.js addArmSwing, ARMS.walk). Used only with CSD_ARMS=1 in bake_characters.py: the shipped store
+sheets keep the walk as it is (the owner judged them fine, Nov 6 2026); renders3 on the laptop holds a bake with it.
 
 The Tripo walk (preset:biped:walk) barely moves the arms: the upper arms stay at the sides, so in the store's front and
 back rows they did not move at all. Each arm is turned about the shoulder, forward when the opposite foot is forward;
