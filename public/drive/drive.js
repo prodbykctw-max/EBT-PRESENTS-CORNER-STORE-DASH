@@ -480,7 +480,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const api = { camOverride: null }; // test hooks (filled in below)
   // ---------- state ----------
   let t = TIME_LIMIT, drove = 0, hits = 0, tokens = 0, nearMisses = 0, state = SKIPFOOT ? 'countdown' : 'onfoot', countdown = 3, shake = 0, endT = 0;
-  const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), tmp3 = new THREE.Vector3(), lastCar = new THREE.Vector3();
+  const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), tmp3 = new THREE.Vector3(), lastCar = new THREE.Vector3(); let lastRz = 0;
   const camV = { d: 0, px: 0, py: 0, pz: 0, lx: 0, ly: 0, lz: 0 }; let camD = null;   // on-foot camera follow (smoothDamp state)
   // ---------- stiff lane steering ----------
   // The car sits in one of four lanes, right to left: 0 the right parking lane, 1 your lane, 2 the oncoming lane,
@@ -1391,14 +1391,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         // camera along with the car's own forward movement first, so only sideways movement and the camera's own easing are left to smooth.
         // (not when the car was put somewhere, a test hook's teleport)
         const mx = carRig.position.x - lastCar.x, mz = carRig.position.z - lastCar.z;
-        if (Math.hypot(mx, mz) < 2) { const f = mx * Math.cos(camA) - mz * Math.sin(camA), fx = f * Math.cos(camA), fz = -f * Math.sin(camA); camPos.x += fx; camPos.z += fz; camLook.x += fx; camLook.z += fz; const my = carRig.position.y - lastCar.y; camPos.y += my; camLook.y += my; }   // (and its climb or fall: on a hill the lag would eat into the 2.5 m of air under the camera)
+        if (Math.hypot(mx, mz) < 2) { const f = mx * Math.cos(camA) - mz * Math.sin(camA), fx = f * Math.cos(camA), fz = -f * Math.sin(camA); camPos.x += fx; camPos.z += fz; camLook.x += fx; camLook.z += fz; const my = route.at(drawS, drawD).z - lastRz; camPos.y += my; camLook.y += my; }   // (and the road's climb or fall under it, not the car's own body height: curbs and seams would jolt the frame; on a hill the lag would eat into the 2.5 m of air under the camera)
       }
       camPos.lerp(targetPos, Math.min(1, dt * 6)); camLook.lerp(targetLook, Math.min(1, dt * 8));
       // realistic: the 2.5 m of air under the camera is re-applied where the camera really is after the easing (the target above only
       // knows the ground under where the camera is heading; on the Luckie St climb the eased camera was 1.8 m up at 20 m/s)
       if (RL) camPos.y = Math.max(camPos.y, ground(camPos.x, -camPos.z) + 2.5);
     }
-    lastCar.copy(carRig.position);
+    lastCar.copy(carRig.position); if (RL) lastRz = route.at(drawS, drawD).z;
     if (api.camOverride) { camPos.copy(api.camOverride.pos); camLook.copy(api.camOverride.look); } // QA: free camera
     camera.position.copy(camPos);
     if (shake > 0 && state === 'onfoot') {

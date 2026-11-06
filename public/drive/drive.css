@@ -141,11 +141,13 @@
 .drive-root.real .drive-race .gap { right: 8px; top: 5px; white-space: nowrap; }   /* one line, above the track and the STORE flag, so it can't wrap onto the heads */
 .drive-root.real .drive-light { top: calc(max(10px, env(safe-area-inset-top)) + 112px); }
 .drive-root.real.driving .drive-hint { bottom: auto; top: 50%; }   /* the closer camera puts the car where the hint used to sit (driving only: on foot the camera is unchanged and the hint stays at bottom: 120px) */
+@media (max-height: 430px) { .drive-root.real.driving .drive-hint { top: 60%; } }   /* short landscape: clear of the message (38%) */
+@media (max-height: 430px) { .drive-root.real .drive-rhud { width: min(560px, calc(100% - 236px)); } }   /* short landscape: a smaller side reserve (SKIP is about 105 px wide), so SPEED and STORE fit at 568 px */
 @media (max-width: 560px) {
   .drive-root.real .drive-rhud { top: calc(max(10px, env(safe-area-inset-top)) + 42px); left: 12px; right: 12px; width: auto; transform: none; }
   .drive-root.real .drive-light { top: calc(max(10px, env(safe-area-inset-top)) + 150px); }
 }
-@media (max-width: 560px), (pointer: coarse) and (orientation: portrait) {
+@media (max-width: 560px), (pointer: coarse) and (orientation: portrait), (max-height: 430px) {
   .drive-root.real .rb-cell b { font-size: 18px; }
   .drive-root.real .rb-cell { padding: 4px 6px; }
   .drive-root.real .drive-row2 .rb-cell { padding: 4px 7px; }

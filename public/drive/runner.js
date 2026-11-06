@@ -688,7 +688,9 @@ export class World {
       a.stillT = a.vs < 0.3 ? (a.stillT || 0) + dt : 0;
       // (and only once it is out of sight: it used to go whether or not it was on screen, and a car waiting at a junction ahead is in view from
       // far down the street, so it blinked out. If it is in view it simply stays at the line)
-      if (a.dead_end && a.stillT > 15 && Math.hypot(cx - car.pose.x, cy - car.pose.y) > 55 && (a.x === undefined || !this.visible(a.x, a.y, a.zAbs, a.type === 'bus' ? 7 : 3.5))) { a.dead = true; continue; }
+      // (the frustum test has no occlusion and a 3000 m far plane, so a car waiting far ahead would count as in view until you passed it, and the cars
+      // behind it would queue: past 250 m (about 5 px tall) it counts as out of view, and after 40 s it goes whether seen or not)
+      if (a.dead_end && Math.hypot(cx - car.pose.x, cy - car.pose.y) > 55 && (a.stillT > 40 || (a.stillT > 15 && (a.x === undefined || !this.camera || Math.hypot(a.x - this.camera.position.x, a.y + this.camera.position.z) > 250 || !this.visible(a.x, a.y, a.zAbs, a.type === 'bus' ? 7 : 3.5))))) { a.dead = true; continue; }
       for (const b of this.ambient) {   // the vehicle ahead on the same street
         if (b === a || b.dead || b.x === undefined || b.road !== a.road || Math.cos(a.h - b.h) < 0.3) continue;   // (one going the other way on that road is not in front of us: two of them head to head each waited for the other for the whole run)
         const ox = b.x - cx, oy = b.y - cy, al = ox * Math.cos(a.h) + oy * Math.sin(a.h);
