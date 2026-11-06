@@ -266,7 +266,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   };
   world.footAt = footAt; world.feet = { surface: feetSurface, rebuild: () => (flat.length ? new TopSurface(flat, 8, nearTri) : null) };   // (rebuild: for measuring the load-time cost)
   const crowd = world.crowd = new Crowd({
-    route, ground, surfAt, heightAt: footAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree, alt: altPeople,
+    route, ground, surfAt, heightAt: footAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree, alt: altPeople, blob: MOBILE && !!RL,
     walls: city.walls, heroWalls: heroSegments(hero.scene, ground(SPOT.x, SPOT.y)), roads: city.streets.index,
     furniture: { ...city.furniture, shelter: [...(city.furniture.shelter || []), ...trams.shelters] },   // riders wait at streetcar platforms too
     onRoute: (x, y) => onRouteRoad(x, y),

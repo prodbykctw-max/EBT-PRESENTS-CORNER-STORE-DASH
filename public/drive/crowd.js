@@ -10,6 +10,7 @@ import * as THREE from './vendor/three.module.min.js';
 import { mergeGeometries } from './vendor/BufferGeometryUtils.js';
 import { LEVEL } from './levels.js';
 import { uploadUsed, shadowSplit } from './runner.js';
+import { ContactBlobs } from './contact.js';
 import { buildCorral, COL, F_CLOSED, F_MOUTH, F_HERO } from './corral.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -121,8 +122,9 @@ export class Crowd {
    * spot: parking space {s,d} (the corner store is on its side) · mobile: phone budget
    * walls: the drawn buildings' wall segments · heroWalls: the hand-built row's wall slices · roads: the other roads (SegIndex)
    * heightAt(x,y,below): what a person's feet stand on: the road surface and the curbs (default: surfAt)
+   * blob: phones, realistic look: a cheap round contact shadow under each person drawn (contact.js; the crowd casts no sun shadow there), whichever way they are drawn
    */
-  constructor({ route, ground, surfAt, heightAt, onRoute, isFree, furniture, visible, camera, spot, mobile, scene, walls, heroWalls, roads, alt }) {
+  constructor({ route, ground, surfAt, heightAt, onRoute, isFree, furniture, visible, camera, spot, mobile, scene, walls, heroWalls, roads, alt, blob = false }) {
     Object.assign(this, { route, ground, surfAt, visible, camera });
     this.footAt = heightAt || surfAt;
     // the whole route is populated from the start (one person per ~5 m of sidewalk, 6.5 m on phones); only the
@@ -174,6 +176,7 @@ export class Crowd {
       s += g.members.length * this.spacing * rnd(0.6, 1.4);            // stratified: even overall, never regular
     }
     this.relocate();
+    if (blob) this.blob = new ContactBlobs(scene, this.people.length);   // (built without drawing from Math.random)
     // the realistic look's people (drive.js hands over `alt` from people-alt.js; null in the comic look and with ?people=none): someone else draws the same people
     // (their positions, paths and behaviour are all above and unchanged; AltPeople takes the same 4 draws from Math.random that the InstancedMesh below takes)
     if (alt) { this.alt = new alt.AltPeople({ crowd: this, variants: alt.variants, scene, mobile }); this.mesh = this.alt.mesh; this.t = 0; return; }
@@ -608,7 +611,7 @@ export class Crowd {
     const SB = M.castShadow && car ? this.shadowBox : null, cp = SB ? r.at(car.s, car.d) : null;
     let ax, ay, lim;
     if (SB) { const zA = new THREE.Vector3().copy(SB.dir).normalize(); ax = new THREE.Vector3(0, 1, 0).cross(zA).normalize(); ay = zA.clone().cross(ax); lim = SB.half() + 25; }
-    let lo = 0, hi = 0;
+    let lo = 0, hi = 0; const BL = this.blob; if (BL) BL.begin();
     for (const m of this.people) {
       if (m.dirty || m.x === undefined) {                       // moved (or never placed): find the ground under them
         const p = r.at(m.s, m.g.side * m.d), gz = this.ground(p.x, p.y);
@@ -619,6 +622,7 @@ export class Crowd {
       const far = Math.hypot(m.x - cam.x, m.z - cam.y, -m.y - cam.z);
       m.on = this.visible(m.x, m.y, m.z + 0.9, 3 + far * 0.04) && lo + hi < cap;
       if (!m.on) continue;
+      if (BL) BL.add(m, far);
       let i;
       if (SB) {
         const rx = m.x - cp.x, ry = m.z - cp.z, rz = -m.y + cp.y;
@@ -635,6 +639,7 @@ export class Crowd {
       M.instanceMatrix.array.copyWithin(lo * 16, (cap - hi) * 16, cap * 16);
       for (const a of Object.values(A)) a.array.copyWithin(lo * a.itemSize, (cap - hi) * a.itemSize, cap * a.itemSize);
     }
+    if (BL) BL.end();
     const n = lo + hi;
     M.count = n; M.userData.shadowCount = lo; uploadUsed(M.instanceMatrix, n);
     for (const a of Object.values(A)) uploadUsed(a, n);   // only the people drawn this frame (the buffers hold the whole route)
