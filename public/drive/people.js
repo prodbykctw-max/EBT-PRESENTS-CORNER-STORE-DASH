@@ -84,3 +84,79 @@ export function makeStandClip(walk) {
   }
   return new THREE.AnimationClip('stand', walk.duration, tracks);
 }
+
+/** Arm swing on top of a clip. The character's own walk barely moves the arms: the upper arms stay at the sides (seen
+ *  from behind, the way the chase camera sees you, they did not move at all), so each arm is turned about the
+ *  shoulder, forward when the opposite foot is forward, and the elbow bends further on the forward swing (a run
+ *  pumps the arms with the elbows bent). `swing`: degrees each way at the shoulder; `bend` + `pump`: extra elbow bend,
+ *  `bend` always and `pump` more at the front of the swing; `out`: degrees the arm is held away from the body (negative:
+ *  tucked in; -2 keeps the swinging arms within ~1 cm of the old reach, so BODY in drive.js still holds); `shoulder`: the share of the swing the shoulder (clavicle) rolls forward and back with the
+ *  arm, so the T-shirt sleeve, which is skinned partly to the shoulder, goes with the arm instead of stretching into a
+ *  white wedge. Phase comes from the clip's own feet, so it always matches the legs. Returns a new clip. */
+export const ARMS = {
+  walk: { swing: 15, bend: 14, pump: 26, out: -2, shoulder: 0.4 },   // a brisk walk: small swing, the forearm pumps up in front
+  run: { swing: 30, bend: 42, pump: 18, out: -2, shoulder: 0.4 },    // a run: elbows bent, hand to the chest in front, behind the hip at the back
+};
+// three.js draws Math.random for the id of everything it makes, and the traffic shares that stream: the posing clone here
+// runs on a private generator so adding the swing does not move it (same idea as withoutRandom in people-alt.js)
+let armRng = 0x2545f491;
+const privateRandom = () => { armRng ^= armRng << 13; armRng ^= armRng >>> 17; armRng ^= armRng << 5; return (armRng >>> 0) / 4294967296; };
+export function addArmSwing(clip, root, opt) {
+  const real = Math.random; Math.random = privateRandom;
+  try { return armSwing(clip, root, opt); } finally { Math.random = real; }
+}
+function armSwing(clip, root, { swing = 24, bend = 10, pump = 14, out = 4, shoulder = 0.4 } = {}) {
+  const o = root.clone(true);     // plain clone: posing only needs the bones, not the skinning
+  const mixer = new THREE.AnimationMixer(o); mixer.clipAction(clip).play();
+  const get = (n) => o.getObjectByName(n);
+  const tracks = clip.tracks.map((t) => t.clone());
+  const track = (n) => tracks.find((t) => t.name === n + '.quaternion');
+  const D = THREE.MathUtils.DEG2RAD;
+  const fwd = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), side = new THREE.Vector3(), w = new THREE.Vector3(), w2 = new THREE.Vector3();
+  // forward: the way the toes point, measured at the first frame
+  mixer.setTime(0); o.updateMatrixWorld(true);
+  get('L_ToeBase').getWorldPosition(w); get('L_Foot').getWorldPosition(w2); fwd.subVectors(w, w2).setY(0).normalize();
+  side.crossVectors(fwd, up).normalize();                                   // turning +angle about this swings a hanging hand forward
+  for (const S of ['L', 'R']) {
+    const O = S === 'L' ? 'R' : 'L';
+    const tu = track(S + '_Upperarm'), tf = track(S + '_Forearm'), tc0 = track(S + '_Clavicle');
+    if (!tu || !tf || !tc0) continue;
+    const times = tu.times, n = times.length;
+    // the clavicle's own track is a constant (2 keys): resample it on the arm's times so it can move
+    const tc = new THREE.QuaternionKeyframeTrack(tc0.name, Array.from(times), new Array(n * 4).fill(0));
+    tracks[tracks.indexOf(tc0)] = tc;
+    // the opposite foot's distance in front of the hips, per sample, scaled to -1..1
+    const ph = [];
+    for (let i = 0; i < n; i++) {
+      mixer.setTime(times[i]); o.updateMatrixWorld(true);
+      get(O + '_Foot').getWorldPosition(w); get('Hip').getWorldPosition(w2); ph.push(w.sub(w2).dot(fwd));
+    }
+    const mid = (Math.max(...ph) + Math.min(...ph)) / 2, amp = (Math.max(...ph) - Math.min(...ph)) / 2 || 1;
+    if (tf.times.length !== n) continue;                                    // both tracks are sampled together
+    // which way is "away from the body" for this arm
+    mixer.setTime(0); o.updateMatrixWorld(true);
+    get(S + '_Hand').getWorldPosition(w); get('Spine02').getWorldPosition(w2);
+    const outSign = Math.sign(w.sub(w2).dot(side)) || 1;
+    const Ps = new THREE.Quaternion(), Wc = new THREE.Quaternion(), Pc = new THREE.Quaternion(), Pc2 = new THREE.Quaternion(), Lu = new THREE.Quaternion(), Lf = new THREE.Quaternion(), Wu = new THREE.Quaternion(), Wf = new THREE.Quaternion(), R = new THREE.Quaternion(), R2 = new THREE.Quaternion();
+    for (let i = 0; i < n; i++) {
+      mixer.setTime(times[i]); o.updateMatrixWorld(true);
+      const cl = get(S + '_Clavicle');
+      cl.parent.getWorldQuaternion(Ps); cl.getWorldQuaternion(Pc);
+      const s = (ph[i] - mid) / amp;                                          // +1: this arm's front of the swing
+      Lu.fromArray(tu.values, i * 4); Lf.fromArray(tf.values, i * 4);
+      Wu.multiplyQuaternions(Pc, Lu);
+      R.setFromAxisAngle(side, swing * D * s); R2.setFromAxisAngle(fwd, -outSign * out * D);
+      Wu.premultiply(R).premultiply(R2);
+      // the shoulder rolls forward with the arm (about the vertical, its outer end toward the front)
+      R.setFromAxisAngle(up, outSign * shoulder * swing * D * s);
+      Pc2.copy(Pc).premultiply(R);
+      Wc.copy(Ps).invert().multiply(Pc2); Wc.toArray(tc.values, i * 4);
+      Lu.copy(Pc2).invert().multiply(Wu); Lu.toArray(tu.values, i * 4);
+      Wf.multiplyQuaternions(Wu, Lf);
+      R.setFromAxisAngle(side, (bend + pump * Math.max(0, s)) * D);
+      Wf.premultiply(R);
+      Lf.copy(Wu).invert().multiply(Wf); Lf.toArray(tf.values, i * 4);
+    }
+  }
+  return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+}

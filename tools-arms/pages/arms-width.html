@@ -1,0 +1,14 @@
+<!doctype html><script type=module>
+import * as THREE from './vendor/three.module.min.js';
+import { GLTFLoader } from './vendor/GLTFLoader.js';
+import { clone } from './vendor/SkeletonUtils.js';
+import { makeRunClip, addArmSwing, ARMS, MODEL_H, BULLY_H } from './people.js';
+const g = await new GLTFLoader().loadAsync('./character.glb');
+const walk = g.animations.find(a => a.name === 'walk'), out = {};
+for (const [k, c] of Object.entries({ run0: makeRunClip(walk), run1: addArmSwing(makeRunClip(walk), g.scene, ARMS.run), runOut0: addArmSwing(makeRunClip(walk), g.scene, { ...ARMS.run, out: 0 }), runSh0: addArmSwing(makeRunClip(walk), g.scene, { ...ARMS.run, out: 0, shoulder: 0 }), runOutM: addArmSwing(makeRunClip(walk), g.scene, { ...ARMS.run, out: -2 }), walk0: walk, walk1: addArmSwing(walk, g.scene, ARMS.walk), walkOutM: addArmSwing(walk, g.scene, { ...ARMS.walk, out: -2 }), walkOutM4: addArmSwing(walk, g.scene, { ...ARMS.walk, out: -4 }) })) {
+  const o = clone(g.scene), mx = new THREE.AnimationMixer(o); mx.clipAction(c).play(); let m = 0; const v = new THREE.Vector3();
+  for (let i = 0; i < 120; i++) { mx.setTime(c.duration * i / 120); o.updateMatrixWorld(true); o.traverse(b => { if (b.isBone && /Hand|Forearm|Upperarm/.test(b.name)) { b.getWorldPosition(v); m = Math.max(m, Math.abs(v.x)); } }); }
+  out[k] = +(m * BULLY_H / MODEL_H).toFixed(3);
+}
+window.__out = out;
+</script>

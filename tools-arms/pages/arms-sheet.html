@@ -1,0 +1,24 @@
+<!doctype html><meta charset=utf-8><body style="margin:0">
+<script type=module>
+import * as THREE from './vendor/three.module.min.js';
+import { GLTFLoader } from './vendor/GLTFLoader.js';
+import { clone } from './vendor/SkeletonUtils.js';
+import { makeRunClip, addArmSwing } from './people.js';
+const g = await new GLTFLoader().loadAsync('./character.glb');
+const Q = new URL(location).searchParams, J = Q.get('opt') ? JSON.parse(Q.get('opt')) : null;
+let clip = g.animations.find(a => a.name === 'walk'); if (Q.get('clip') === 'run') clip = makeRunClip(clip);
+if (J) clip = addArmSwing(clip, g.scene, J);
+const C = 192, N = 8, r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true }); r.setSize(C * N, C * 3); document.body.appendChild(r.domElement);
+const sc = new THREE.Scene(); sc.background = new THREE.Color(0x9aa3ad); sc.add(new THREE.HemisphereLight(0xffffff, 0x555555, 2.5)); const dl = new THREE.DirectionalLight(0xffffff, 2); dl.position.set(2, 3, 4); sc.add(dl);
+const E = 22 * Math.PI / 180, Z = +(Q.get('zoom') || 1), cam = new THREE.OrthographicCamera(-0.62 / Z, 0.62 / Z, 0.62 / Z, -0.62 / Z, 0.1, 50);
+r.setScissorTest(true);
+[0, Math.PI, Math.PI / 2].forEach((ry, row) => {
+  for (let i = 0; i < N; i++) {
+    const o = clone(g.scene), mx = new THREE.AnimationMixer(o); mx.clipAction(clip).play(); mx.setTime(clip.duration * i / N); o.rotation.y = ry;
+    const s = new THREE.Scene(); s.background = sc.background; s.add(o, ...sc.children.map(c => c.clone()));
+    cam.position.set(0, 0.5 + 10 * Math.sin(E), 10 * Math.cos(E)); cam.lookAt(0, Z > 1 ? 0.62 : 0.5, 0); cam.position.y += Z > 1 ? 0.12 : 0;
+    r.setViewport(i * C, (2 - row) * C, C, C); r.setScissor(i * C, (2 - row) * C, C, C); r.render(s, cam);
+  }
+});
+window.__done = true;
+</script>

@@ -25,7 +25,7 @@ import { Guide } from './guide.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
 import * as SkeletonUtils from './vendor/SkeletonUtils.js';
-import { makeBullyMaterial, makeRunClip, makeStandClip, MODEL_H, PLAYER_H, BULLY_H } from './people.js';
+import { makeBullyMaterial, makeRunClip, makeStandClip, addArmSwing, ARMS, MODEL_H, PLAYER_H, BULLY_H } from './people.js';
 
 const BASE = new URL('./', import.meta.url);
 const TIME_LIMIT = 70;   // the traffic (TRAFFIC = 0.25 of what it was: see traffic.js) costs the headless bot a few seconds on a clean run; it parks with about 21 s left (7.7 s with the full street, headless bot means)
@@ -627,8 +627,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
   // you and the bully: the store's character in 3D (people.js), with a walk, a run built from it, and a standing pose
   if (RL) RL.upgradeCharacter(charGltf.scene);   // before makePerson clones it for the bully
-  const clips = { walk: charGltf.animations.find((a) => a.name === 'walk') };
-  clips.run = makeRunClip(clips.walk); clips.stand = makeStandClip(clips.walk);
+  // the walk and the run get a real arm swing on top (people.js addArmSwing: the model's own walk hardly moves the arms,
+  // and from behind they did not move at all); the standing pose stays the model's own (arms down)
+  const walk0 = charGltf.animations.find((a) => a.name === 'walk');
+  const clips = { walk: addArmSwing(walk0, charGltf.scene, ARMS.walk), run: addArmSwing(makeRunClip(walk0), charGltf.scene, ARMS.run), stand: makeStandClip(walk0) };
   // How fast the ground goes by under a clip: the speed a planted foot sweeps backwards while it's on the ground,
   // measured off the clip (and how low the soles get, so the standing pose can be set down on the same ground).
   // Playing the clip at (your speed / that) keeps the planted foot still on the pavement. The first version measured

@@ -424,7 +424,14 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
 - **The people** are the store's own character in 3D (`people.js`, `character.glb`: the rigged Tripo model from the
   commercial's Blender scene, decimated to 16k triangles, exported by `drive/tools/export_character.py`), with its walk
   and a run built from it at load time (`makeRunClip`), plus a standing pose (`makeStandClip`); see "How you move on
-  foot" above for how they're played. The bully is the same model recoloured in the shader exactly as the
+  foot" above for how they're played. **The arms swing** (`addArmSwing`, `ARMS` in `people.js`): the model's own walk
+  barely moves them (the upper arms stay at the sides; from behind, the way the chase camera sees you, they did not move
+  at all), so the walk and the run each get a swing at load time: each arm turns about the shoulder, forward when the
+  opposite foot is forward (phase read off the clip's own feet), the elbow bends further on the forward swing (the run
+  pumps: hand to the chest in front, behind the hip at the back), the shoulder rolls with 40 % of the swing so the tee's
+  sleeve follows the arm, and the arms are tucked in 2 degrees so they reach no more than ~1 cm wider than before
+  (`BODY` still holds). It runs on a private random generator, so the traffic's shared `Math.random` stream is unchanged.
+  The store's sprite sheets carry the same swing on the walk (`standalone/tools/arm_swing.py`). The bully is the same model recoloured in the shader exactly as the
   store's sprite sheet is (white tee -> red, denim -> charcoal, red kicks -> black) and drawn taller.
 - **The race.** When you get in he runs for his own ride (1.6 s), then comes after you at 17 m/s, shown only on the bar
   at the top (`.drive-race`: your head, his head, the STORE flag; `heads.png`). If he gets within 4.5 m he's **on your

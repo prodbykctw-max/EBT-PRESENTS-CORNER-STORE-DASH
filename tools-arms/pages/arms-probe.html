@@ -1,0 +1,25 @@
+<!doctype html><meta charset=utf-8><body style="margin:0;background:#888">
+<script type=module>
+import * as THREE from './vendor/three.module.min.js';
+import { GLTFLoader } from './vendor/GLTFLoader.js';
+import { makeRunClip, makeStandClip, addArmSwing } from './people.js';
+const g = await new GLTFLoader().loadAsync('./character.glb');
+const walk = g.animations.find(a => a.name === 'walk'), run = makeRunClip(walk);
+const W = 1200, H = 420, r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); r.setSize(W, H); document.body.appendChild(r.domElement);
+const sc = new THREE.Scene(); sc.background = new THREE.Color(0x9aa3ad); sc.add(new THREE.HemisphereLight(0xffffff, 0x555555, 2.5)); const dl = new THREE.DirectionalLight(0xffffff, 2); dl.position.set(2, 3, 4); sc.add(dl);
+const Q = new URL(location).searchParams, J = Q.get('opt') ? JSON.parse(Q.get('opt')) : null;
+let clip = Q.get('clip') === 'walk' ? walk : run;
+if (J) clip = addArmSwing(clip, g.scene, J);
+const out = { hands: [] };
+const N = 6, view = new URL(location).searchParams.get('view') || 'side';
+const { clone } = await import('./vendor/SkeletonUtils.js');
+for (let i = 0; i < N; i++) {
+  const o = clone(g.scene), mx = new THREE.AnimationMixer(o); mx.clipAction(clip).play(); mx.setTime(clip.duration * i / N);
+  o.position.x = (i - (N - 1) / 2) * 0.55; o.rotation.y = view === 'back' ? Math.PI : Math.PI / 2; sc.add(o); o.updateMatrixWorld(true);
+  const wp = n => o.getObjectByName(n).getWorldPosition(new THREE.Vector3());
+  const rel = (a, b) => { const v = wp(a).sub(wp(b)); return [+v.x.toFixed(3), +v.y.toFixed(3), +v.z.toFixed(3)]; };
+  out.hands.push({ Lrel: rel('L_Hand', 'L_Upperarm'), Rrel: rel('R_Hand', 'R_Upperarm'), Lelb: rel('L_Forearm','L_Upperarm') });
+}
+const cam = new THREE.PerspectiveCamera(30, W / H, 0.1, 50); cam.position.set(0, 0.55, 4.3); cam.lookAt(0, 0.5, 0);
+r.render(sc, cam); window.__out = out; window.__done = true;
+</script>

@@ -9,7 +9,8 @@ Run: python standalone/tools/compose_sheets.py
 import base64, colorsys, io, os
 from PIL import Image
 
-CHAR_DIR = r"C:\Users\Owner\Desktop\corner-store-dash-character"
+CHAR_DIR = os.environ.get("CSD_CHAR_DIR", r"C:\Users\Owner\Desktop\corner-store-dash-character")
+RENDERS = os.environ.get("CSD_RENDERS", "renders3")      # renders3: the walk with the arm swing (bake_characters.py); renders2: the old one
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FRAMES, CELL = 8, 96
 
@@ -19,7 +20,7 @@ def load_cells(name):
     raw = {}
     for row in "DUR":
         for c in range(FRAMES):
-            p = os.path.join(CHAR_DIR, "renders2", f"{name}_{row}_{c}.png")
+            p = os.path.join(CHAR_DIR, RENDERS, f"{name}_{row}_{c}.png")
             if not os.path.exists(p): return None
             raw[(row, c)] = Image.open(p).convert("RGBA")
     boxes = [im.getchannel("A").point(lambda v: 255 if v > 10 else 0).getbbox() for im in raw.values()]
