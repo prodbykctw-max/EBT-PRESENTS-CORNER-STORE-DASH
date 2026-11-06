@@ -5,7 +5,7 @@ await L.ticks(p, 150);
 await p.evaluate(() => { const D = window.__drive; D.ui.setHint(''); D.race.s = D.car.s - 3; }); await L.ticks(p, 12);
 await p.addStyleTag({ content: '.drive-root.real .drive-rbar > *, .drive-root.real .drive-row2 > * { opacity: 1 !important; transform: none !important; }' });
 const out = { state: await p.evaluate(() => window.__drive.state), gapText: await p.evaluate(() => document.querySelector('.drive-race .gap').textContent) };
-for (const [w, h] of [[390, 844], [375, 812], [370, 800], [360, 780], [320, 568]]) {
+for (const [w, h] of [[390, 844], [375, 812], [360, 780], [359, 780], [350, 760], [320, 568]]) {
   await p.setViewportSize({ width: w, height: h }); await L.ticks(p, 6);
   const m = { race: await R('.drive-race'), track: await R('.drive-race .track'), gap: await R('.drive-race .gap'), ebt: await R('.drive-tokens', '.rb-cell'), speed: await R('.drive-speed', '.rb-cell'), store: await R('.drive-dist', '.rb-cell'), light: await R('.drive-light'), rhud: await R('.drive-rhud') };
   m.inline = m.race.y < m.ebt.b; m.gapSpillsLeft = m.inline ? m.gap.x < m.ebt.r + 4 : false; m.gapOverStoreFlag = m.gap.r > m.track.r - 40;

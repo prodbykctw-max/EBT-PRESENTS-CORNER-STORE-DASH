@@ -128,15 +128,17 @@
 .drive-root.real .rb-cell span { font-size: 9px; line-height: 1.2; letter-spacing: .14em; color: #ff6a1a; white-space: nowrap; }
 .drive-root.real .rb-cell b { font: 800 22px/1.1 "HelveticaNeue-CondensedBold", "Roboto Condensed", sans-serif-condensed, "Bahnschrift SemiBold Condensed", "Arial Narrow", system-ui, sans-serif; font-stretch: condensed; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .drive-root.real .rb-cell.tok b { color: #ffd400; }
-.drive-root.real .drive-speed { min-width: 4.6ch; text-align: center; }   /* fixed widths, so the race strip's heads don't jump as the digits change */
-.drive-root.real .drive-dist { min-width: 5.2ch; text-align: center; }
+/* row 2: EBT is as wide as its number; the race strip, SPEED and STORE share the rest in fixed proportions, so no cell's width follows its digits
+   and the heads on the strip never jump as the speed or the distance change digits */
 .drive-root.real .drive-tokens { min-width: 2ch; text-align: center; }
+.drive-root.real .drive-row2 .rb-cell:not(.tok) { flex: 1 1 0; min-width: 0; }
+.drive-root.real .drive-row2 .drive-race { flex: 2.2 1 0; }
 .drive-root.real .rb-cell b.low, .drive-root.real .rb-cell.hot b { color: #ff4d4d; }
 /* the race bar moves into row 2: it is a flex item now, not floating (its head and flag are still placed inside it) */
 .drive-root.real .drive-race { position: relative; top: auto; left: auto; transform: none; flex: 1 1 0; width: auto; min-width: 0; height: auto; min-height: 46px; }
 .drive-root.real .drive-race .track { left: 16px; right: 46px; top: 27px; border-color: #ff6a1a; }
 .drive-root.real .drive-race.hot .track { border-color: #ff4d4d; }
-.drive-root.real .drive-race .gap { right: 46px; top: 5px; }
+.drive-root.real .drive-race .gap { right: 8px; top: 5px; white-space: nowrap; }   /* one line, above the track and the STORE flag, so it can't wrap onto the heads */
 .drive-root.real .drive-light { top: calc(max(10px, env(safe-area-inset-top)) + 112px); }
 .drive-root.real.driving .drive-hint { bottom: auto; top: 50%; }   /* the closer camera puts the car where the hint used to sit (driving only: on foot the camera is unchanged and the hint stays at bottom: 120px) */
 @media (max-width: 560px) {
@@ -151,8 +153,8 @@
   .drive-root.real .drive-race { min-height: 42px; }
   .drive-root.real .drive-race .track { top: 25px; }
 }
-/* narrow phones (under 370 px; 375 and wider keep the strip inline in row 2): the race strip gets its own line under the cells, so its track and heads have room and "ON YOUR TAIL!" can't run onto the STORE cell */
-@media (max-width: 369px) {
+/* narrow phones (under 360 px; 360 and wider keep the strip inline in row 2): the race strip gets its own line under the cells, so its track and heads have room and "ON YOUR TAIL!" can't run onto the STORE cell */
+@media (max-width: 359px) {
   .drive-root.real .drive-row2 { flex-wrap: wrap; }
   .drive-root.real .drive-row2 .drive-race { flex: 1 1 100%; order: 9; min-height: 46px; }
   .drive-root.real:has(.drive-race:not([hidden])) .drive-light { top: calc(max(10px, env(safe-area-inset-top)) + 200px); }
