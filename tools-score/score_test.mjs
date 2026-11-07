@@ -1,11 +1,11 @@
 // Plays the store run through window.__csd and checks the new scoring end to end:
 // the score on screen, the end-screen breakdown, and the leaderboard payload against the server's rules.
 // node tools-score/score_test.mjs http://localhost:PORT/standalone.html OUTDIR
-import { chromium } from 'playwright';
+import { chromium } from 'playwright-core';
 import { validateLive3 } from '../worker/score-rules.js';
 import { mkdirSync } from 'node:fs';
 const [url, out] = process.argv.slice(2); mkdirSync(out, { recursive: true });
-const browser = await chromium.launch({ args: ['--no-sandbox'] });
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] });
 const fails = []; const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails.push(m); };
 
 async function play(name, { lead, gaps, catchAfter, waitIn }) {
