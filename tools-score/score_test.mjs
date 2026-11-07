@@ -34,9 +34,9 @@ async function play(name, { lead, gaps, catchAfter, waitIn }) {
         await new Promise((r) => setTimeout(r, 1200));
         document.getElementById('btnContinue').click(); c.freeze(true);
       }
-      const before = S().score, p = S().curPos; c.tp(p.x, p.y); let n = 0;
+      const before = S().score, p = S().curPos, base = c.items[S().order[i]].pts; c.tp(p.x, p.y); let n = 0;
       while (S().nGot === i && n++ < 240) c.step(H, 1);
-      picks.push({ got: S().nGot, pts: S().score - before, combo: S().combo });
+      picks.push({ got: S().nGot, pts: S().score - before, base, mult: (S().score - before) / base });
     }
     sec(0.5);
     const pad = [476, 408]; c.tp(pad[0], pad[1]); let n = 0;
@@ -61,17 +61,17 @@ async function play(name, { lead, gaps, catchAfter, waitIn }) {
 
 // A: he's 30 s behind, items 1 s apart (one long combo), pay at once: beat out + no catch
 const A = await play('beat_combo', { lead: 30, gaps: [1, 1, 1, 1, 1, 1] });
-ok(A.picks.map((p) => p.pts).join() === '100,200,300,300,300,300,600', 'A: combo x1 x2 x3 x3 x3 x3, rice x3');
+ok(A.picks.map((p) => p.mult).join() === '1,2,3,3,3,3,3', 'A: combo x1 x2 x3 x3 x3 x3 x3');
 ok(A.beatOut && A.noCatch && A.won, 'A: beat out + no catch');
 ok(A.score === A.itemPts + 500 + A.timeBonus + 2000 + 1000, 'A: score = items + 500 + speed + 2000 + 1000');
 ok(A.timeBonus === 3000 - 25 * A.runSecs, 'A: speed bonus 3000 - 25/s');
 // B: he's in after 2 s, items 5 s apart (no combo), caught once before item 4
 const B = await play('caught_nocombo', { lead: 2, gaps: [5, 5, 5, 5, 5, 5], catchAfter: 3 });
-ok(B.picks.map((p) => p.pts).join() === '100,100,100,100,100,100,200', 'B: no combo');
+ok(B.picks.map((p) => p.mult).join() === '1,1,1,1,1,1,1', 'B: no combo');
 ok(!B.beatOut && !B.noCatch && B.won, 'B: no beat-out, no no-catch');
 ok(B.score === 800 + 500 + B.timeBonus, 'B: score = 800 + 500 + speed');
 // C: a gap mid-streak resets it; a catch mid-streak resets it too
 const C = await play('reset', { lead: 30, gaps: [1, 1, 6, 1, 1, 1] });
-ok(C.picks.map((p) => p.pts).join() === '100,200,300,100,200,300,600', 'C: a 6 s gap starts again at x1');
+ok(C.picks.map((p) => p.mult).join() === '1,2,3,1,2,3,3', 'C: a 6 s gap starts again at x1');
 await browser.close();
 console.log(fails.length ? `\n${fails.length} FAILED` : '\nALL PASS'); process.exit(fails.length ? 1 : 0);

@@ -169,10 +169,10 @@ const run3 = (o = {}) => ({ v: 3, name: 'KCT', items: 7, run_seconds: 40, won: t
 
 test('v3 combo totals', () => {
   assert.deepEqual(comboPointsOptions(0), [0]);
-  assert.deepEqual(comboPointsOptions(1), [100]);
-  assert.deepEqual(comboPointsOptions(2), [200, 300]);
-  // all 7 in one streak: x1 x2 x3 x3 x3 x3, then RICE & BEANS x3 = 1,500 + 600
+  assert.deepEqual(comboPointsOptions(2), [200, 300, 400, 500]);
+  // all 7 in one streak, RICE & BEANS at x3: 100 + 200 + 300*4 + 600
   assert.equal(Math.max(...comboPointsOptions(7)), 2100);
+  assert.deepEqual(comboPointsOptions(1), [100, 200]);
   assert.equal(Math.min(...comboPointsOptions(7)), 800);
   assert.equal(speedBonus3(0), 3000);
   assert.equal(speedBonus3(40), 2000);
@@ -190,13 +190,19 @@ test('honest v3 runs validate', () => {
   // caught with 3 items in a streak
   assert.equal(validateLive3(run3({ score: 600, items: 3, items_points: 600, won: false })), null);
   assert.equal(validateLive3(run3({ score: 0, items: 0, items_points: 0, won: false })), null);
+  // RICE & BEANS can come first or second (the order is shuffled each run)
+  assert.equal(validateLive3(run3({ score: 200, items: 1, items_points: 200, won: false })), null);
+  assert.equal(validateLive3(run3({ score: 700, items: 3, items_points: 700, won: false })), null);              // 200, 200, 300
+  assert.equal(validateLive3(run3({ score: 2000 + 500 + 2000, items_points: 2000 })), null);                     // 100, 400, then x3 on
 });
 
 test('impossible v3 runs are rejected', () => {
   assert.ok(validateLive3(run3({ score: 3301 })));
   assert.ok(validateLive3(run3({ score: 3300 + 2000, beat_out: true, won: true, items: 6 })));
   assert.ok(validateLive3(run3({ score: 2400, items_points: 2400, run_seconds: 40 + 0 })));       // more than any streak
-  assert.ok(validateLive3(run3({ score: 700, items: 3, items_points: 700, won: false })));         // x1 x2 x4 isn't a streak
+  assert.ok(validateLive3(run3({ score: 1000, items: 3, items_points: 1000, won: false })));       // 3 items top out at 900
+  assert.ok(validateLive3(run3({ score: 600, items: 2, items_points: 600, won: false })));         // 2 items top out at 500
+  assert.ok(validateLive3(run3({ score: 1000 + 500 + 2275 + 2000, items_points: 1000, run_seconds: 29 + 1 + 0, beat_out: true })));  // he's always in by 30 s
   assert.ok(validateLive3(run3({ score: 2300, items: 3, items_points: 300, won: false, beat_out: true })));  // bonus without paying
   assert.ok(validateLive3(run3({ score: 3300, run_seconds: 1.5 })));
   assert.ok(validateLive3(run3({ score: 3300 + 100, drive: { bonus: 100, time_left: 99, tokens: 0, near_misses: 0 } })));

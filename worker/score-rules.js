@@ -97,27 +97,34 @@ export const LIVE_MAX_SCORE = 800 + LIVE.CHECKOUT + LIVE.SPEED_MAX
   + Math.round(LIVE.DRIVE_TIME * 50 + LIVE.MAX_TOKENS * 25 + LIVE.MAX_NEAR_MISSES * 50 + 800);
 
 // ── v3: the scoring of Nov 2026 (standalone/csd.js, the constants under DOOR) ──
-// { v: 3, ..., items_points, beat_out, no_catch }. Items are grabbed in list order (RICE & BEANS last, 200);
-// an item within 4 s of the one before is a combo: its points x2, the next x3, then x3 on (a gap or a catch
-// starts again at x1). Paying (won): 500 + max(0, 3000 - 25 * floor(seconds in the store)) + 2000 if you
-// paid before the bully walked in (beat_out) + 1000 if he never caught you (no_catch). Drive bonus as in v2.
-export const LIVE3 = { SPEED_MAX: 3000, SPEED_PER_SECOND: 25, BEAT_OUT: 2000, NO_CATCH: 1000, COMBO_MAX: 3 };
-const ITEM_BASE = [100, 100, 100, 100, 100, 100, 200];   // csd.js ITEMS, in the order they are grabbed
+// { v: 3, ..., items_points, beat_out, no_catch }. The items come in a fresh random order each run (startRun
+// shuffles S.order), so RICE & BEANS (200) can be any of them; the other six are 100. An item within 4 s of the one
+// before is a combo: its points x2, the next x3, then x3 on (a gap or a catch starts again at x1). Paying (won):
+// 500 + max(0, 3000 - 25 * floor(seconds in the store)) + 2000 if you paid before the bully walked in (beat_out;
+// he always walks in by BULLY_IN_MAX = 30 s, so only with run_seconds < 30) + 1000 if he never caught you
+// (no_catch). Drive bonus as in v2.
+export const LIVE3 = { SPEED_MAX: 3000, SPEED_PER_SECOND: 25, BEAT_OUT: 2000, NO_CATCH: 1000, COMBO_MAX: 3, BULLY_IN_MAX: 30 };
 
-/** Every item total `n` grabbed items can add up to, over every combo pattern. */
+/** Every item total `n` grabbed items can add up to, over every order (RICE & BEANS anywhere) and combo pattern. */
 export function comboPointsOptions(n) {
-  let states = new Map([[0, new Set([0])]]);               // last multiplier -> totals so far
+  // state: last multiplier, RICE & BEANS grabbed yet -> totals so far
+  let states = new Map([['0,0', new Set([0])]]);
   for (let i = 0; i < n; i++) {
     const next = new Map();
-    for (const [m, totals] of states) {
+    const add = (k, t) => { if (!next.has(k)) next.set(k, new Set()); next.get(k).add(t); };
+    for (const [key, totals] of states) {
+      const [m, rice] = key.split(',').map(Number);
       for (const k of new Set(i === 0 ? [1] : [1, Math.min(LIVE3.COMBO_MAX, m + 1)])) {
-        if (!next.has(k)) next.set(k, new Set());
-        for (const t of totals) next.get(k).add(t + ITEM_BASE[i] * k);
+        for (const t of totals) {
+          if (i - rice < LIVE.ITEMS - 1) add(`${k},${rice}`, t + 100 * k);   // one of the six 100s, if any are left
+          if (!rice) add(`${k},1`, t + 200 * k);                             // RICE & BEANS
+        }
       }
     }
     states = next;
   }
-  const all = new Set(); for (const t of states.values()) for (const x of t) all.add(x);
+  const all = new Set();
+  for (const [key, t] of states) if (n < LIVE.ITEMS || key.endsWith(',1')) for (const x of t) all.add(x);
   return [...all].sort((a, b) => a - b);
 }
 
@@ -139,6 +146,7 @@ export function validateLive3(p) {
   if (!isInt(items) || items < 0 || items > LIVE.ITEMS) return 'items out of range';
   if (won && items !== LIVE.ITEMS) return 'items out of range';
   if (!won && (beat || noCatch)) return 'score out of range';
+  if (beat && runSeconds >= LIVE3.BULLY_IN_MAX) return 'score out of range';
   if (!comboPointsOptions(items).includes(itemPts)) return 'items_points out of range';
   const checkout = won ? LIVE.CHECKOUT + speedBonus3(runSeconds) + (beat ? LIVE3.BEAT_OUT : 0) + (noCatch ? LIVE3.NO_CATCH : 0) : 0;
   if (score !== itemPts + checkout + bonus) return 'score out of range';

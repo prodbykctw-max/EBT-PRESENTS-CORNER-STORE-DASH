@@ -102,6 +102,7 @@ var DOOR={x:415,y:1590}, BULLY_IN_MIN=2, BULLY_IN_MAX=30, BULLY_IN_TAIL=1.4;
 //   checkout: CHECKOUT, plus the speed bonus SPEED_MAX - SPEED_PER_S per second in the store (0 from 2 minutes),
 //   plus BEAT_OUT if you pay before the bully even walks in, plus NO_CATCH if he never grabbed you (continue unused)
 var COMBO_WINDOW=4, COMBO_MAX=3, CHECKOUT_PTS=500, SPEED_MAX=3000, SPEED_PER_S=25, BEAT_OUT=2000, NO_CATCH=1000;
+function commas(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
 var CATCH_R=30, PICK_R=36;
 var BULLY_LINES=["HEY! YOU!","GIMME THAT!","GET BACK HERE!","THOSE ARE MINE!"];
 
@@ -835,9 +836,9 @@ function winCheck(){
       S.noCatch=S.continues>=1;                 // he never grabbed you (your one continue is still there)
       addScore(CHECKOUT_PTS+timeBonus+(S.beatOut?BEAT_OUT:0)+(S.noCatch?NO_CATCH:0));
       S.timeBonus=timeBonus;
-      if(S.beatOut) announce("OUT BEFORE HE GOT IN!  +"+BEAT_OUT);
+      if(S.beatOut) announce("OUT BEFORE HE GOT IN!  +"+commas(BEAT_OUT));
       sfx.win(); haptic(HAP.win);
-      setTimeout(function(){ endScreen(true); },500);
+      setTimeout(function(){ endScreen(true); },S.beatOut? 1600 : 500);   // long enough to read the beat-out call first
       return;
     }
   }
@@ -849,10 +850,10 @@ function endScreen(won){
   var nb=function(t){ return t.replace(/ /g,"\u00a0"); };   // a part never breaks inside itself on a narrow phone
   if(won){
     var sub=el("endSub"); sub.textContent="";
-    var line=function(t,big){ var b=document.createElement(big?"b":"span"); b.textContent=t; if(big) b.className="bonusBig"; sub.appendChild(b); sub.appendChild(document.createElement("br")); };
-    line([nb("ITEMS "+S.itemPts+((S.comboMax||1)>1? " (COMBO x"+S.comboMax+")" : "")), nb("CHECKOUT "+CHECKOUT_PTS), nb("SPEED BONUS +"+(S.timeBonus||0))].join(" · "));
-    if(S.beatOut) line("BEAT HIM OUT +"+BEAT_OUT,true);
-    if(S.noCatch) line("NO CATCH +"+NO_CATCH,true);
+    var line=function(t,big){ if(sub.firstChild) sub.appendChild(document.createElement("br")); var b=document.createElement(big?"b":"span"); b.textContent=t; if(big) b.className="bonusBig"; sub.appendChild(b); };
+    line([nb("ITEMS "+commas(S.itemPts)+((S.comboMax||1)>1? " (COMBO x"+S.comboMax+")" : "")), nb("CHECKOUT "+CHECKOUT_PTS), nb("SPEED BONUS +"+commas(S.timeBonus||0))].join(" · "));
+    if(S.beatOut) line("BEAT HIM OUT +"+commas(BEAT_OUT),true);
+    if(S.noCatch) line("NEVER CAUGHT +"+commas(NO_CATCH),true);
   } else el("endSub").textContent = canCont? "1 CONTINUE LEFT — ITEMS KEPT" : "ITEMS: "+S.nGot+" / "+ITEMS.length;
   el("finalScore").textContent=String(S.score).padStart(6,"0");
   if(MOTION){
