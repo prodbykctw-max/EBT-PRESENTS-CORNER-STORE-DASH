@@ -316,19 +316,25 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
 - **On foot.** You start on the right sidewalk of Luckie St (s = 14 m) with the bully 8 m behind you. Your car is parked
   at the right curb up the block with its **hazards flashing** and a yellow ▼ over it, in the first stretch of parking
   lane where it sits level (Luckie St is steep: on its cross-slope a car rolls ~10°, so the spot is picked by measuring
-  the car's roll and pitch with `standOn`). Hold RUN (the GAS pedal, labelled RUN while you are on foot) to run (5.6 m/s), BRAKE to back up, ◀ ▶ to step left or right
-  anywhere across the sidewalk (see "Where you run" below). Run into someone from the crowd and you stumble ("WATCH IT!"); the bully
+  the car's roll and pitch with `standOn`). **You move the way you move in the store**
+  (owner, Nov 2026): put a thumb down anywhere that isn't a button and drag; a gold ring appears there and the knob
+  follows your thumb (44 px travel, nothing under 6 px, full speed from 22 px: the store's stick). Up the screen is up
+  the street: drag up to run (up to 5.6 m/s, as fast as the stick is pushed; anywhere within 45° of straight up is full speed, so a dodge isn't slower than the bully), down to back up (2.2 m/s), sideways to
+  cross the sidewalk (up to 3.5 m/s, a small dead band so a straight-up drag doesn't drift), diagonals do both; you
+  turn and run the way you go. A mouse drags the same way; arrows / WASD give the same directions. The pedals are
+  hidden on foot and pop in when you get in the car (`footVec`, the stick block after `stepSide` in `drive.js`,
+  `.drive-stick` / `.drive-root.onfoot` in `drive.css`; test hook `__drive.foot.stick = {x, y}`). See "Where you run" below. Run into someone from the crowd and you stumble ("WATCH IT!"); the bully
   shoves through people. He runs 5.3 m/s, so a clean run gets away and a sloppy one gets caught: a catch is a **shove**
   ("SHOVED!", 0.9 s down), never the end. Near the car you cut over to the driver's door yourself and jump in: "GO! GO!
   GO!", no 3-2-1, and the car swings straight into the travel lane. The drive's clock only runs once you're driving.
-- **The street is yours too** (`streetPath`, `streetEvents`, `runnerShove` in `drive.js`). ◀ ▶ now take you off the curb and
+- **The street is yours too** (`streetPath`, `streetEvents`, `runnerShove` in `drive.js`). Dragging left (toward the street) takes you off the curb and
   across the whole street to the far curb (`PATH.far`; before, ◀ stopped at the centre line of the sidewalk). Parked cars, moving cars,
   the streetcar, cones and barricades are solid: each is checked where it will be over the next 1.8 s as well as where it is, and your
   line is moved to the nearest free side, preferring the side you are already leaning to; with no gap at all you stop and wait
   (`me.blocked`) instead of running into it, but never for ever: standing still with something in the way for 1.5 s lets you (and the bully) go along the nearer edge for a second (`holdUp`, `release`). The bully follows you into the street. The traffic keeps running while you are on foot and
   reacts to you (honks, skids). If a car really cannot stop you get a **soft bump**: you stagger to the side out of its way, lose
   speed for 0.55 s, "WATCH IT!" and the crash sound, at most once every 1.2 s, never game over. The camera follows a sidestep gently
-  (`camD`) and keeps you framed anywhere in the street. Standing still next to a parked car, ◀ does nothing until a gap
+  (`camD`) and keeps you framed anywhere in the street. Standing still next to a parked car, dragging left does nothing until a gap
   in the parked cars lines up, since the car is solid; running, you slip through the gaps.
   **A last pass makes it a guarantee** (`solidPass` in `drive.js`): the line-bending above is a request, and something could still end up on
   you (a car changing lane into your line, a streetcar arriving, a cone, a tree). So after all the steering of every 1/120 s step, and once more
@@ -342,13 +348,14 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   in all 3 runs that were checked to the end (13.9 s, then the hazard lights and marker are hidden and you are driving).
 - **How you move on foot** (`updateFoot`, `posePerson`, the `PATH` block in `drive.js`). You and the bully move in the
   same fixed 1/120 s steps as the car and are drawn between the last two steps, so a phone's uneven frames (8 to 33 ms)
-  don't make the run stutter. GAS gets you to full speed in about 0.35 s and letting go stops you in about 0.27 s
-  (0.45 m), easing in and out instead of a flat ramp and a dead stop. ◀ ▶ is a smooth sidestep (a stiff spring, 90 % of
+  don't make the run stutter. Dragging up gets you to full speed in about 0.35 s and letting go stops you in about 0.27 s
+  (0.45 m), easing in and out instead of a flat ramp and a dead stop. Sideways is a smooth sidestep (a stiff spring, 90 % of
   the way in 0.35 s, at most 5 m/s sideways); you turn a little toward where you're going and lean into it, so it reads
   as a cut, not a slide. The camera follows on a critically damped spring (no overshoot, the same at any frame rate)
   and follows a sidestep more gently than you make it.
-  - **Where you run** is your choice: ◀ ▶ step you left or right (a tap is a 0.9 m step; holding keeps you moving
-    at 2.6 m/s after 0.2 s) anywhere from just inside the curb (`PATH.left`: where the street's road surface ends,
+  - **Where you run** is your choice: the stick's sideways part moves you left or right (up to 3.5 m/s, never more
+    than 0.6 m ahead of where you are, so you stop where your thumb stops: ~7 cm slide; Nov 2026, it used to be ◀ ▶
+    steps of 0.9 m and 2.6 m/s held) anywhere from just inside the curb (`PATH.left`: where the street's road surface ends,
     plus 0.57 m for your body) to 0.72 m off the buildings (`PATH.outer`), and you stay where you let go. Street
     furniture is solid: you slip round a trunk or pole on the side you're already on (`avoidProps`). Before
     (Oct 27 2026) there were only the two fixed lines below, both at least 1.35 m in from the curb, and you started on
