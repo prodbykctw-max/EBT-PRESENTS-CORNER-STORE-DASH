@@ -36,6 +36,21 @@ like a routing mistake — getting pinned in a dead end — not like being outru
 
 ## Scoring
 
+**The live store (`standalone/csd.js`, Nov 2026).** The constants are under `DOOR` in `csd.js`; the leaderboard
+checks every part (`validateLive3` in `worker/score-rules.js`, payload `v: 3`; `v: 2` stays for older pages):
+
+| Source | Points |
+| --- | --- |
+| Items | 100 each, RICE & BEANS 200 |
+| Combo | the next item within 4 s of the last: x2, then x3 (a gap or a catch resets it) |
+| Checkout | 500 |
+| Speed bonus | 3,000 − 25 per second in the store (0 from 2 minutes) |
+| Beat him out | +2,000 if you pay before the bully walks in |
+| No catch | +1,000 if he never caught you (continue unused) |
+| Drive bonus | carried in from the drive |
+
+The table below is the old grid prototype (`public/src/*`):
+
 | Source | Points |
 | --- | --- |
 | Items | 100 / 150 / 200 / 250, rising with aisle depth |

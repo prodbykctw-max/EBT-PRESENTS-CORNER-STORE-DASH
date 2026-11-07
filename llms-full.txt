@@ -33,7 +33,7 @@ A standalone game presented by EBT (Everything But Trapped), the Atlanta brand r
 - Don't get caught by the bully. He cuts you off, hunts for you when he loses sight of you, and lunges when he's close: a red ring under him is the wind-up, so sidestep. You get one continue per run, and you keep the items you already have.
 - With the list complete, pay at any register (the PAY spots in front of the counters) to win.
 - Touch controls: drag anywhere on the screen to move. Keyboard: arrows or WASD, P = pause.
-- Scoring: 100 per item (200 for rice & beans), 500 for checking out, a speed bonus of up to 1,500 (a faster run scores more), plus the drive bonus.
+- Scoring: 100 per item (200 for rice & beans), doubled or tripled in a combo (grab the next item within 4 seconds: x2, then x3); 500 for checking out; +2,000 if you pay before the bully even walks in; +1,000 if he never catches you; a speed bonus of up to 3,000 (minus 25 per second in the store); plus the drive bonus.
 - After a run, enter three initials and save your score to the global leaderboard.
 
 ## Tech

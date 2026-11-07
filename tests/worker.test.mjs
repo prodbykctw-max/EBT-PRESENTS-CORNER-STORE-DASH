@@ -100,8 +100,11 @@ test('live rules match the game source', () => {
   const csd = readFileSync(new URL('../standalone/csd.js', import.meta.url), 'utf8');
   const pts = [...csd.matchAll(/pts:(\d+)/g)].map((m) => +m[1]).sort((a, b) => a - b);
   assert.deepEqual(pts, [100, 100, 100, 100, 100, 100, 200]);
-  assert.match(csd, /Math\.max\(0,1500-S\.runSecs\*15\)/);
-  assert.match(csd, /addScore\(500\+timeBonus\)/);
+  // the v3 scoring (the v2 rules stay for pages cached before it)
+  assert.match(csd, /COMBO_WINDOW=4, COMBO_MAX=3, CHECKOUT_PTS=500, SPEED_MAX=3000, SPEED_PER_S=25, BEAT_OUT=2000, NO_CATCH=1000;/);
+  assert.match(csd, /Math\.max\(0,SPEED_MAX-S\.runSecs\*SPEED_PER_S\)/);
+  assert.match(csd, /addScore\(CHECKOUT_PTS\+timeBonus\+\(S\.beatOut\?BEAT_OUT:0\)\+\(S\.noCatch\?NO_CATCH:0\)\)/);
+  assert.match(csd, /var body=\{v:3,/);
   const drive = readFileSync(new URL('../public/drive/drive.js', import.meta.url), 'utf8');
   assert.match(drive, /const TIME_LIMIT = 70;/);
   assert.match(drive, /timeLeft \* 50 \+ tokens \* 25 \+ nearMisses \* 50 \+ \(result\.cleanPark \? 500 : 0\) \+ \(hits === 0 \? 300 : 0\)/);
@@ -157,4 +160,59 @@ test('the GitHub Pages copy gets CORS; other sites do not', async () => {
   assert.equal(evil.headers.get('access-control-allow-origin'), null);
   const evilPre = await worker.fetch(new Request(ORIGIN + '/api/scores', { method: 'OPTIONS', headers: { origin: 'https://evil.example' } }), { DB });
   assert.equal(evilPre.status, 403);
+});
+
+// ── live game (v: 3): combos, beat-him-out, no-catch, the bigger speed bonus ──
+import { validateLive3, comboPointsOptions, speedBonus3 } from '../worker/score-rules.js';
+const run3 = (o = {}) => ({ v: 3, name: 'KCT', items: 7, run_seconds: 40, won: true, items_points: 800,
+  beat_out: false, no_catch: false, drive: { bonus: 0, time_left: 0, tokens: 0, near_misses: 0 }, ...o });
+
+test('v3 combo totals', () => {
+  assert.deepEqual(comboPointsOptions(0), [0]);
+  assert.deepEqual(comboPointsOptions(2), [200, 300, 400, 500]);
+  // all 7 in one streak, RICE & BEANS at x3: 100 + 200 + 300*4 + 600
+  assert.equal(Math.max(...comboPointsOptions(7)), 2100);
+  assert.deepEqual(comboPointsOptions(1), [100, 200]);
+  assert.equal(Math.min(...comboPointsOptions(7)), 800);
+  assert.equal(speedBonus3(0), 3000);
+  assert.equal(speedBonus3(40), 2000);
+  assert.equal(speedBonus3(120), 0);
+});
+
+test('honest v3 runs validate', () => {
+  // 800 items + 500 + 2000 speed (40 s)
+  assert.equal(validateLive3(run3({ score: 3300 })), null);
+  // perfect: combo all the way, beat him out, never caught, 20 s
+  assert.equal(validateLive3(run3({ score: 2100 + 500 + 2500 + 2000 + 1000, items_points: 2100, run_seconds: 20, beat_out: true, no_catch: true })), null);
+  // with a drive bonus
+  const bonus = Math.round(41.37 * 50 + 12 * 25 + 3 * 50 + 500 + 300);
+  assert.equal(validateLive3(run3({ score: 3300 + 1000 + bonus, no_catch: true, drive: { bonus, time_left: 41.37, tokens: 12, near_misses: 3 } })), null);
+  // caught with 3 items in a streak
+  assert.equal(validateLive3(run3({ score: 600, items: 3, items_points: 600, won: false })), null);
+  assert.equal(validateLive3(run3({ score: 0, items: 0, items_points: 0, won: false })), null);
+  // RICE & BEANS can come first or second (the order is shuffled each run)
+  assert.equal(validateLive3(run3({ score: 200, items: 1, items_points: 200, won: false })), null);
+  assert.equal(validateLive3(run3({ score: 700, items: 3, items_points: 700, won: false })), null);              // 200, 200, 300
+  assert.equal(validateLive3(run3({ score: 2000 + 500 + 2000, items_points: 2000 })), null);                     // 100, 400, then x3 on
+});
+
+test('impossible v3 runs are rejected', () => {
+  assert.ok(validateLive3(run3({ score: 3301 })));
+  assert.ok(validateLive3(run3({ score: 3300 + 2000, beat_out: true, won: true, items: 6 })));
+  assert.ok(validateLive3(run3({ score: 2400, items_points: 2400, run_seconds: 40 + 0 })));       // more than any streak
+  assert.ok(validateLive3(run3({ score: 1000, items: 3, items_points: 1000, won: false })));       // 3 items top out at 900
+  assert.ok(validateLive3(run3({ score: 600, items: 2, items_points: 600, won: false })));         // 2 items top out at 500
+  assert.ok(validateLive3(run3({ score: 1000 + 500 + 2275 + 2000, items_points: 1000, run_seconds: 29 + 1 + 0, beat_out: true })));  // he's always in by 30 s
+  assert.ok(validateLive3(run3({ score: 2300, items: 3, items_points: 300, won: false, beat_out: true })));  // bonus without paying
+  assert.ok(validateLive3(run3({ score: 3300, run_seconds: 1.5 })));
+  assert.ok(validateLive3(run3({ score: 3300 + 100, drive: { bonus: 100, time_left: 99, tokens: 0, near_misses: 0 } })));
+  assert.ok(validateLive3(run3({ score: 3300, items_points: undefined })));
+});
+
+test('v3 runs post through the Worker', async () => {
+  const DB = fakeDB();
+  const res = await worker.fetch(post(run3({ score: 3300 })), { DB });
+  assert.equal(res.status, 201);
+  const bad = await worker.fetch(post(run3({ score: 3301 })), { DB: fakeDB() });
+  assert.equal(bad.status, 400);
 });

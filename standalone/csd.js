@@ -96,6 +96,13 @@ var FACE_BIAS=1.25, FACE_HOLD=0.18, SLIDE_MIN_SIN=0.14, SLIDE_FULL_SIN=0.5;
 /* The race to the store (the drive's chase): with a lead he comes in through the door that many seconds into the run;
    on your tail, right behind you. DOOR is the welcome mat, between the cart corrals. */
 var DOOR={x:415,y:1590}, BULLY_IN_MIN=2, BULLY_IN_MAX=30, BULLY_IN_TAIL=1.4;
+// Scoring (owner, Nov 2026: "more points for beating it before the bully even makes it inside, and a better scoring
+// system"). The leaderboard checks every part of it (worker/score-rules.js validateLive3, payload v: 3).
+//   items: 100 each, RICE & BEANS 200; an item grabbed within COMBO_WINDOW s of the one before is a combo: x2, then x3
+//   checkout: CHECKOUT, plus the speed bonus SPEED_MAX - SPEED_PER_S per second in the store (0 from 2 minutes),
+//   plus BEAT_OUT if you pay before the bully even walks in, plus NO_CATCH if he never grabbed you (continue unused)
+var COMBO_WINDOW=4, COMBO_MAX=3, CHECKOUT_PTS=500, SPEED_MAX=3000, SPEED_PER_S=25, BEAT_OUT=2000, NO_CATCH=1000;
+function commas(n){ return String(n).replace(/\B(?=(\d{3})+(?!\d))/g,","); }
 var CATCH_R=30, PICK_R=36;
 var BULLY_LINES=["HEY! YOU!","GIMME THAT!","GET BACK HERE!","THOSE ARE MINE!"];
 
@@ -772,10 +779,14 @@ function pickSpawnPos(it){
 }
 function collect(it){
   var pickedX=S.curPos.x, pickedY=S.curPos.y;
-  S.got[it.id]=1; S.nGot++; addScore(it.pts);
+  // a combo: this one within COMBO_WINDOW s of the last one doubles it, the next triples it, and so on at x3
+  var combo=(S.lastPick!==null && S.runT-S.lastPick<=COMBO_WINDOW) ? Math.min(COMBO_MAX,(S.combo||1)+1) : 1;
+  S.combo=combo; S.lastPick=S.runT;
+  var pts=it.pts*combo; S.itemPts+=pts; if(combo>1) S.comboMax=Math.max(S.comboMax||1,combo);
+  S.got[it.id]=1; S.nGot++; addScore(pts);
   S.activeIdx++;
   S.curPos=pickSpawnPos(currentItem());
-  bubble(pickedX,pickedY-40,"+"+it.pts+" "+it.id,1.2);
+  bubble(pickedX,pickedY-40,"+"+pts+" "+it.id+(combo>1? "  x"+combo+" COMBO!" : ""),combo>1? 1.5 : 1.2);
   sfx.pick(); haptic(HAP.pick);
   // (after the race he's outside until his time comes, so a pickup doesn't summon him; without the race, your first
   // pickup is what sets him off, as before)
@@ -789,7 +800,7 @@ function caught(){
   setTimeout(function(){ endScreen(false); },900);
 }
 function useContinue(){
-  S.continues--;
+  S.continues--; S.lastPick=null; S.combo=1;   // getting caught ends a combo
   player.x=SPAWN_P.x; player.y=SPAWN_P.y; player.vx=0; player.vy=0;
   var bs=pickBullySpawn(); bully.x=bs.x; bully.y=bs.y; bully.home=bs; bully.vx=0; bully.vy=0;
   bully.path=null; bully.pi=0; bully.stuckT=0; bully.noLos=0; bully.taunt=2.5; bully.repath=0;
@@ -820,11 +831,14 @@ function winCheck(){
     if(player.x>p[0]-6&&player.x<p[2]+6&&player.y>p[1]-6&&player.y<p[3]+6){
       S.mode="end";
       S.runSecs=Math.floor(S.runT); S.won=true;
-      var timeBonus=Math.max(0,1500-S.runSecs*15);
-      addScore(500+timeBonus);
+      var timeBonus=Math.max(0,SPEED_MAX-S.runSecs*SPEED_PER_S);
+      S.beatOut=!!S.bullyOutside;               // paid before he even walked in (only after a race: he's outside till then)
+      S.noCatch=S.continues>=1;                 // he never grabbed you (your one continue is still there)
+      addScore(CHECKOUT_PTS+timeBonus+(S.beatOut?BEAT_OUT:0)+(S.noCatch?NO_CATCH:0));
       S.timeBonus=timeBonus;
+      if(S.beatOut) announce("OUT BEFORE HE GOT IN!  +"+commas(BEAT_OUT));
       sfx.win(); haptic(HAP.win);
-      setTimeout(function(){ endScreen(true); },500);
+      setTimeout(function(){ endScreen(true); },S.beatOut? 1600 : 500);   // long enough to read the beat-out call first
       return;
     }
   }
@@ -833,10 +847,14 @@ function endScreen(won){
   var canCont = !won && S.continues>0;
   el("endTitle").textContent = won? "YOU MADE IT OUT!" : (canCont? "CAUGHT!" : "THE BULLY GOT YOU!");
   el("endTitle").style.color = won? PAL.gold : PAL.coral;
-  el("endSub").textContent = won
-    // non-breaking spaces inside each part: on a narrow phone the line breaks after a "·", never inside "SPEED BONUS +900"
-    ? "ITEMS\u00a0800\u00a0· CHECKOUT\u00a0500\u00a0· SPEED\u00a0BONUS\u00a0+"+(S.timeBonus||0)
-    : (canCont? "1 CONTINUE LEFT — ITEMS KEPT" : "ITEMS: "+S.nGot+" / "+ITEMS.length);
+  var nb=function(t){ return t.replace(/ /g,"\u00a0"); };   // a part never breaks inside itself on a narrow phone
+  if(won){
+    var sub=el("endSub"); sub.textContent="";
+    var line=function(t,big){ if(sub.firstChild) sub.appendChild(document.createElement("br")); var b=document.createElement(big?"b":"span"); b.textContent=t; if(big) b.className="bonusBig"; sub.appendChild(b); };
+    line([nb("ITEMS "+commas(S.itemPts)+((S.comboMax||1)>1? " (COMBO x"+S.comboMax+")" : "")), nb("CHECKOUT "+CHECKOUT_PTS), nb("SPEED BONUS +"+commas(S.timeBonus||0))].join(" · "));
+    if(S.beatOut) line("BEAT HIM OUT +"+commas(BEAT_OUT),true);
+    if(S.noCatch) line("NEVER CAUGHT +"+commas(NO_CATCH),true);
+  } else el("endSub").textContent = canCont? "1 CONTINUE LEFT — ITEMS KEPT" : "ITEMS: "+S.nGot+" / "+ITEMS.length;
   el("finalScore").textContent=String(S.score).padStart(6,"0");
   if(MOTION){
     var fs={v:0}; el("finalScore").textContent="000000";
@@ -961,7 +979,7 @@ function pickBullySpawn(){
 }
 function startRun(){
   hide("ovEnd"); hide("ovTitle"); hide("ovHow"); hide("ovDriveHow");
-  S.mode="play"; storeView(true); S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.runSecs=0; S.won=false; S.drive=null; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9;
+  S.mode="play"; storeView(true); S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.runSecs=0; S.won=false; S.drive=null; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9; S.itemPts=0; S.combo=1; S.comboMax=1; S.lastPick=null; S.beatOut=false; S.noCatch=false;
   S.bullyOutside=false; S.bullyIn=0; S.bullyTail=false;
   if(GS) GS.killTweensOf(SHOWN); SHOWN.v=0; REVEAL.idx=-1; PAYIN.on=false;   // motion state starts fresh with the run
   // one item live on the board at a time, in a fresh random order each run —
@@ -1463,7 +1481,8 @@ function renderBoard(rows,mine,note){
 function submitScore(){
   var entry={initials:initials.join(""),score:S.score};
   var d=S.drive||{};
-  var body={v:2,name:entry.initials,score:S.score,items:S.nGot,run_seconds:S.runSecs||0,won:!!S.won,
+  var body={v:3,name:entry.initials,score:S.score,items:S.nGot,run_seconds:S.runSecs||0,won:!!S.won,
+    items_points:S.itemPts||0,beat_out:!!(S.won&&S.beatOut),no_catch:!!(S.won&&S.noCatch),
     drive:{bonus:d.bonus||0,time_left:Math.round((d.timeLeft||0)*100)/100,tokens:d.tokens||0,near_misses:d.nearMisses||0}};
   el("submitRow").style.display="none";
   el("lbNote").textContent="SAVING\u2026";

@@ -7,7 +7,7 @@
  *   GET  /api/health            -> { ok: true, db: boolean }
  */
 
-import { validate, validateLive } from './score-rules.js';
+import { validate, validateLive, validateLive3 } from './score-rules.js';
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -59,7 +59,7 @@ async function addScore(env, payload, request) {
     score,
     items: Math.floor(Number(payload.items ?? 0)),
     // v1: seconds left on the store clock. Live game (v: 2): seconds spent in the store.
-    time_left: Math.floor(Number(payload.v === 2 ? payload.run_seconds ?? 0 : payload.time_left ?? 0)),
+    time_left: Math.floor(Number(payload.v === 2 || payload.v === 3 ? payload.run_seconds ?? 0 : payload.time_left ?? 0)),
     won: payload.won ? 1 : 0,
     country: request.headers.get('cf-ipcountry') ?? null,
   };
@@ -123,7 +123,7 @@ async function api(request, env, url) {
         const payload = await request.json().catch(() => null);
         if (!payload) return json({ error: 'invalid json' }, 400);
         // v: 2 is the live game (drive + store); anything else is the v1 modular build's rules
-        const problem = payload.v === 2 ? validateLive(payload) : validate(payload);
+        const problem = payload.v === 3 ? validateLive3(payload) : payload.v === 2 ? validateLive(payload) : validate(payload);
         if (problem) return json({ error: problem }, 400);
         return json(await addScore(env, payload, request), 201);
       }
