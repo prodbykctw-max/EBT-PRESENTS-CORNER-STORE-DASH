@@ -324,7 +324,7 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   last good spot. Moving things go first (route boxes including your own parked car, the cross streets' cars via
   `World.ambientBoxes`, the crowd on both sides) and walls always win. The edge of the map is a wall.
   **Controls** are camera-relative: up the screen is away from the camera, sideways is across the screen, down runs at it; speed is
-  the stick's push times `FOOT.run` in any direction (`wishVelocity`, `approach`). The heading turns toward your velocity at a capped
+  the stick's push times `FOOT.run` (6.4 m/s; was 5.6, raised Nov 2026 so you can open a lead on the bully's 5.3) in any direction (`wishVelocity`, `approach`). The heading turns toward your velocity at a capped
   rate. The camera is the same 10 m back / 6 m up / 7 m ahead framing, turned by `camYaw`, which swings in behind you in proportion to
   the forward part of the drag and your speed (`camYawStep`, at most 1.5 rad/s; pure left/right/down don't orbit). Walls pull the
   camera in along a 2D ray (never closer than 4 m, raising it instead, always 1.8 m above ground). The overpass cutaway, the sun and

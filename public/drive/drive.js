@@ -49,7 +49,9 @@ const SKIPFOOT = QA && new URLSearchParams(location.search).has('skipfoot');
 // you, shown only on the bar at the top. Whatever lead you have when you park is how long you get in the store before
 // he walks in; if he's on your tail, he follows you straight in.
 // (he runs a touch slower than you: a clean run up the sidewalk gets away, but every person you run into lets him close)
-const FOOT = { run: 5.6, back: 2.2, bully: 5.3, bullyGo: 0.8, start: 14, carAhead: 30, bullyBehind: 8, stun: 0.9, reach: 0.9, pause: 1.1 };
+// run: your top speed on foot. 6.4 m/s (was 5.6; the owner, Nov 2026: "he runs just as fast if not faster than me... I need to be able to run a
+// little faster"): 1.1 m/s faster than the bully's 5.3 instead of 0.3, so a clean run pulls away about 4x as fast
+const FOOT = { run: 6.4, back: 2.2, bully: 5.3, bullyGo: 0.8, start: 14, carAhead: 30, bullyBehind: 8, stun: 0.9, reach: 0.9, pause: 1.1 };
 // the on-foot camera: this far behind you (m), this high above your feet, aiming this far ahead of you, and never closer than min (walls pull it in to that)
 const ON_FOOT_CAM = { back: 10, up: 6.0, ahead: 7, min: 4 };
 const RACE = { pace: 17, accel: 3.4, hop: 1.6, tail: 4.5, shake: 60, maxLead: 30 };   // 17 m/s: a good run beats him by ~6 s; an average one gets caught late
