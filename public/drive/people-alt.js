@@ -341,7 +341,7 @@ export class AltPeople {
     const cr = this.crowd, r = cr.route, people = cr.people, cam = cr.camera.position;
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), pos = new THREE.Vector3(), sc = new THREE.Vector3();
     const M0 = this.lods[0].mesh;
-    const SB = M0.castShadow && car ? cr.shadowBox : null, cp = SB ? r.at(car.s, car.d) : null;
+    const SB = M0.castShadow && car ? cr.shadowBox : null, cp = SB ? (cr.focus || r.at(car.s, car.d)) : null;
     let ax, ay, lim;
     if (SB) { const zA = new THREE.Vector3().copy(SB.dir).normalize(); ax = new THREE.Vector3(0, 1, 0).cross(zA).normalize(); ay = zA.clone().cross(ax); lim = SB.half() + 25; }
     const lo = this.lods.map(() => 0), hi = this.lods.map(() => 0), BL = cr.blob;

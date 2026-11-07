@@ -432,5 +432,5 @@ function buildFreeway(list, ground, tex) {
   }
   deck.castShadow = true;
   const group = new THREE.Group(); group.name = 'freeway'; group.add(deck, structure, columns, capMesh);
-  return { group, deck, decks };
+  return { group, deck, decks, pieces: list };   // (pieces: every elevated road with its draped samples [x, y, ground, h] and lift: roam.js builds the walls round them from the same data)
 }
