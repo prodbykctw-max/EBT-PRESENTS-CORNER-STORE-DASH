@@ -506,10 +506,28 @@ HUD markup is unchanged.
 ## Sound
 
 The engine uses real V8 recordings (on-throttle and off-throttle loops), pitched by rpm and
-crossfaded by throttle, over an 8-speed automatic with audible shifts. It plays at 37% of its original level
-(`ENGINE_LEVEL` in `audio.js`: 63% quieter, measured at the speakers). The tire squeal, screech,
+crossfaded by throttle, over an 8-speed automatic with audible shifts. **It's subtle, like GTA** (Nov 2026): the
+whole engine plays at half of the 37%-of-original level it had (`ENGINE_LEVEL` in `audio.js`), and off the gas
+(idle, coasting, cruising) the off-throttle loop is at 30% of its old share (`OFF_SHARE`), so you hear a faint rumble
+until you press GAS and the engine pulling when you do. The tire squeal, screech,
 horn, token clink and crash (sheet metal, plus glass on big hits, over a low thump) are recordings
-too. Sources and licenses are in `public/drive/sfx/CREDITS.txt`. The V8 is CC BY-SA 4.0
+too.
+
+**The whole soundscape is mixed like GTA** (Nov 2026, the owner: "everything like GTA as far as the soundscape: the engine,
+noises and SFX"): the car is the loudest steady thing, effects punch but never blast, ambience sits underneath. Every sound has a
+named gain constant at the top of `audio.js` (a multiplier on its old gain). The levels are measured by
+`tools-engine/sfx_levels.mjs` (renders `DriveAudio` itself offline, through its own master compressor, no game boot, a few seconds)
+and `tools-engine/sfx_levels.py` (loudest 400 ms, K-weighted, in dB against the engine cruising on the gas = 0 dB; crashes by peak
+against the engine's peak). Targets, and the constant that sets each: distant horns -18 (`FAR_HORN`), your horn +1 (`HORN`), honk at
+you -4 (`HONK_AT`) with its skid -6 (`SKID`), tyre squeal -4 (`SQUEAL`), full crash peak +4 (`CRASH`), small bumps -8 (`BUMP_CURVE`:
+a hit of power p plays at p^1.36), token -10 (`TOKEN`), win chord -6 (`CHIME`), near-miss whoosh -12 (`WHOOSH`), streetcar bell -10
+(`BELL`), police siren -2 (`SIREN`). The city rumble (`RUMBLE`) was left at the owner's -75% pick; it measures about -11 dB, above
+the -18 dB the other sounds were aimed at. Worst case (siren, crash, horns, skid, bell, chord and the engine flat out together)
+peaks at -19 dBFS at the master. To re-measure after touching a gain: serve `public/` (`node scripts/serve.mjs 5301`), run
+`node tools-engine/sfx_levels.mjs http://localhost:5301 <dir>` then `python3 tools-engine/sfx_levels.py <dir>`; it marks any sound
+more than 2 dB off its target. `tools-engine/rec_mix.mjs` records the 60 fps drive with this sound for a before/after video.
+
+Sources and licenses are in `public/drive/sfx/CREDITS.txt`. The V8 is CC BY-SA 4.0
 (DerMeehdrescher / Meehdrescher Studios) and **needs a credit in the game's credits**; the rest is CC0.
 `drive/tools/build_sfx.py` cuts, normalizes and makes the loops seamless (349 KB total).
 
