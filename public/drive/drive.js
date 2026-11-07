@@ -747,14 +747,13 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     return { line: (s, lane) => -at(lanes[lane], s), inner: (s) => -at(I, s), outer: (s) => -at(O, s), left: (s) => -at(C, s), far: (s) => route.hw(s) - CURB_GAP - 0.1, wall: (s) => -at(wall, s), lanes, props: footProps, s0, step };
   })();
   const footLineD = (s, lane = 0) => PATH.line(s, lane);
-  // the GAS pedal is the RUN button while you're on foot, and turns back into GAS when you get in
-  const gasBtn = root.querySelector('.dp.gas'), gasLabel = (onFoot) => { if (!gasBtn) return; gasBtn.querySelector('b').textContent = onFoot ? 'RUN' : 'GAS'; gasBtn.setAttribute('aria-label', onFoot ? 'Run' : 'Gas'); };
-  gasLabel(!SKIPFOOT);   // the line round the street furniture (the bully's, the autopilot's)
+  // (the GAS pedal used to be relabelled RUN on foot; on foot the pedals are hidden now and you drag to run)
+  const gasLabel = () => {};   // the line round the street furniture (the bully's, the autopilot's)
   // Where you run across the sidewalk is yours: the stick's sideways part (below, footVec) moves you anywhere from just
   // inside the curb to WALL_GAP off the buildings (and on across the street), and you stay there when you let go.
   // (It used to be two fixed lines, then ◀ ▶ steps of SIDE_STEP; stepSide is kept for the test tools.)
   const SIDE_STEP = 0.9;
-  const sideRange = (s) => [PATH.outer(s), PATH.far(s)];   // route d: the building side is more negative; the far end is the far curb of the street, so ▶ takes you off the curb and across
+  const sideRange = (s) => [PATH.outer(s), PATH.far(s)];   // route d: the building side is more negative; the far end is the far curb of the street, so ◀ (+d) takes you off the curb and across
   let footSide = null;
   const stepSide = (dir) => { const [lo, hi] = sideRange(me.s); footSide = THREE.MathUtils.clamp((footSide ?? me.d) + dir * SIDE_STEP, lo, hi); };
   // ---------- on foot you move the way you move in the store ----------
@@ -766,7 +765,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // down to back up, left / right to cross the sidewalk (◀ toward the street), diagonals do both. A mouse drags the
   // same way; the arrow keys / WASD give the same directions. The pedals are hidden until you're in the car.
   const STICK = { dead: 6, full: 22, travel: 44 }, LAT_RATE = 3.5, LAT_DEAD = 0.15, LAT_LEAD = 0.6;   // LAT_RATE: m/s across the sidewalk at full stick
-  const stickEl = document.createElement('div'); stickEl.className = 'drive-stick'; stickEl.innerHTML = '<i></i>'; root.appendChild(stickEl);
+  const stickEl = document.createElement('div'); stickEl.className = 'drive-stick'; stickEl.setAttribute('aria-hidden', 'true'); stickEl.innerHTML = '<i></i>'; root.appendChild(stickEl);
   const stickKnob = stickEl.firstElementChild;
   let stick = null;   // the drag in progress: { id, ax, ay (the ring), cx, cy (the thumb), x, y (-1..1), on, q }
   const stickK = (m) => { const t = THREE.MathUtils.clamp((m - STICK.dead) / (STICK.full - STICK.dead), 0, 1); return t * (2 - t); };
@@ -797,7 +796,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   root.addEventListener('touchend', stickLift); root.addEventListener('touchcancel', stickLift);
   // a mouse or pen: press anywhere on the street and drag (the store's board works the same way)
   root.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'touch' || stick || !stickOK(e.target)) return;
+    if (e.pointerType === 'touch' || e.button !== 0 || stick || !stickOK(e.target)) return;
     stick = { id: 'mouse', ax: e.clientX, ay: e.clientY, cx: e.clientX, cy: e.clientY, x: 0, y: 0, on: false };
     audio.unlock(); showStick(); try { root.setPointerCapture(e.pointerId); } catch {}
   });
@@ -1023,6 +1022,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (Math.abs(ds) > 0.15 || Math.abs(dd) > 0.15) { m.ofs.s -= ds; m.ofs.d -= dd; }
     if (m.stopped) { m.stopped = false; m.blocked = true; }   // (an end face in the way: stand there, don't run on the spot)
   }
+  const GAS_HINT = 'Hold GAS to go!'; let gasHint = 0;
   function getIn() {
     // (runnerOn off: the runner is in the car, so traffic stops treating the spot he got in at as a person standing in the road)
     state = 'driving'; world.runnerOn = false; gasLabel(false); me.o.visible = me.blob.visible = false; hazards.visible = false; markerSprite.visible = false;
@@ -1033,7 +1033,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     laneK = 1; followLane(); if (BOT) car.targetD = route.lane(car.s, 0);
     cpFrom = car.s;
     hud.pop.replaceChildren();   // a taunt still floating up would sit on top of GO! GO! GO!
-    flash('GO! GO! GO!', 900); setHint(''); haptic(HAP.go); audio.chime();
+    flash('GO! GO! GO!', 900); haptic(HAP.go); audio.chime();
+    // your thumb was on the street, not on GAS: say where to go now (phones; cleared when you press GAS or after 3 s)
+    setHint(!BOT && matchMedia('(pointer: coarse)').matches ? GAS_HINT : ''); gasHint = 3;
     // he runs for his own ride (just behind where he's standing), then he's coming
     race = { s: him.s - 2, v: 0, hop: RACE.hop + Math.max(0, him.pause), tail: false, shookAt: 0 };
     raceBar.hidden = false;
@@ -1041,9 +1043,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   function updateFoot(dt) {
     footT += dt;
     // you: drag up (or hold ↑) to run up the block, as fast as the stick is pushed; down to back up if you overshoot; you
-    // cut over to the driver's door yourself
-    const fv = footVec(), fwd = Math.max(0, -fv.y);
-    const want = me.stun > 0 || me.blocked ? 0 : BOT ? FOOT.run : fwd > 0 ? FOOT.run * fwd : -FOOT.back * Math.max(0, fv.y);   // (blocked: no way round whatever is in the road ahead: you wait, you don't run into it)
+    // cut over to the driver's door yourself. Anywhere within 45° of straight up is full running speed (the store's
+    // diagonals are full speed too; scaling by the angle made a dodge slower than the bully, who runs 5.3 m/s, and made
+    // ↑+← on a keyboard slower than it was), and a shorter drag is slower.
+    const fv = footVec(), fm = Math.hypot(fv.x, fv.y), up = fm ? -fv.y / fm : 0;
+    const fwd = up > 0 ? fm * Math.min(1, up * Math.SQRT2) : 0, bk = up < 0 ? fm * Math.min(1, -up * Math.SQRT2) : 0;
+    const want = me.stun > 0 || me.blocked ? 0 : BOT ? FOOT.run : fwd > 0 ? FOOT.run * fwd : -FOOT.back * bk;   // (blocked: no way round whatever is in the road ahead: you wait, you don't run into it)
     me.stun = Math.max(0, me.stun - dt);
     const mv = me.stun > 0 ? MOVE.stun : Math.abs(want) > Math.abs(me.v) && want * me.v >= 0 ? MOVE.up : MOVE.down;
     speedTo(me, want, dt, mv[0], mv[1]);
@@ -1097,7 +1102,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       }
       if (Math.abs(q.s - him.s) < 0.7 && Math.abs(qd - him.d) < 0.6 && !q.shove) knock(q, him.d);
     }
-    if (!found && footT > 2.2 && footT < 2.4) setHint('Drag up to run — get to your car');
+    if (!found && footT > 0.3 && footT < 0.5) setHint('Drag up to run — get to your car');   // (straight away: there's no button on screen to tell you)
     if (!found && doorS - me.s < 14) { found = true; audio.token(); setHint('That’s your ride — get in!'); }
     // the bully: a beat to clock you, then he runs you down; catching you is a shove, not the end
     him.pause = Math.max(0, him.pause - dt);
@@ -1179,7 +1184,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     let turn = Math.atan2(m.dv, Math.max(m.v, 2.5)) * 0.7 * THREE.MathUtils.smoothstep(m.v, 0, 1.5);
     if (m === me) {
       const across = 1 - THREE.MathUtils.smoothstep(m.v, 0.6, 2.5);
-      turn = THREE.MathUtils.lerp(turn, Math.atan2(m.dv, Math.max(m.v, 0.6)) * THREE.MathUtils.smoothstep(Math.abs(m.dv), 0, 1.5), across);
+      turn = THREE.MathUtils.lerp(turn, Math.atan2(m.dv, Math.max(Math.abs(m.v), 0.6)) * THREE.MathUtils.smoothstep(Math.abs(m.dv), 0, 1.5), across);
     }
     const head = route.at(s).a + turn;
     if (m.yaw === null) m.yaw = head;
@@ -1187,7 +1192,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // animation: stand, walk and run blended by speed, all on one clock that advances with the ground you cover
     const sp = m === me ? Math.hypot(m.v, m.dv) : Math.abs(m.v), wRun = THREE.MathUtils.smoothstep(sp, 1.6, 4.2), moving = THREE.MathUtils.smoothstep(sp, 0.05, 1.0);
     const plant = THREE.MathUtils.lerp(m.plantWalk, m.plantRun, wRun), dur = clips.run.duration;
-    m.phase = (((m.phase + (m === me ? Math.sign(m.v || 1) * sp : m.v) / plant * dt) % dur) + dur) % dur;
+    m.phase = (((m.phase + (m === me ? (m.v < -0.3 ? -1 : 1) * sp : m.v) / plant * dt) % dur) + dur) % dur;   // (you: legs run backwards only while you're really backing up; a speed easing to 0 from a back-up never quite gets there)
     m.act.stand.setEffectiveWeight(1 - moving); m.act.walk.setEffectiveWeight(moving * (1 - wRun)); m.act.run.setEffectiveWeight(moving * wRun);
     m.act.walk.time = m.act.run.time = m.phase; m.act.stand.time = 0;
     m.mixer.update(0);
@@ -1253,6 +1258,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (!manual) adaptRes(now);
     if (paused || api.pause || (holding && !manual)) { if (!manual) comic.render(); return; }   // paused (or QA freeze-frame): the world holds still   // QA: freeze-frame for look-dev
     hornT -= dt;
+    if (gasHint > 0 && ((gasHint -= dt) <= 0 || keys.has('gas'))) { gasHint = 0; if (hud.hint.textContent === GAS_HINT) setHint(''); }   // the 'Hold GAS' prompt after getting in
     if (state === 'countdown') {
       countdown -= dt;
       const cd = countdown > 0 ? String(Math.ceil(countdown)) : 'GO!';

@@ -18,7 +18,7 @@ const touch = (type, pts) => p.evaluate(([type, pts, prev]) => {
 }, [type, pts, down]).then(() => { if (pts[0]) down = pts[0]; });
 const tick = (n) => p.evaluate((n) => { const d = window.__drive, f = d.foot, M = f.me; for (let i = 0; i < n; i++) { f.him.s = Math.min(f.him.s, M.s - 25); d.tick(1 / 60); }
   const yawOff = Math.atan2(Math.sin(M.yaw - d.route.at(M.s).a), Math.cos(M.yaw - d.route.at(M.s).a)) * 180 / Math.PI;
-  return { s: +M.s.toFixed(2), d: +M.d.toFixed(3), v: +M.v.toFixed(2), dv: +(M.dv || 0).toFixed(2), yawOff: Math.round(yawOff), runW: +M.act.run.getEffectiveWeight().toFixed(2), standW: +M.act.stand.getEffectiveWeight().toFixed(2), stun: +(M.stun||0).toFixed(2) }; }, n);
+  return { s: +M.s.toFixed(2), d: +M.d.toFixed(3), v: +M.v.toFixed(2), dv: +(M.dv || 0).toFixed(2), yawOff: Math.round(yawOff), runW: +M.act.run.getEffectiveWeight().toFixed(2), phase: +M.phase.toFixed(3), standW: +M.act.stand.getEffectiveWeight().toFixed(2), stun: +(M.stun||0).toFixed(2) }; }, n);
 const log = (l, r) => console.log(l.padEnd(30), JSON.stringify(r));
 // run up to open sidewalk first (s ~ 22, between the trees at 18 and 32)
 await touch('touchStart', [[200, 600]]); await touch('touchMove', [[200, 560]]); log('run up', await tick(70));
@@ -31,5 +31,13 @@ await touch('touchStart', [[X, Y]]); await touch('touchMove', [[X + 40, Y]]); lo
 await touch('touchEnd', []); const a2 = await tick(1); const z2 = await tick(60); console.log('slide after release (m):', Math.abs(z2.d - a2.d).toFixed(3));
 await touch('touchStart', [[X, Y]]); await touch('touchMove', [[X, Y + 40]]); log('down (back up) 1s', await tick(60));
 await touch('touchEnd', []); log('released', await tick(30));
+// right after backing up, cross straight over: the legs must run forwards (phase increasing)
+await touch('touchStart', [[X, Y]]); await touch('touchMove', [[X - 40, Y]]); const p0 = await tick(1); const p1 = await tick(12); log('cross after back-up', p1);
+const dph = (p1.phase - p0.phase + 10) % 2.5; console.log('legs after back-up:', p1.phase > p0.phase || p1.phase < p0.phase - 1 ? 'forwards' : 'BACKWARDS', p0.phase, p1.phase);
+await touch('touchEnd', []); await tick(20);
+// up-left drag: full running speed (within 45 deg of up)
+await touch('touchStart', [[X, Y]]); await touch('touchMove', [[X - 40, Y - 40]]); log('up-left 45 deg 1s', await tick(60));
+await touch('touchMove', [[X - 40, Y - 20]]); log('up-left 63 deg off up 1s', await tick(60));
+await touch('touchEnd', []); await tick(20);
 console.log('errors', JSON.stringify(errs));
 await b.close();
