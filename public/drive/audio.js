@@ -18,7 +18,10 @@ const RATIOS = [0, 4.71, 3.14, 2.10, 1.67, 1.29, 1.0, 0.84, 0.67], FINAL = 3.09,
 const IDLE = 800, REDLINE = 6200;
 // engine loudness: 63% quieter than it was (0.75), at the owner's request. Measured at the speakers, after the master
 // compressor, the engine comes out at 37-39% of its old level at idle, pulling away, cruising, flat out and coasting.
-const ENGINE_LEVEL = 0.75 * 0.37;
+// Then (Nov 2026, the owner: "like Grand Theft Auto, subtle, only when the engine is tapped, a lot lower"): the whole
+// engine at half that again, and off the gas (idle, coasting, cruising without the pedal) the off-throttle recording at
+// OFF_SHARE of its old share, so the engine is a faint rumble until you press GAS and you hear it pull when you do.
+const ENGINE_LEVEL = 0.75 * 0.37 * 0.5, OFF_SHARE = 0.3;
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export class DriveAudio {
@@ -95,7 +98,7 @@ export class DriveAudio {
     const aim = (param, v, tc) => { if (param._aim !== v) { param.setTargetAtTime(v, t, tc); param._aim = v; } };
     for (const ly of this.layers) aim(ly.src.playbackRate, rate, 0.04);
     aim(on.g.gain, Math.sin(l * Math.PI / 2) * 0.9, 0.06);          // equal-power crossfade
-    aim(off.g.gain, Math.cos(l * Math.PI / 2) * 0.75, 0.06);
+    aim(off.g.gain, Math.cos(l * Math.PI / 2) * 0.75 * OFF_SHARE, 0.06);
     aim(this.engLP.frequency, 2400 + this.rpm * 0.6, 0.08);
     aim(this.squeal.gain, slip > 0.3 ? Math.min(0.55, (slip - 0.3) * 1.1) : 0, 0.05);
   }
