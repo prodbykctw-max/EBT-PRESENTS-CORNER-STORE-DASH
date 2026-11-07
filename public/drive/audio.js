@@ -5,7 +5,7 @@
 //   tyres:  a recorded squeal loop that swells with lateral slip; a recorded screech on hard hits
 //   crash:  recorded sheet-metal hit (+ glass on big ones) over a low synthesised body thump
 //   horn / distant horns / token clink: recordings, slightly re-pitched each time so they never repeat
-//   bed:    low brown-noise city rumble
+//   bed:    low brown-noise city rumble (at RUMBLE) + distant horns
 // Mobile browsers only start audio after a user gesture: unlock() is called from pointerdown / keydown.
 
 const SFX = new URL('./sfx/', import.meta.url);
@@ -22,6 +22,8 @@ const IDLE = 800, REDLINE = 6200;
 // engine at half that again, and off the gas (idle, coasting, cruising without the pedal) the off-throttle recording at
 // OFF_SHARE of its old share, so the engine is a faint rumble until you press GAS and you hear it pull when you do.
 const ENGINE_LEVEL = 0.75 * 0.37 * 0.5, OFF_SHARE = 0.3;
+// the city rumble under everything (buildBed): 75% quieter than it was, so at idle it no longer drowns the faint engine
+const RUMBLE = 0.25;
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export class DriveAudio {
@@ -63,7 +65,9 @@ export class DriveAudio {
     let last = 0; for (let i = 0; i < d.length; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; }
     const n = ctx.createBufferSource(); n.buffer = b; n.loop = true;
     const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 380;
-    n.connect(lp).connect(this.bus.bed); n.start();
+    // the rumble at RUMBLE of its old level (the owner, Nov 2026: with the quieter engine it was the loudest thing at idle);
+    // the far horns below keep their level
+    n.connect(lp).connect(gain(ctx, RUMBLE, this.bus.bed)); n.start();
     this.bedTimer = setInterval(() => { if (Math.random() < 0.3) this.play('hornFar', { gain: rnd(0.12, 0.25), rate: rnd(0.88, 1.08), bus: this.bus.bed }); }, 5000);
   }
 
