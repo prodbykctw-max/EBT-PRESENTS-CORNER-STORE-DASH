@@ -7,6 +7,7 @@ Source: the commercial's Blender scene (Kema's ebt_corner_store_scene.blend), wh
 goes in as a 1024 px JPEG. Only the walk is exported; the run is made from it at load time (people.js makeRunClip), on
 the sampled clip, so it always matches the rig. The model's own height in the file is MODEL_H (0.982); the game scales it.
 
+Then run drive/tools/fix_character_weights.py on the result (it untangles the hands from the jeans and the tee).
 Run headless with Blender 5.x (or the bpy module):  blender -b --python drive/tools/export_character.py -- <scene.blend> <out.glb>
 """
 import bpy, sys, os

@@ -12,10 +12,15 @@ the game mirrors R for L) x FRAMES columns, CELL px square, transparent.
 Root motion is cancelled by keeping the camera on the hips, so every cell is a walk in place, feet on the
 same baseline. Renders cells at 2x; standalone/tools/compose_sheets.py (system Python + Pillow) downsamples and packs them.
 
+CSD_ARMS=1 puts the drive's arm swing on the player's walk first (standalone/tools/arm_swing.py). The shipped sheets are
+the walk as it is (the owner judged the store's arms fine as they are, Nov 6 2026), so the default is off.
 Run (visible, in Blender's UI):  blender --python standalone/tools/bake_characters.py
-Outputs: <CHAR_DIR>/renders2/<name>_<row>_<frame>.png
+  or headless, the player only:  set CSD_BAKE=player & blender -b --python standalone/tools/bake_characters.py
+Outputs: <CHAR_DIR>/<CSD_RENDERS, default renders2>/<name>_<row>_<frame>.png (renders2: the shipped bake; renders3: with the swing)
 """
 import bpy, math, os, sys, base64, io, mathutils
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from arm_swing import add_arm_swing, WALK          # the player's arm swing (same as the drive's, public/drive/people.js)
 
 REPO = r"C:\Users\Owner\Desktop\EBT_PRESENTS_CORNER_STORE_DASH"
 CHAR_DIR = r"C:\Users\Owner\Desktop\corner-store-dash-character"
@@ -163,6 +168,8 @@ def bake(name, path, author=None):
         act, N = author(arm, fwd); start, end = 1, N + 1
     else:
         act = arm.animation_data.action; start, end = int(act.frame_range[0]), int(act.frame_range[1])
+        if os.environ.get("CSD_ARMS", "0") == "1":
+            print("arm swing keys", add_arm_swing(arm, fwd, list(range(start, end + 1)), **WALK))
     span = end - start
     frames = [start + round(span * k / FRAMES) for k in range(FRAMES)]
     lo, hi = world_bbox(meshes)
@@ -171,7 +178,7 @@ def bake(name, path, author=None):
     # face the camera for D: the camera looks along +Y (from -Y); rotate the character so it faces -Y, etc.
     base = math.atan2(fwd.y, fwd.x)
     rows = {"D": -math.pi / 2, "U": math.pi / 2, "R": 0.0}                    # desired world facing angle
-    tmp = os.path.join(CHAR_DIR, "renders2"); os.makedirs(tmp, exist_ok=True)
+    tmp = os.path.join(CHAR_DIR, os.environ.get("CSD_RENDERS", "renders2")); os.makedirs(tmp, exist_ok=True)
     root = arm
     for ri, (row, ang) in enumerate(rows.items()):
         root.rotation_mode = "XYZ"; root.rotation_euler.z = ang - base

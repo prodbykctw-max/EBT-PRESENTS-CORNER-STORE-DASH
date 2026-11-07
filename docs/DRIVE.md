@@ -424,7 +424,22 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
 - **The people** are the store's own character in 3D (`people.js`, `character.glb`: the rigged Tripo model from the
   commercial's Blender scene, decimated to 16k triangles, exported by `drive/tools/export_character.py`), with its walk
   and a run built from it at load time (`makeRunClip`), plus a standing pose (`makeStandClip`); see "How you move on
-  foot" above for how they're played. The bully is the same model recoloured in the shader exactly as the
+  foot" above for how they're played. **The arms swing** (`addArmSwing`, `ARMS` in `people.js`): the model's own walk
+  barely moves them (the upper arms stay at the sides; from behind, the way the chase camera sees you, they did not move
+  at all), so the walk and the run each get a swing at load time: each arm turns about the shoulder, forward when the
+  opposite foot is forward (phase read off the clip's own feet), the elbow bends further on the forward swing (the run
+  pumps: hand to the chest in front, behind the hip at the back), the shoulder rolls with 40 % of the swing so the tee's
+  sleeve follows the arm, and the arms are tucked in 2 degrees. Forward is the average of both feet over the clip (one
+  toe alone points ~11 degrees off). Measured on the arm joints at the bully's size: sideways 0.377 m in the run (0.401
+  before), front/back of the hip 0.420 m in the run (0.366 before) and 0.383 m in the walk (0.222), so `BODY` (0.42 m,
+  which also pads the obstacle boxes along the street) still holds (`tools-arms/width.mjs`). It runs on a private random generator, so the traffic's shared `Math.random` stream is unchanged.
+  **The hands no longer drag the jeans** (`drive/tools/fix_character_weights.py`, run on `character.glb`): the scan's
+  automatic skin weights tied ~350 jeans vertices around the pockets to the hand bones and ~370 vertices of each hand to
+  the thigh bones, so each hand pulled a patch of jeans with it and each stride pulled the hands toward the jeans. Below
+  the elbow every vertex is now either arm or body (by distance along the surface from sure seeds) and follows only
+  its own bones; the few triangles the scan fused between hand and hip are split so the tee and jeans stay whole.
+  The store's sprite sheets keep the walk as it is (the owner judged them fine); a bake with the same swing exists
+  (`standalone/tools/arm_swing.py`, `CSD_ARMS=1`). The bully is the same model recoloured in the shader exactly as the
   store's sprite sheet is (white tee -> red, denim -> charcoal, red kicks -> black) and drawn taller.
 - **The race.** When you get in he runs for his own ride (1.6 s), then comes after you at 17 m/s, shown only on the bar
   at the top (`.drive-race`: your head, his head, the STORE flag; `heads.png`). If he gets within 4.5 m he's **on your
