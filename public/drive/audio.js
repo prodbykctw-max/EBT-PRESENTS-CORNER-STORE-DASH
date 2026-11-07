@@ -24,6 +24,22 @@ const IDLE = 800, REDLINE = 6200;
 const ENGINE_LEVEL = 0.75 * 0.37 * 0.5, OFF_SHARE = 0.3;
 // the city rumble under everything (buildBed): 75% quieter than it was, so at idle it no longer drowns the faint engine
 const RUMBLE = 0.25;
+// The rest of the soundscape, mixed like GTA (Nov 2026, the owner: "we're doing everything like GTA as far as the soundscape: the
+// engine, noises and SFX"): the car is the loudest steady thing, effects punch but never blast, ambience stays underneath. Each is a
+// multiplier on that sound's old gain, set by measuring it in the game's own mix (tools-engine/sfx_levels.mjs + sfx_levels.py);
+// the target is its loudness in dB against the engine cruising on the gas (0 dB), in the comment. Gains only, no sound file touched.
+const FAR_HORN = 0.54;  // distant horns in the bed: -18 dB (they are occasional, under the rumble)
+const HORN = 0.07;      // your own horn: +1 dB
+const HONK_AT = 0.058;  // other cars honking at you, full: -4 dB (further away and it falls with distance, as before)
+const SKID = 0.10;      // their tyre screech with it: -6 dB
+const SQUEAL = 0.063;   // your tyre squeal at full slip: -4 dB
+const CRASH = 0.072;    // a full-power crash (metal + glass + screech + thump): peak +4 dB over the engine's peak, short
+const BUMP_CURVE = 1.36; // a lighter hit (power p) plays at p^this of a full one on top of the old p: small bumps land at -8 dB
+const TOKEN = 0.041;    // token pickup, a light tick: -10 dB
+const CHIME = 0.040;    // the four-clink win/parked chord: -6 dB
+const WHOOSH = 0.204;   // near-miss air rush: -12 dB
+const BELL = 0.078;      // streetcar bell: -10 dB
+const SIREN = 0.104;    // police siren when busted: -2 dB
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export class DriveAudio {
@@ -68,8 +84,11 @@ export class DriveAudio {
     // the rumble at RUMBLE of its old level (the owner, Nov 2026: with the quieter engine it was the loudest thing at idle);
     // the far horns below keep their level
     n.connect(lp).connect(gain(ctx, RUMBLE, this.bus.bed)); n.start();
-    this.bedTimer = setInterval(() => { if (Math.random() < 0.3) this.play('hornFar', { gain: rnd(0.12, 0.25), rate: rnd(0.88, 1.08), bus: this.bus.bed }); }, 5000);
+    this.bedTimer = setInterval(() => { if (Math.random() < 0.3) this.farHorn(); }, 5000);
   }
+
+  /** a horn far away in the bed (g = 0.12..0.25 before FAR_HORN) */
+  farHorn(g = rnd(0.12, 0.25)) { this.play('hornFar', { gain: g * FAR_HORN, rate: rnd(0.88, 1.08), bus: this.bus.bed }); }
 
   setMuted(m) { this.muted = m; if (this.out) this.out.gain.value = m ? 0 : 0.9; }
 
@@ -104,7 +123,7 @@ export class DriveAudio {
     aim(on.g.gain, Math.sin(l * Math.PI / 2) * 0.9, 0.06);          // equal-power crossfade
     aim(off.g.gain, Math.cos(l * Math.PI / 2) * 0.75 * OFF_SHARE, 0.06);
     aim(this.engLP.frequency, 2400 + this.rpm * 0.6, 0.08);
-    aim(this.squeal.gain, slip > 0.3 ? Math.min(0.55, (slip - 0.3) * 1.1) : 0, 0.05);
+    aim(this.squeal.gain, slip > 0.3 ? Math.min(0.55, (slip - 0.3) * 1.1) * SQUEAL : 0, 0.05);
   }
 
   play(name, { gain: g = 1, rate = 1, bus, delay = 0 } = {}) {
@@ -116,20 +135,20 @@ export class DriveAudio {
 
   crash(power = 1) {
     if (!this.ctx) return;
-    const p = Math.max(0.35, power);
-    this.play('metal' + (1 + ((Math.random() * 3) | 0)), { gain: 0.9 * p, rate: rnd(0.8, 0.95) });
-    if (power > 0.8) { this.play('glass', { gain: 0.5, rate: rnd(0.95, 1.1), delay: 0.03 }); this.play('screech', { gain: 0.35, rate: rnd(0.95, 1.05) }); }
+    const p = Math.max(0.35, power), k = CRASH * p ** (BUMP_CURVE - 1);   // k * p = CRASH * p^BUMP_CURVE
+    this.play('metal' + (1 + ((Math.random() * 3) | 0)), { gain: 0.9 * p * k, rate: rnd(0.8, 0.95) });
+    if (power > 0.8) { this.play('glass', { gain: 0.5 * CRASH, rate: rnd(0.95, 1.1), delay: 0.03 }); this.play('screech', { gain: 0.35 * CRASH, rate: rnd(0.95, 1.05) }); }
     // low body thump under the recording: that's what makes a car hit feel heavy
     const ctx = this.ctx, t = ctx.currentTime, o = ctx.createOscillator();
     o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(38, t + 0.2);
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.8 * p, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.8 * p * k, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
     o.connect(g).connect(this.bus.fx); o.start(t); o.stop(t + 0.32);
   }
-  horn() { this.play('horn', { gain: 0.8, rate: 1 }); }
+  horn() { this.play('horn', { gain: 0.8 * HORN, rate: 1 }); }
   /** another driver's horn (g = 0..1 by distance), a little different in pitch each time; and a skid when they stand on the brakes */
-  honkAt(g = 1) { this.play('horn', { gain: 0.55 * g, rate: rnd(0.88, 1.12) }); }
-  skid(g = 1) { this.play('screech', { gain: 0.3 * g, rate: rnd(1.0, 1.15) }); }
-  token() { this.play('coin', { gain: 0.75, rate: rnd(1.25, 1.4) }); }
+  honkAt(g = 1) { this.play('horn', { gain: 0.55 * g * HONK_AT, rate: rnd(0.88, 1.12) }); }
+  skid(g = 1) { this.play('screech', { gain: 0.3 * g * SKID, rate: rnd(1.0, 1.15) }); }
+  token() { this.play('coin', { gain: 0.75 * TOKEN, rate: rnd(1.25, 1.4) }); }
   whoosh() { this.air(); }
   air() { // near miss: a short band-passed air rush
     const ctx = this.ctx; if (!ctx) return;
@@ -138,7 +157,7 @@ export class DriveAudio {
     const n = ctx.createBufferSource(); n.buffer = b;
     const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 0.8;
     bp.frequency.setValueAtTime(500, t); bp.frequency.exponentialRampToValueAtTime(1600, t + 0.15); bp.frequency.exponentialRampToValueAtTime(350, t + 0.5);
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.22, t + 0.12); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.22 * WHOOSH, t + 0.12); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
     n.connect(bp).connect(g).connect(this.bus.fx); n.start(t);
   }
   bell(gain = 0.5) { // streetcar gong: "ding-ding", synthesised from bell-like inharmonic partials
@@ -148,7 +167,7 @@ export class DriveAudio {
       for (const [f, a] of [[1180, 1], [1180 * 2.76, 0.45], [1180 * 5.4, 0.18], [590, 0.3]]) {
         const o = ctx.createOscillator(), g = ctx.createGain();
         o.type = 'sine'; o.frequency.value = f;
-        g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(gain * a * k * 0.25, t + 0.004);
+        g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(gain * BELL * a * k * 0.25, t + 0.004);
         g.gain.exponentialRampToValueAtTime(0.0001, t + (f > 2000 ? 0.35 : 0.9));
         o.connect(g).connect(this.bus.fx); o.start(t); o.stop(t + 1);
       }
@@ -165,11 +184,11 @@ export class DriveAudio {
       depth.connect(o.frequency); const g = gain(ctx, type === 'square' ? 0.25 : 0.5, lp); o.connect(g); o.start(t); return o;
     });
     lfo.start(t);
-    out.gain.exponentialRampToValueAtTime(0.05, t + 0.8); out.gain.exponentialRampToValueAtTime(0.32, t + 4);
+    out.gain.exponentialRampToValueAtTime(0.05 * SIREN, t + 0.8); out.gain.exponentialRampToValueAtTime(0.32 * SIREN, t + 4);
     this.sirenOn = { stop: () => { out.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.2); [lfo, ...oscs].forEach((o) => o.stop(ctx.currentTime + 1)); } };
   }
   chime() { // parked: coin clinks rising
-    [1, 1.26, 1.5, 2].forEach((r, i) => this.play('coin', { gain: 0.6, rate: r, delay: i * 0.09 }));
+    [1, 1.26, 1.5, 2].forEach((r, i) => this.play('coin', { gain: 0.6 * CHIME, rate: r, delay: i * 0.09 }));
   }
 
   stop() {
