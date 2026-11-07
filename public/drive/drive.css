@@ -166,3 +166,11 @@
   .drive-root.real .drive-row2 .drive-race { flex: 1 1 100%; order: 9; min-height: 46px; }
   .drive-root.real:has(.drive-race:not([hidden])) .drive-light { top: calc(max(10px, env(safe-area-inset-top)) + 200px); }
 }
+
+/* on foot you drag anywhere to move, like the store (drive.js footVec): its gold ring, no pedals until you're in the car */
+.drive-root.onfoot .drive-pad { display: none; }
+.drive-stick { position: absolute; left: 0; top: 0; width: 96px; height: 96px; border-radius: 50%; z-index: 4;
+  border: 3px solid rgba(245,197,24,.55); background: rgba(30,35,64,.28); pointer-events: none; opacity: 0; transition: opacity .12s; }
+.drive-stick.on { opacity: 1; }
+.drive-stick i { position: absolute; left: 28px; top: 28px; width: 40px; height: 40px; border-radius: 50%;
+  background: rgba(245,197,24,.85); box-shadow: 0 2px 8px rgba(0,0,0,.4); }

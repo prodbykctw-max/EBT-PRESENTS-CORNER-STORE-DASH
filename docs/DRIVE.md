@@ -316,8 +316,14 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
 - **On foot.** You start on the right sidewalk of Luckie St (s = 14 m) with the bully 8 m behind you. Your car is parked
   at the right curb up the block with its **hazards flashing** and a yellow ▼ over it, in the first stretch of parking
   lane where it sits level (Luckie St is steep: on its cross-slope a car rolls ~10°, so the spot is picked by measuring
-  the car's roll and pitch with `standOn`). Hold RUN (the GAS pedal, labelled RUN while you are on foot) to run (5.6 m/s), BRAKE to back up, ◀ ▶ to step left or right
-  anywhere across the sidewalk (see "Where you run" below). Run into someone from the crowd and you stumble ("WATCH IT!"); the bully
+  the car's roll and pitch with `standOn`). **You move the way you move in the store**
+  (owner, Nov 2026): put a thumb down anywhere that isn't a button and drag; a gold ring appears there and the knob
+  follows your thumb (44 px travel, nothing under 6 px, full speed from 22 px: the store's stick). Up the screen is up
+  the street: drag up to run (up to 5.6 m/s, as fast as the stick is pushed), down to back up (2.2 m/s), sideways to
+  cross the sidewalk (up to 3.5 m/s, a small dead band so a straight-up drag doesn't drift), diagonals do both; you
+  turn and run the way you go. A mouse drags the same way; arrows / WASD give the same directions. The pedals are
+  hidden on foot and pop in when you get in the car (`footVec`, the stick block after `stepSide` in `drive.js`,
+  `.drive-stick` / `.drive-root.onfoot` in `drive.css`; test hook `__drive.foot.stick = {x, y}`). See "Where you run" below. Run into someone from the crowd and you stumble ("WATCH IT!"); the bully
   shoves through people. He runs 5.3 m/s, so a clean run gets away and a sloppy one gets caught: a catch is a **shove**
   ("SHOVED!", 0.9 s down), never the end. Near the car you cut over to the driver's door yourself and jump in: "GO! GO!
   GO!", no 3-2-1, and the car swings straight into the travel lane. The drive's clock only runs once you're driving.

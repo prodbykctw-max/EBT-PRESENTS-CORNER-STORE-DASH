@@ -332,6 +332,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const setPaused = (p) => {
     if (p && !(state === 'driving' || state === 'countdown' || state === 'onfoot')) return;   // nothing to pause at the finish
     paused = p; keys.clear();                                                     // no stuck gas / steering on resume
+    try { endStick(); } catch {}                                                 // nor a drag (try: a pause before the level has loaded)
     for (const b of root.querySelectorAll('[data-k].on')) b.classList.remove('on');
     const panel = root.querySelector('.drive-paused');
     panel.hidden = !p;
@@ -371,7 +372,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // held keys: a quick tap (finger down and up between two frames, easy on a phone drawing the city at 30 fps) used
   // to be missed entirely. One lane per press; holding does nothing more.
   const tapLane = (k) => {
-    if (state === 'onfoot' && !paused) { try { stepSide(k === 'left' ? 1 : -1); } catch {} haptic(HAP.lane); return; }   // (try: a press while the level is still loading)   // on foot: a step left or right
+    if (state === 'onfoot') return;   // on foot ◀ ▶ are held directions (footVec), like the store's arrows, not steps
     if (state !== 'driving' || BOT || paused) return;
     laneShift(k === 'left' ? 1 : -1); followLane();
   };
@@ -749,14 +750,69 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // the GAS pedal is the RUN button while you're on foot, and turns back into GAS when you get in
   const gasBtn = root.querySelector('.dp.gas'), gasLabel = (onFoot) => { if (!gasBtn) return; gasBtn.querySelector('b').textContent = onFoot ? 'RUN' : 'GAS'; gasBtn.setAttribute('aria-label', onFoot ? 'Run' : 'Gas'); };
   gasLabel(!SKIPFOOT);   // the line round the street furniture (the bully's, the autopilot's)
-  // Where you run across the sidewalk is yours: ◀ ▶ step you over (a tap is a step of SIDE_STEP, holding keeps you
-  // moving at SIDE_RATE) anywhere from just inside the curb to WALL_GAP off the buildings, and you stay there when you
-  // let go. (It used to be two fixed lines, both 1.3 m+ in from the curb, and you started on the left one, so ◀ did
-  // nothing at all and on the narrow stretch (s 44-56) the two lines were 4 cm apart, hard by the wall.)
-  const SIDE_STEP = 0.9, SIDE_RATE = 2.6, SIDE_HOLD = 0.2;
+  // Where you run across the sidewalk is yours: the stick's sideways part (below, footVec) moves you anywhere from just
+  // inside the curb to WALL_GAP off the buildings (and on across the street), and you stay there when you let go.
+  // (It used to be two fixed lines, then ◀ ▶ steps of SIDE_STEP; stepSide is kept for the test tools.)
+  const SIDE_STEP = 0.9;
   const sideRange = (s) => [PATH.outer(s), PATH.far(s)];   // route d: the building side is more negative; the far end is the far curb of the street, so ▶ takes you off the curb and across
   let footSide = null;
   const stepSide = (dir) => { const [lo, hi] = sideRange(me.s); footSide = THREE.MathUtils.clamp((footSide ?? me.d) + dir * SIDE_STEP, lo, hi); };
+  // ---------- on foot you move the way you move in the store ----------
+  // (owner, Nov 2026: "instead of a run button, you should be able to run the same way you run inside the store")
+  // The whole screen is the controller, like the store's (standalone/csd.js bindTouch): put a thumb down anywhere that
+  // isn't a button and drag the way you want to go. A gold ring appears where you touched and the knob follows your
+  // thumb: 44 px of travel (the ring drifts along if you keep pulling), nothing under 6 px, full speed from 22 px
+  // (the store's STICK_DEAD / STICK_FULL). Up the screen is up the street (the camera is behind you): drag up to run,
+  // down to back up, left / right to cross the sidewalk (◀ toward the street), diagonals do both. A mouse drags the
+  // same way; the arrow keys / WASD give the same directions. The pedals are hidden until you're in the car.
+  const STICK = { dead: 6, full: 22, travel: 44 }, LAT_RATE = 3.5, LAT_DEAD = 0.15, LAT_LEAD = 0.6;   // LAT_RATE: m/s across the sidewalk at full stick
+  const stickEl = document.createElement('div'); stickEl.className = 'drive-stick'; stickEl.innerHTML = '<i></i>'; root.appendChild(stickEl);
+  const stickKnob = stickEl.firstElementChild;
+  let stick = null;   // the drag in progress: { id, ax, ay (the ring), cx, cy (the thumb), x, y (-1..1), on, q }
+  const stickK = (m) => { const t = THREE.MathUtils.clamp((m - STICK.dead) / (STICK.full - STICK.dead), 0, 1); return t * (2 - t); };
+  const showStick = () => {
+    stickEl.style.transform = `translate(${stick.ax - 48}px, ${stick.ay - 48}px)`;
+    stickKnob.style.transform = `translate(${stick.cx - stick.ax}px, ${stick.cy - stick.ay}px)`; stickEl.classList.add('on');
+  };
+  const endStick = () => { stick = null; stickEl.classList.remove('on'); };
+  const stickMove = (cx, cy) => {
+    stick.cx = cx; stick.cy = cy;
+    let dx = cx - stick.ax, dy = cy - stick.ay, m = Math.hypot(dx, dy);
+    if (m > STICK.travel) { stick.ax = cx - dx / m * STICK.travel; stick.ay = cy - dy / m * STICK.travel; dx = cx - stick.ax; dy = cy - stick.ay; m = STICK.travel; }
+    if (m > STICK.dead) {
+      const q = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'R' : 'L') : (dy > 0 ? 'D' : 'U');
+      if (m > 10 && (!stick.on || stick.q !== q)) { stick.q = q; haptic(HAP.lane, 60); }   // a tick when you swing to a new direction, like the store
+      const k = stickK(m); stick.on = true; stick.x = dx / m * k; stick.y = dy / m * k;
+    } else { stick.on = false; stick.x = stick.y = 0; }
+    showStick();
+  };
+  const stickOK = (t) => state === 'onfoot' && !paused && !t?.closest?.('button, [data-skip], [data-pause], .drive-paused, .drive-busted, .dp');
+  root.addEventListener('touchstart', (e) => {
+    if (stick) return; const t = e.changedTouches[0]; if (!t || !stickOK(e.target)) return;
+    stick = { id: t.identifier, ax: t.clientX, ay: t.clientY, cx: t.clientX, cy: t.clientY, x: 0, y: 0, on: false };
+    audio.unlock(); haptic(HAP.tap); showStick();
+  }, { passive: false });
+  root.addEventListener('touchmove', (e) => { if (stick) for (const t of e.changedTouches) if (t.identifier === stick.id) stickMove(t.clientX, t.clientY); }, { passive: false });
+  const stickLift = (e) => { if (stick) for (const t of e.changedTouches) if (t.identifier === stick.id) endStick(); };
+  root.addEventListener('touchend', stickLift); root.addEventListener('touchcancel', stickLift);
+  // a mouse or pen: press anywhere on the street and drag (the store's board works the same way)
+  root.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch' || stick || !stickOK(e.target)) return;
+    stick = { id: 'mouse', ax: e.clientX, ay: e.clientY, cx: e.clientX, cy: e.clientY, x: 0, y: 0, on: false };
+    audio.unlock(); showStick(); try { root.setPointerCapture(e.pointerId); } catch {}
+  });
+  root.addEventListener('pointermove', (e) => { if (e.pointerType !== 'touch' && stick?.id === 'mouse') stickMove(e.clientX, e.clientY); });
+  const mouseUp = (e) => { if (e.pointerType !== 'touch' && stick?.id === 'mouse') endStick(); };
+  root.addEventListener('pointerup', mouseUp); root.addEventListener('pointercancel', mouseUp); root.addEventListener('lostpointercapture', mouseUp);
+  // where you're asking to go, like the store's inputVec: the stick, else the keys (ArrowUp/W up the street, ArrowDown/S
+  // back, ◀ ▶ across); x screen-right, y screen-down, length at most 1. (api.foot.stick: a test hook, like the store's testVec)
+  const footVec = () => {
+    if (api.foot?.stick) return api.foot.stick;
+    let x = (keys.has('right') ? 1 : 0) - (keys.has('left') ? 1 : 0), y = (keys.has('down') ? 1 : 0) - (keys.has('gas') ? 1 : 0);
+    if (stick?.on) { x = stick.x; y = stick.y; }
+    const m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; }
+    return { x, y };
+  };
   // street furniture (trees, lamps, signal poles, benches) is solid: you slip round it on the side you're already on
   // (or the other side when there's no room), easing out before it and back after, so you never run through a trunk
   const avoidProps = (s, d, cur) => {
@@ -793,6 +849,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   Object.assign(him, { s: FOOT.start - FOOT.bullyBehind, d: footLineD(FOOT.start - FOOT.bullyBehind) });
   for (const p of [me, him]) { p.ps = p.s; p.pd = p.d; }
   me.o.visible = him.o.visible = me.blob.visible = him.blob.visible = !SKIPFOOT;
+  root.classList.toggle('onfoot', !SKIPFOOT);   // drive.css: no pedals on foot (you drag, like the store); they come in when you get in
   let footT = 0, found = false, race = null, tauntK = 0, footAcc = 0;
   const TAUNTS = ['HEY! YOU!', 'GET BACK HERE!', 'THOSE ARE MINE!', 'GIMME THAT!'];
   const footZ = (s, d) => { const p = route.at(s, d), gz = ground(p.x, p.y); return { p, z: Math.max(surfAt(p.x, p.y, gz + 1.2) ?? -Infinity, gz + LEVEL.TERRAIN) }; };
@@ -969,6 +1026,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   function getIn() {
     // (runnerOn off: the runner is in the car, so traffic stops treating the spot he got in at as a person standing in the road)
     state = 'driving'; world.runnerOn = false; gasLabel(false); me.o.visible = me.blob.visible = false; hazards.visible = false; markerSprite.visible = false;
+    // the drag ends here (a thumb still down is not GAS: the stick never writes keys) and the pedals come in
+    endStick(); root.classList.remove('onfoot');
+    if (G) G.from(root.querySelectorAll('.drive-pad'), { y: 40, opacity: 0, duration: 0.45, stagger: 0.07, ease: 'back.out(1.5)', clearProps: 'transform,opacity' });
     // you peel out: the car swings straight into the travel lane (the parking lane ahead is full of parked cars)
     laneK = 1; followLane(); if (BOT) car.targetD = route.lane(car.s, 0);
     cpFrom = car.s;
@@ -980,8 +1040,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   }
   function updateFoot(dt) {
     footT += dt;
-    // you: hold GAS to run up the block, BRAKE to back up if you overshoot; you cut over to the driver's door yourself
-    const want = me.stun > 0 || me.blocked ? 0 : (keys.has('gas') || BOT) ? FOOT.run : keys.has('down') ? -FOOT.back : 0;   // (blocked: no way round whatever is in the road ahead: you wait, you don't run into it)
+    // you: drag up (or hold ↑) to run up the block, as fast as the stick is pushed; down to back up if you overshoot; you
+    // cut over to the driver's door yourself
+    const fv = footVec(), fwd = Math.max(0, -fv.y);
+    const want = me.stun > 0 || me.blocked ? 0 : BOT ? FOOT.run : fwd > 0 ? FOOT.run * fwd : -FOOT.back * Math.max(0, fv.y);   // (blocked: no way round whatever is in the road ahead: you wait, you don't run into it)
     me.stun = Math.max(0, me.stun - dt);
     const mv = me.stun > 0 ? MOVE.stun : Math.abs(want) > Math.abs(me.v) && want * me.v >= 0 ? MOVE.up : MOVE.down;
     speedTo(me, want, dt, mv[0], mv[1]);
@@ -991,21 +1053,33 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // (me.nudge: the recoil from a bump below, a sideways give away from whoever you hit that eases out over ~1 s, kept
     // inside the sidewalk's edges)
     me.nudge *= Math.exp(-dt * 1.6);
-    // ◀ ▶ held: keep moving over (after SIDE_HOLD, so a tap is just the one step)
-    for (const [k, dir] of [['left', 1], ['right', -1]]) {
-      if (keys.has(k)) { me['hold' + k] = (me['hold' + k] || 0) + dt; if (me['hold' + k] > SIDE_HOLD) { const [lo, hi] = sideRange(me.s); footSide = THREE.MathUtils.clamp((footSide ?? me.d) + dir * SIDE_RATE * dt, lo, hi); } }
-      else me['hold' + k] = 0;
+    // across the sidewalk: the stick's sideways part moves your line at up to LAT_RATE (a small dead band, so a drag
+    // straight up doesn't drift you toward the street). The line starts from where you actually are when you start
+    // (after going round a tree or being knocked aside it can sit off you, and you'd be steering something you can't see).
+    const lx = BOT ? 0 : -fv.x, lat = Math.sign(lx) * Math.max(0, (Math.abs(lx) - LAT_DEAD) / (1 - LAT_DEAD));   // + = toward the street (◀)
+    me.sideV = 0;
+    if (lat) {
+      // (the line never leads you by more than LAT_LEAD: held against a tree or a car it would otherwise run on behind
+      // it, and the line left behind the trunk then pinned you there when you tried to run on)
+      const [lo, hi] = sideRange(me.s), from = me.latOn ? (footSide ?? me.d) : THREE.MathUtils.clamp(me.d, lo, hi);
+      footSide = THREE.MathUtils.clamp(THREE.MathUtils.clamp(from + lat * LAT_RATE * dt, me.d - LAT_LEAD, me.d + LAT_LEAD), lo, hi); me.sideV = (footSide - from) / dt;
     }
+    me.latOn = !!lat;
     if (footSide !== null) { const [lo, hi] = sideRange(me.s); footSide = THREE.MathUtils.clamp(footSide, lo, hi); }
     // (the recoil is checked against the street furniture again: on its own it pushed you back across a trunk you were
     // already going round, which is how you ran through the tree at s 46 after bumping someone at s 42)
     const myLine = (s) => { const L = meLine(s); return me.nudge ? avoidProps(s, Math.min(Math.max(L + me.nudge, Math.min(L, PATH.outer(s))), Math.max(L, PATH.far(s))), me.d) : L; };
     // ...then round whatever is solid in the street, eased (a first-order follow, 0.11 s) so a car appearing in the way is a
     // quick lean to the free side, not a jump
-    holdUp(me, me.stun <= 0 && (keys.has('gas') || BOT), dt);
+    holdUp(me, me.stun <= 0 && (fwd > 0 || BOT), dt);
     const L0 = myLine(me.s), L1 = streetPath(me, L0, dt);
-    me.tg = me.tg === undefined ? L1 : me.tg + (L1 - me.tg) * (1 - Math.exp(-dt * 9));
-    steerTo(me, me.tg, (myLine(me.s + 0.2) - myLine(me.s - 0.2)) / 0.4 * me.v, dt);
+    // while you cross the sidewalk with the stick, the follow and the spring are told how fast your line is actually
+    // moving (as far as the street lets it: nothing while a tree or a car holds it), so you stop where your thumb
+    // stops instead of sliding on about a metre behind it (the store's player stops in 0.025 s)
+    const ff = me.sideV && me.L1 !== undefined ? Math.sign(me.sideV) * Math.min(Math.abs(me.sideV), Math.max(0, Math.sign(me.sideV) * (L1 - me.L1) / dt)) : 0;
+    me.L1 = L1;
+    me.tg = me.tg === undefined ? L1 : me.tg + ff * dt + (L1 - me.tg - ff * dt) * (1 - Math.exp(-dt * 9));
+    steerTo(me, me.tg, (myLine(me.s + 0.2) - myLine(me.s - 0.2)) / 0.4 * me.v + ff, dt);
     solidPass(me);
     // run into someone and you stumble (the bully just shoves through them); they get knocked aside, so you don't
     // run on through their body
@@ -1023,7 +1097,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       }
       if (Math.abs(q.s - him.s) < 0.7 && Math.abs(qd - him.d) < 0.6 && !q.shove) knock(q, him.d);
     }
-    if (!found && footT > 2.2 && footT < 2.4) setHint('Hold RUN — get to your car');
+    if (!found && footT > 2.2 && footT < 2.4) setHint('Drag up to run — get to your car');
     if (!found && doorS - me.s < 14) { found = true; audio.token(); setHint('That’s your ride — get in!'); }
     // the bully: a beat to clock you, then he runs you down; catching you is a shove, not the end
     him.pause = Math.max(0, him.pause - dt);
@@ -1099,13 +1173,21 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     m.roll += (THREE.MathUtils.clamp(-m.dv * 0.035, -0.13, 0.13) - m.roll) * k;
     // facing: the street's heading, turned a little toward where you're actually going (a sidestep is a diagonal cut,
     // not a sideways slide), eased
-    const head = route.at(s).a + Math.atan2(m.dv, Math.max(m.v, 2.5)) * 0.7 * THREE.MathUtils.smoothstep(m.v, 0, 1.5);
+    // (you, with the stick, can also move straight across the sidewalk: then you turn toward where you're going and run
+    // there, instead of a standing figure sliding sideways. At running speed this is the same turn as before; the
+    // bully keeps exactly the old rule.)
+    let turn = Math.atan2(m.dv, Math.max(m.v, 2.5)) * 0.7 * THREE.MathUtils.smoothstep(m.v, 0, 1.5);
+    if (m === me) {
+      const across = 1 - THREE.MathUtils.smoothstep(m.v, 0.6, 2.5);
+      turn = THREE.MathUtils.lerp(turn, Math.atan2(m.dv, Math.max(m.v, 0.6)) * THREE.MathUtils.smoothstep(Math.abs(m.dv), 0, 1.5), across);
+    }
+    const head = route.at(s).a + turn;
     if (m.yaw === null) m.yaw = head;
     m.yaw += Math.atan2(Math.sin(head - m.yaw), Math.cos(head - m.yaw)) * (1 - Math.exp(-dt * 14));
     // animation: stand, walk and run blended by speed, all on one clock that advances with the ground you cover
-    const sp = Math.abs(m.v), wRun = THREE.MathUtils.smoothstep(sp, 1.6, 4.2), moving = THREE.MathUtils.smoothstep(sp, 0.05, 1.0);
+    const sp = m === me ? Math.hypot(m.v, m.dv) : Math.abs(m.v), wRun = THREE.MathUtils.smoothstep(sp, 1.6, 4.2), moving = THREE.MathUtils.smoothstep(sp, 0.05, 1.0);
     const plant = THREE.MathUtils.lerp(m.plantWalk, m.plantRun, wRun), dur = clips.run.duration;
-    m.phase = (((m.phase + m.v / plant * dt) % dur) + dur) % dur;
+    m.phase = (((m.phase + (m === me ? Math.sign(m.v || 1) * sp : m.v) / plant * dt) % dur) + dur) % dur;
     m.act.stand.setEffectiveWeight(1 - moving); m.act.walk.setEffectiveWeight(moving * (1 - wRun)); m.act.run.setEffectiveWeight(moving * wRun);
     m.act.walk.time = m.act.run.time = m.phase; m.act.stand.time = 0;
     m.mixer.update(0);
@@ -1518,7 +1600,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     snapshot: (q = 0.85) => { city.cull(camera, scene.fog); comic.render(); return renderer.domElement.toDataURL('image/jpeg', q); } });
   // live getters (Object.assign would have frozen their values at assignment time)
   Object.defineProperties(api, { state: { get: () => state }, time: { get: () => t }, race: { get: () => race } });
-  api.foot = { me, him, homeS, homeD, doorS, doorD, path: PATH, get side() { return footSide; }, set side(v) { footSide = v; }, stepSide };
+  api.foot = { me, him, homeS, homeD, doorS, doorD, path: PATH, get side() { return footSide; }, set side(v) { footSide = v; }, stepSide, stick: null, get drag() { return stick; } };   // stick: {x, y} overrides the input (tests)
   window.__drive = api;
   return api;
 }
