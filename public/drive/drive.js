@@ -744,7 +744,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     });
     const at = (arr, s) => { const x = THREE.MathUtils.clamp((s - s0) / step, 0, n - 1), i = Math.min(n - 2, Math.floor(x)); return arr[i] + (arr[i + 1] - arr[i]) * (x - i); };
     // route d is negative on this (the right) side
-    // far: the far curb of the street (the street is yours to run in too: see streetPath)
+    // far: the far curb of the street. (PATH and footProps are only what footLineD reads now: the start and the bully's start positions, the ?bot autopilot's line and updateHimLeft's. Nothing steers you along them: you run anywhere, roam.js)
     return { line: (s, lane) => -at(lanes[lane], s), inner: (s) => -at(I, s), outer: (s) => -at(O, s), left: (s) => -at(C, s), far: (s) => route.hw(s) - CURB_GAP - 0.1, wall: (s) => -at(wall, s), lanes, props: footProps, s0, step };
   })();
   const footLineD = (s, lane = 0) => PATH.line(s, lane);
@@ -755,8 +755,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // The whole screen is the controller, like the store's (standalone/csd.js bindTouch): put a thumb down anywhere that
   // isn't a button and drag the way you want to go. A gold ring appears where you touched and the knob follows your
   // thumb: 44 px of travel (the ring drifts along if you keep pulling), nothing under 6 px, full speed from 22 px
-  // (the store's STICK_DEAD / STICK_FULL). Up the screen is up the street (the camera is behind you): drag up to run,
-  // down to back up, left / right to cross the sidewalk (◀ toward the street), diagonals do both. A mouse drags the
+  // (the store's STICK_DEAD / STICK_FULL). Up the screen is away from the camera (it is behind you, and swings round
+  // as you run: camYawStep): drag up to run away from it, sideways to run across the screen, down to run back at it, any direction at a speed set by how far you push. A mouse drags the
   // same way; the arrow keys / WASD give the same directions. The pedals are hidden until you're in the car.
   const STICK = { dead: 6, full: 22, travel: 44 };
   const stickEl = document.createElement('div'); stickEl.className = 'drive-stick'; stickEl.setAttribute('aria-hidden', 'true'); stickEl.innerHTML = '<i></i>'; root.appendChild(stickEl);
@@ -797,8 +797,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   root.addEventListener('pointermove', (e) => { if (e.pointerType !== 'touch' && stick?.id === 'mouse') stickMove(e.clientX, e.clientY); });
   const mouseUp = (e) => { if (e.pointerType !== 'touch' && stick?.id === 'mouse') endStick(); };
   root.addEventListener('pointerup', mouseUp); root.addEventListener('pointercancel', mouseUp); root.addEventListener('lostpointercapture', mouseUp);
-  // where you're asking to go, like the store's inputVec: the stick, else the keys (ArrowUp/W up the street, ArrowDown/S
-  // back, ◀ ▶ across); x screen-right, y screen-down, length at most 1. (api.foot.stick: a test hook, like the store's testVec)
+  // where you're asking to go, like the store's inputVec: the stick, else the keys (ArrowUp/W away from the camera, ArrowDown/S
+  // towards it, ◀ ▶ across the screen); x screen-right, y screen-down, length at most 1. (api.foot.stick: a test hook, like the store's testVec)
   const footVec = () => {
     if (api.foot?.stick) return api.foot.stick;
     let x = (keys.has('right') ? 1 : 0) - (keys.has('left') ? 1 : 0), y = (keys.has('down') ? 1 : 0) - (keys.has('gas') ? 1 : 0);
@@ -820,14 +820,19 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   let camYaw = startP.a;   // the way the camera looks (world angle): along the street at the start, then it follows you (updateFoot)
   const trail = new Trail(); trail.push(him.x, him.y); trail.push(me.x, me.y);   // where you have been: the bully runs it
   const chase = {};          // where he is running to (roam.js chaseTarget)
+  const PR = { s: 0, d: 0, a: 0, off: 0 };   // projectFine's answer, reused (it is asked several times a step)
+  const OFF_ROUTE = 1e4;   // the d of someone who is not beside the route's street at all (see syncRoute)
   const syncRoute = (m) => {
-    const pr = route.projectFine(m.x, m.y), c = Math.cos(pr.a), sn = Math.sin(pr.a), vx = m.vx + m.kvx, vy = m.vy + m.kvy;
-    m.s = pr.s; m.d = pr.d; m.v = vx * c + vy * sn; m.dv = -vx * sn + vy * c;   // (along and across the route there: the traffic and the crowd read these)
+    const pr = route.projectFine(m.x, m.y, PR), c = Math.cos(pr.a), sn = Math.sin(pr.a), vx = m.vx + m.kvx, vy = m.vy + m.kvy;
+    // off: how far past the route's start or end the point is (s stops at 0 / the length there, and d would still read a few metres: a runner 40 m behind the start would count as standing at s = 0).
+    // Anyone not beside the route is far off it as far as everything that reads s and d is concerned (the traffic, the crowd, the street's boxes).
+    m.off = pr.off; m.s = pr.s; m.d = pr.off < 0.5 ? pr.d : OFF_ROUTE; m.v = vx * c + vy * sn; m.dv = -vx * sn + vy * c;   // (along and across the route there: the traffic and the crowd read these)
   };
   // near enough to the route's street for its traffic and its crowd to matter
-  const onStreet = (m) => m.s > -8 && m.s < route.length + 8 && Math.abs(m.d) < route.hw(m.s) + 9;
+  const onStreet = (m) => m.off < 0.5 && Math.abs(m.d) < route.hw(m.s) + 9;
   syncRoute(me); syncRoute(him);
-  world.others = [him];   // cars see him too
+  const othersOn = [him], othersOff = [];
+  world.others = onStreet(him) ? othersOn : othersOff;   // cars see him too (while he is beside the route's street: moveSolid keeps this)
   me.o.visible = him.o.visible = me.blob.visible = him.blob.visible = !SKIPFOOT;
   root.classList.toggle('onfoot', !SKIPFOOT);   // drive.css: no pedals on foot (you drag, like the store); they come in when you get in
   const focus = { x: 0, y: 0, z: 0 };   // where the sun's shadow box is centred while you are on foot (world.focus, crowd.focus)
@@ -836,6 +841,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // the height of the ground under a foot: the road or the terrain, whichever is higher (a freeway deck is only ever under your feet where it is level with the ground, its walls keep you off the rest)
   const footZ = (x, y) => { const gz = ground(x, y); return Math.max(surfAt(x, y, gz + 1.2) ?? -Infinity, gz + LEVEL.TERRAIN); };
   // how far each of you is from the door, as the crow flies, for the race bar and the YOUR CAR distance. Capped at 60 m so luring him far away and doubling back is no exploit
+  const offScreen = (x, y) => !world.visible(x, y, footZ(x, y) + 1, 2.5);   // the camera cannot see a person standing there
   const doorDist = (m) => Math.hypot(m.x - DOOR.x, m.y - DOOR.y), BAR_CAP = 60;
   const barS = (m) => doorS - Math.min(BAR_CAP, doorDist(m));
 
@@ -886,31 +892,40 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   //    A thing that is standing is left by whichever of its four ways is shortest; a side is slid along.
   // 2. the cross streets' cars and buses, anywhere in the city, the same way, as the boxes they are drawn as (World.ambientBoxes).
   // 3. the people of the crowd: you bump them (they are knocked aside, you stumble); the bully just shoves through.
-  const E = 0.003, rBoxes = [], aBoxes = [];
+  // (all of this runs every 1/120 s step, twice: the boxes, the ways out and the projection are reused objects, nothing is allocated, so a phone's GC does not hitch)
+  const E = 0.003, rBoxes = [], rPool = [], aBoxes = [];
+  const wCost = [0, 0, 0, 0], wAxis = [0, 0, 0, 0], wTgt = [0, 0, 0, 0], wOrd = [0, 1, 2, 3], TT = { ds: 0, dd: 0, x: 0, y: 0 }, QR = {};
+  function wayTo(k, m, s, d, c, sn) { TT.ds = wAxis[k] === 1 ? wTgt[k] - s : 0; TT.dd = wAxis[k] === 0 ? wTgt[k] - d : 0; TT.x = m.x + c * TT.ds - sn * TT.dd; TT.y = m.y + sn * TT.ds + c * TT.dd; }
   function routeBoxes(m, isMe) {
     const obs = world.traffic.obs; if (!obs || !obs.length) return;
-    rBoxes.length = 0;
-    for (const o of obs) {
+    let nb = 0;
+    for (let i = 0; i < obs.length; i++) {
+      const o = obs[i];
       if (o.runner || o.o === him || o.o === me || o.cross || !o.L || !o.W || Math.abs(o.s - m.s) > 24) continue;
-      const ent = o.o, live = typeof ent.s === 'number' && typeof ent.d === 'number', os = live ? ent.s : o.s, od = live ? ent.d : o.d;
-      rBoxes.push({ mv: Math.abs(o.vs) > 2, sLo: Math.min(o.s, os) - o.L / 2 - BODY, sHi: Math.max(o.s, os) + o.L / 2 + BODY, dLo: Math.min(o.d, od) - o.W / 2 - BODY, dHi: Math.max(o.d, od) + o.W / 2 + BODY });
+      const ent = o.o, live = typeof ent.s === 'number' && typeof ent.d === 'number', os = live ? ent.s : o.s, od = live ? ent.d : o.d, b = rPool[nb] || (rPool[nb] = {});
+      b.mv = Math.abs(o.vs) > 2; b.sLo = Math.min(o.s, os) - o.L / 2 - BODY; b.sHi = Math.max(o.s, os) + o.L / 2 + BODY; b.dLo = Math.min(o.d, od) - o.W / 2 - BODY; b.dHi = Math.max(o.d, od) + o.W / 2 + BODY;
+      rBoxes[nb++] = b;
     }
-    if (!rBoxes.length) return;
+    rBoxes.length = nb;
+    if (!nb) return;
     for (let pass = 0; pass < 6; pass++) {
-      const pr = route.projectFine(m.x, m.y), s = pr.s, d = pr.d;
-      const h = rBoxes.find((b) => s > b.sLo && s < b.sHi && d > b.dLo && d < b.dHi); if (!h) break;
-      // the ways out of it: [cost, axis, target]
-      const ways = [[d - h.dLo, 'd', h.dLo - E], [h.dHi - d, 'd', h.dHi + E]];
-      if (!h.mv) ways.push([s - h.sLo, 's', h.sLo - E], [h.sHi - s, 's', h.sHi + E]);
-      ways.sort((a, b) => a[0] - b[0]);
+      const pr = route.projectFine(m.x, m.y, PR), s = pr.s, d = pr.d;
+      let h = null; for (let i = 0; i < nb; i++) { const b = rBoxes[i]; if (s > b.sLo && s < b.sHi && d > b.dLo && d < b.dHi) { h = b; break; } }
+      if (!h) break;
+      // the ways out of it (cost, axis 0 = d / 1 = s, target), nearest first
+      let nw = 0;
+      wCost[nw] = d - h.dLo; wAxis[nw] = 0; wTgt[nw++] = h.dLo - E;
+      wCost[nw] = h.dHi - d; wAxis[nw] = 0; wTgt[nw++] = h.dHi + E;
+      if (!h.mv) { wCost[nw] = s - h.sLo; wAxis[nw] = 1; wTgt[nw++] = h.sLo - E; wCost[nw] = h.sHi - s; wAxis[nw] = 1; wTgt[nw++] = h.sHi + E; }
+      for (let i = 0; i < nw; i++) wOrd[i] = i;
+      for (let i = 1; i < nw; i++) { const k = wOrd[i]; let j = i - 1; while (j >= 0 && wCost[wOrd[j]] > wCost[k]) { wOrd[j + 1] = wOrd[j]; j--; } wOrd[j + 1] = k; }   // (stable insertion sort of at most 4)
       const c = Math.cos(pr.a), sn = Math.sin(pr.a);
-      const to = (w) => { const ds = w[1] === 's' ? w[2] - s : 0, dd = w[1] === 'd' ? w[2] - d : 0; return { ds, dd, x: m.x + c * ds - sn * dd, y: m.y + sn * ds + c * dd }; };
-      let pick = null; for (const w of ways) { const t = to(w); if (!walk.solid(t.x, t.y, BODY)) { pick = { w, t }; break; } }   // the nearest way out that is not into a wall
-      if (!pick) pick = { w: ways[0], t: to(ways[0]) };
-      m.x = pick.t.x; m.y = pick.t.y;
-      const sg = Math.sign(pick.w[1] === 's' ? pick.t.ds : pick.t.dd);
-      if (pick.w[1] === 's') killInto(m, c * sg, sn * sg); else killInto(m, -sn * sg, c * sg);
-      if (isMe && h.mv && pick.w[1] === 'd' && Math.abs(pick.t.dd) > 0.12) { const q = route.at((h.sLo + h.sHi) / 2, (h.dLo + h.dHi) / 2); runnerShove(q.x, q.y); }   // (a car at speed took him: knocked aside, checked, staggers)
+      let pk = -1; for (let i = 0; i < nw; i++) { wayTo(wOrd[i], m, s, d, c, sn); if (!walk.solid(TT.x, TT.y, BODY)) { pk = wOrd[i]; break; } }   // the nearest way out that is not into a wall
+      if (pk < 0) { pk = wOrd[0]; wayTo(pk, m, s, d, c, sn); }
+      m.x = TT.x; m.y = TT.y;
+      const sg = Math.sign(wAxis[pk] === 1 ? TT.ds : TT.dd);
+      if (wAxis[pk] === 1) killInto(m, c * sg, sn * sg); else killInto(m, -sn * sg, c * sg);
+      if (isMe && h.mv && wAxis[pk] === 0 && Math.abs(TT.dd) > 0.12) { const q = route.at((h.sLo + h.sHi) / 2, (h.dLo + h.dHi) / 2); runnerShove(q.x, q.y); }   // (a car at speed took him: knocked aside, checked, staggers)
     }
   }
   function ambientBoxPass(m, isMe) {
@@ -936,7 +951,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   function crowdPass(m, isMe) {
     for (const q of crowd.people) {
       if (Math.abs(q.s - m.s) > 3) continue;
-      const side = q.g.side, qd = side * q.d, p = route.at(q.s, qd), dist = Math.hypot(p.x - m.x, p.y - m.y);
+      const side = q.g.side, qd = side * q.d, p = route.at(q.s, qd, QR), dist = Math.hypot(p.x - m.x, p.y - m.y);
       if (isMe) {
         if (dist < 0.6 && me.stun <= 0 && (q.bumped || 0) < footT) {
           q.bumped = footT + 2; me.vx *= 0.45; me.vy *= 0.45; me.stun = 0.35; shake = 0.35;
@@ -956,6 +971,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     ambientBoxPass(m, isMe);
     wallPass(walk, m, BODY);   // last: walls always win
     syncRoute(m);
+    if (!isMe) world.others = onStreet(m) ? othersOn : othersOff;   // the cars see the bully only while he is beside the route's street
   }
   const GAS_HINT = 'Hold GAS to go!'; let gasHint = 0;
   function getIn() {
@@ -1016,13 +1032,18 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     him.acc = approach(him, ux * sp, uy * sp, go ? 0.14 : 0.1, go ? 20 : 30, dt, him.heading);
     faceMove(him, dt);
     integrate(him, dt);
-    if (gap0 < 0.7) { const k = 0.7 / gap0; him.x = me.x + (him.x - me.x) * k; him.y = me.y + (him.y - me.y) * k; }   // right on your back: he cannot stand inside you
+    const gap1 = Math.hypot(him.x - me.x, him.y - me.y);   // (after his step: the push out below scales THIS vector, so it is measured now)
+    if (gap1 < 0.7 && gap1 > 1e-4) { const k = 0.7 / gap1; him.x = me.x + (him.x - me.x) * k; him.y = me.y + (him.y - me.y) * k; }   // right on your back: he cannot stand inside you
     moveSolid(him, false);
     // stuck for good somewhere with no way to you (a trapped corner): put back on your trail a dozen metres behind you once he is far away, never on screen
     him.stuckT = go && sp > 2 && Math.hypot(him.vx, him.vy) < 0.8 ? (him.stuckT || 0) + dt : 0;
-    if (him.stuckT > 3 && gap0 > 22 && trail.n > 30) { const id = trail.n - 24; him.x = trail.px(id); him.y = trail.py(id); him.vx = him.vy = him.kvx = him.kvy = 0; him.good = { x: him.x, y: him.y }; trail.reached = id; him.stuckT = 0; syncRoute(him); }
+    // (never where the camera can see: an older crumb, a dozen at a time, until one is out of frame; if every one is on screen he waits and tries again next step)
+    if (him.stuckT > 3 && gap0 > 22 && trail.n > 30) {
+      let id = trail.n - 24; for (let k = 0; k < 30 && trail.has(id) && !offScreen(trail.px(id), trail.py(id)); k++) id -= 12;
+      if (trail.has(id) && offScreen(trail.px(id), trail.py(id))) { him.x = trail.px(id); him.y = trail.py(id); him.vx = him.vy = him.kvx = him.kvy = 0; him.good = { x: him.x, y: him.y }; trail.reached = id; him.stuckT = 0; syncRoute(him); }
+    }
     const gap = Math.hypot(me.x - him.x, me.y - him.y);
-    if (go && gap < FOOT.reach && me.stun <= 0) {
+    if (go && gap < FOOT.reach && me.stun <= 0 && walk.clearLine(me.x, me.y, him.x, him.y, 0.05)) {   // (and nothing solid between you: a thin wall or railing does not let him shove through it)
       // shoved from behind: you lurch away from him, stagger and go down on one knee; he stops to gloat
       me.stun = FOOT.stun; me.vx += (me.x - him.x) / (gap || 1) * 1.2; me.vy += (me.y - him.y) / (gap || 1) * 1.2; him.pause = FOOT.pause; shake = 0.7;
       stagger(me, 0.5, 0.14 * (Math.random() < 0.5 ? -1 : 1), FOOT.stun, 0.22);
@@ -1036,6 +1057,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   }
   // after you drive off he's still out there for a moment, running for his ride, until he's behind the camera
   function updateHimLeft(dt) {
+    // he was running for his ride; once he is off the route's street, or has had 8 s, he is gone (he used to run on into whatever wall was between him and the car, and stay there)
+    him.leftT = (him.leftT || 0) + dt;
+    if (!onStreet(him) || him.leftT > 8) { him.o.visible = him.blob.visible = false; world.others = othersOff; return; }
     const q = route.at(him.s + 4, footLineD(him.s + 4)), dx = q.x - him.x, dy = q.y - him.y, L = Math.hypot(dx, dy) || 1, sp = FOOT.bully * 0.7;
     him.acc = approach(him, dx / L * sp, dy / L * sp, 0.2, 12, dt, him.heading);
     faceMove(him, dt); integrate(him, dt); moveSolid(him, false);

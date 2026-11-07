@@ -89,12 +89,12 @@ export class RouteFrame {
   }
   i(s) { return Math.max(0, Math.min(this.n - 1, s)); }
   /** world (x, y, z, heading) for route coords */
-  at(s, d = 0) {
+  at(s, d = 0, out = {}) {   // (out: an object to fill and return, for the callers that ask every physics step)
     const f = this.i(s), i = Math.min(this.n - 2, f | 0), t = f - i;
     const x = this.X[i] + (this.X[i + 1] - this.X[i]) * t, y = this.Y[i] + (this.Y[i + 1] - this.Y[i]) * t;
     const a = lerpAngle(this.A[i], this.A[i + 1], t);
     const wx = x - Math.sin(a) * d, wy = y + Math.cos(a) * d;
-    return { x: wx, y: wy, z: this.ground(wx, wy), a };
+    out.x = wx; out.y = wy; out.z = this.ground(wx, wy); out.a = a; return out;
   }
   hw(s) { return this.HW[Math.round(this.i(s))]; }
   hwAt(x, y) { return this.hw(this.project(x, y).s); }
@@ -128,18 +128,21 @@ export class RouteFrame {
   }
   /** like project(), but exact: project() answers in 2 m steps and measures d against that one sample's heading. This slides s along the
    *  route (between the 1 m samples) until the point lies straight across from it, so at(s, d) lands back on (x, y). Also gives the heading there.
-   *  Used for a person on foot, whose s, d, speed along and speed across (traffic and the crowd read them) must not step every 2 m. */
-  projectFine(x, y) {
+   *  Used for a person on foot, whose s, d, speed along and speed across (traffic and the crowd read them) must not step every 2 m.
+   *  `out` (optional) is filled and returned, so a caller that asks every step allocates nothing. */
+  projectFine(x, y, out = {}) {
     let f = this.project(x, y).s; const last = this.n - 1, X = this.X, Y = this.Y, A = this.A;
-    let i = 0, t = 0, px = 0, py = 0, a = 0;
+    let i = 0, t = 0, px = 0, py = 0, a = 0, e = 0;
     for (let k = 0; k < 5; k++) {
       i = Math.min(this.n - 2, Math.max(0, Math.floor(f))); t = f - i;
       px = X[i] + (X[i + 1] - X[i]) * t; py = Y[i] + (Y[i + 1] - Y[i]) * t; a = lerpAngle(A[i], A[i + 1], t);
-      const e = (x - px) * Math.cos(a) + (y - py) * Math.sin(a);   // how far along the heading the point sits from this spot
+      e = (x - px) * Math.cos(a) + (y - py) * Math.sin(a);   // how far along the heading the point sits from this spot
       if (Math.abs(e) < 1e-4) break;
       f = Math.min(last, Math.max(0, f + e));
     }
-    return { s: f, d: -(x - px) * Math.sin(a) + (y - py) * Math.cos(a), a };
+    // off: how far the point is from at(s, d) (0 anywhere beside the route; the distance past the start or the end of the route behind/after it, where s stops at 0 or the length)
+    out.s = f; out.d = -(x - px) * Math.sin(a) + (y - py) * Math.cos(a); out.a = a; out.off = Math.abs(e);
+    return out;
   }
   distTo(x, y) {
     let bd = 1e9; const gx = Math.floor(x / 20), gy = Math.floor(y / 20);
@@ -708,9 +711,10 @@ export class World {
       // (the frustum test has no occlusion and a 3000 m far plane, so a car waiting far ahead would count as in view until you passed it, and the cars
       // behind it would queue: past 250 m (about 5 px tall) it counts as out of view, and after 40 s it goes whether seen or not)
       if (a.dead_end && Math.hypot(cx - car.pose.x, cy - car.pose.y) > 55 && (a.stillT > 40 || (a.stillT > 15 && (a.x === undefined || !this.camera || Math.hypot(a.x - this.camera.position.x, a.y + this.camera.position.z) > 250 || !this.visible(a.x, a.y, a.zAbs, a.type === 'bus' ? 7 : 3.5))))) { a.dead = true; continue; }
-      if (this.runnerFoot && this.runner && this.runner.x !== undefined) {   // the person on foot ahead on this street (the runner can be on any street now): stop short of him
-        const ox = this.runner.x - cx, oy = this.runner.y - cy, al = ox * Math.cos(a.h) + oy * Math.sin(a.h);
-        if (al > 0 && al < 26 && Math.abs(-ox * Math.sin(a.h) + oy * Math.cos(a.h)) < 2.2 + 0.15 * a.vs) vt = Math.min(vt, al < BODY_BOX[a.type][0] + 3 ? 0 : Math.sqrt(2 * 3.5 * Math.max(0, al - BODY_BOX[a.type][0] - 2)));   // (from the nose: half the body length ahead of the centre)
+      if (this.runnerFoot && !a.deck && this.runner && this.runner.x !== undefined) {   // the person on foot ahead on this street (the runner can be on any street now): stop short of him (not a bridge car: it is overhead)
+        const lx = (a.rx ?? cx) - Math.sin(a.rh ?? a.h) * (a.lane || 0), ly = (a.ry ?? cy) + Math.cos(a.rh ?? a.h) * (a.lane || 0);   // where it is drawn (its lane offset included), as ambientBoxes has it
+        const bl = (BODY_BOX[a.type] || BODY_BOX.sedan)[0], ox = this.runner.x - lx, oy = this.runner.y - ly, al = ox * Math.cos(a.h) + oy * Math.sin(a.h);
+        if (al > 0 && al < 26 && Math.abs(-ox * Math.sin(a.h) + oy * Math.cos(a.h)) < 2.2 + 0.15 * a.vs) vt = Math.min(vt, al < bl + 3 ? 0 : Math.sqrt(2 * 3.5 * Math.max(0, al - bl - 2)));   // (from the nose: half the body length ahead of the centre)
       }
       for (const b of this.ambient) {   // the vehicle ahead on the same street
         if (b === a || b.dead || b.x === undefined || b.road !== a.road || Math.cos(a.h - b.h) < 0.3) continue;   // (one going the other way on that road is not in front of us: two of them head to head each waited for the other for the whole run)
@@ -874,13 +878,16 @@ export class World {
   /** The cross-street vehicles (and buses) within `range` m of a point, as the boxes they are drawn as: { x, y (centre), h (heading), hl, hw (half length, half width), vs (speed) }.
    *  Whoever is on foot in the street runs into these (drive.js); they are world-plane boxes, not route ones, because they are anywhere in the city. Bridge traffic is overhead. */
   ambientBoxes(px, py, range, out = []) {
-    out.length = 0;
+    // (called every physics step for each person on foot: the boxes are kept and refilled, not allocated; `out.n` is how many are live, out.length is set to it)
+    let n = 0; const pool = out.pool || (out.pool = []);
     for (const a of this.ambient) {
       if (a.deck || a.dead || a.x === undefined) continue;
       const ah = a.rh ?? a.h, x = (a.rx ?? a.x) - Math.sin(ah) * a.lane, y = (a.ry ?? a.y) + Math.cos(ah) * a.lane;
       if (Math.abs(x - px) > range || Math.abs(y - py) > range) continue;
-      const [hl, hw] = BODY_BOX[a.type] || BODY_BOX.sedan; out.push({ a, x, y, h: ah, hl, hw, vs: a.vs || 0 });
+      const bb = BODY_BOX[a.type] || BODY_BOX.sedan, b = pool[n] || (pool[n] = {});
+      b.a = a; b.x = x; b.y = y; b.h = ah; b.hl = bb[0]; b.hw = bb[1]; b.vs = a.vs || 0; out[n++] = b;
     }
+    out.length = n;
     return out;
   }
 

@@ -208,6 +208,7 @@ export function buildWalkWorld({ walls = [], hero = [], extra = [], circles = []
 
 // ------------------------------------------------------------------ the trail
 /** Where you have been, one crumb every 0.5 m (a ring of the last `cap`). The bully runs your trail: when he cannot see you he aims at the newest crumb he can. */
+const AIM_CHECKS = 60;
 export class Trail {
   constructor(cap = 800) { this.cap = cap; this.x = new Float32Array(cap); this.y = new Float32Array(cap); this.n = 0; this.last = null; this.reached = 0; }
   push(x, y, step = 0.5) {
@@ -220,7 +221,8 @@ export class Trail {
   /** the newest crumb a body at (x, y) has a clear line to, no older than the last one he reached; -1 if none */
   aim(world, x, y, r = BODY, stride = 2) {
     const lo = Math.max(this.reached, this.n - this.cap);
-    for (let id = this.n - 1; id >= lo; id -= stride) if (world.clearLine(x, y, this.px(id), this.py(id), r)) return id;
+    let left = AIM_CHECKS;   // (at most this many lines are tested, newest first: 60 of them reach 60 m back at 2 crumbs a step; the cost is per call on a phone)
+    for (let id = this.n - 1; id >= lo && left-- > 0; id -= stride) if (world.clearLine(x, y, this.px(id), this.py(id), r)) return id;
     return -1;
   }
 }
@@ -282,8 +284,15 @@ export function chaseTarget(world, trail, him, me, st, dt) {
   st.t = (st.t ?? 0) - dt;
   if (st.t <= 0 || st.tx === undefined) {   // looks again ten times a second, not every step
     st.t = 0.1;
-    for (let k = 0; k < 40 && trail.reached < trail.n && Math.hypot(him.x - trail.px(trail.reached), him.y - trail.py(trail.reached)) < 0.9; k++) trail.reached++;   // crumbs he has run through
+    trail.reached = Math.max(trail.reached, trail.n - trail.cap);   // (the ring overwrites its oldest crumbs: never point at one that is gone)
+    // crumbs he has run through: on to just past the newest one within 0.9 m of him among the next 60 (the next crumb alone could be out of reach for good after a cut corner)
+    for (let id = Math.min(trail.n - 1, trail.reached + 59); id >= trail.reached; id--) if (Math.hypot(him.x - trail.px(id), him.y - trail.py(id)) < 0.9) { trail.reached = id + 1; break; }
     st.sees = world.clearLine(him.x, him.y, me.x, me.y, BODY);
+    if (st.sees) {   // running straight at you: the crumbs he is nearest to are the ones he has passed, so a corner he cuts does not leave the old ones to be run back to
+      let best = trail.reached, bd = 1e9;
+      for (let id = trail.reached, e = Math.min(trail.n, trail.reached + 120); id < e; id += 2) { const q = Math.hypot(him.x - trail.px(id), him.y - trail.py(id)); if (q < bd) { bd = q; best = id; } }
+      if (bd < 3) trail.reached = best;
+    }
     if (!st.sees) {
       let id = trail.aim(world, him.x, him.y, BODY, 2);
       if (id < 0) id = Math.max(trail.reached, trail.n - trail.cap);   // no crumb in view: the oldest he has not reached
@@ -313,10 +322,13 @@ export function furnitureCircles(furniture) {
 export function walkWorldFor({ city, heroWalls, shelters = [], W }) {
   const fw = freewayColliders(city.freeway.pieces || [], city.ground);
   const furniture = { ...city.furniture, shelter: [...(city.furniture.shelter || []), ...shelters] };
-  const E = W.elevation, PAD = 150;
+  const E = W.elevation, PAD = 150;   // 150 m of (flat, empty) ground past the data's edge to run on...
+  // ...but never past what is drawn: the terrain mesh covers the elevation grid plus makeGround's PAD (400 m) all round (city.ground.grid), and the edge stays 10 m inside that
+  const G = city.ground.grid, inset = 10;
+  const gx0 = G.x0 + inset, gx1 = G.x0 + G.nx * G.step - inset, gy0 = G.y0 + inset, gy1 = G.y0 + G.ny * G.step - inset;
   return buildWalkWorld({
     walls: city.walls, hero: heroWalls, extra: fw.segs, footprints: city.footprints,
     circles: [...furnitureCircles(furniture), ...fw.circles],
-    bounds: { x0: E.x0 - PAD, x1: E.x0 + (E.gx - 1) * E.step + PAD, y0: E.y0 - PAD, y1: E.y0 + (E.gy - 1) * E.step + PAD },
+    bounds: { x0: Math.max(gx0, E.x0 - PAD), x1: Math.min(gx1, E.x0 + (E.gx - 1) * E.step + PAD), y0: Math.max(gy0, E.y0 - PAD), y1: Math.min(gy1, E.y0 + (E.gy - 1) * E.step + PAD) },
   });
 }

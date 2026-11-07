@@ -336,6 +336,10 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   Test hooks: `__drive.foot` has `me`/`him` (x, y, vx, vy, heading, plus s/d), `camYaw`, `trail`, `walls`, `solidAt(x, y)`,
   `clearLine`, `doorDist`. Node tests: `node tools-roam/collide.test.mjs` (random runs against the real city's walls, no browser);
   `tools-roam/check_roam.mjs` is the browser script.
+  **Off the street:** `syncRoute` stores `off` (how far the point is from `route.at(s, d)`: past the route's start or end `s` stops at 0 or the
+  length, so `off` is the distance beyond it). With `off` >= 0.5 m, `d` is set to 1e4 and `onStreet` is false: the route's traffic,
+  its boxes, the crowd and `world.others` ignore that person (the bully drops out of `world.others` the same way). After you drive off,
+  the bully is hidden once he is off the street or after 8 s (`updateHimLeft`). The map edge is 10 m inside the drawn ground.
   The paragraphs below were written for the old street-locked run (sidewalk lanes, `stepSide`, `streetPath`): where they talk about
   lanes, a curb band or the 9 m pull to the door, the code above is the truth.
 - **On foot.** You start on the right sidewalk of Luckie St (s = 14 m) with the bully 8 m behind you. Your car is parked

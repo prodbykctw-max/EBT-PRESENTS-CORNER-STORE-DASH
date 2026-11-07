@@ -217,5 +217,60 @@ console.log(`   ${totalSteps} steps, ${contacts} with a wall contact, ${reverts}
   if (caught < runs * 0.9) fail(`the bully caught only ${caught}/${runs}`);
 }
 
+// ---------------------------------------------------------------- 7. review fixes
+{
+  // 7a. behind the start and past the end of the route is off the street (the traffic and the crowd read s and d: they must not see a runner standing at s = 0)
+  const p0 = route.at(0, 0), pL = route.at(route.length, 0), out = {};
+  let offBad = 0, n = 0;
+  for (const [p, sign] of [[p0, -1], [pL, 1]]) for (const dist of [5, 20, 80]) for (const d of [-8, 0, 8]) {
+    const x = p.x + Math.cos(p.a) * sign * dist - Math.sin(p.a) * d, y = p.y + Math.sin(p.a) * sign * dist + Math.cos(p.a) * d;
+    route.projectFine(x, y, out); n++;
+    if (!(out.off > 0.5)) { offBad++; fail(`a point ${dist} m ${sign < 0 ? 'behind the start' : 'past the end'} (d ${d}) reads off = ${out.off.toFixed(3)} (should be > 0.5)`); }
+  }
+  // beside the route anywhere along it: off ~ 0
+  let maxOff = 0; for (let s = 5; s < route.length - 5; s += 7.3) for (const d of [-9, -3, 0, 3, 9]) { const q = route.at(s, d); route.projectFine(q.x, q.y, out); maxOff = Math.max(maxOff, out.off); }
+  if (maxOff > 0.05) fail(`beside the route, projectFine off is ${maxOff.toFixed(3)} m (should be ~0)`);
+  const o1 = {}, r1 = route.projectFine(p0.x, p0.y, o1); if (r1 !== o1) fail('projectFine did not return the out object');
+  console.log(`7a. off-street: ${n - offBad}/${n} points behind the start / past the end read off > 0.5 m; beside the route off <= ${maxOff.toFixed(4)} m`);
+
+  // 7b. the trail: the ring overwriting crumbs the bully has not reached, a cut corner, and the scan cap
+  {
+    const tr = new Trail(100); for (let i = 0; i < 400; i++) tr.push(i * 0.6, 0);
+    const him = { x: 399 * 0.6, y: 0 }, me = { x: 399 * 0.6, y: 0 }, st = {};
+    tr.reached = 5;   // far older than anything the ring still holds
+    chaseTarget(walk, tr, him, me, st, 1);
+    if (tr.reached < tr.n - tr.cap) fail(`trail.reached ${tr.reached} is older than the ring (${tr.n - tr.cap})`);
+    // he cut a corner: the next crumb is not within 0.9 m, a later one is
+    const t2 = new Trail(800); for (let i = 0; i < 100; i++) t2.push(i * 0.6, 0);
+    const h2 = { x: 40 * 0.6 + 0.2, y: 0.3 }, st2 = {}; t2.reached = 20;
+    chaseTarget(walk, t2, h2, { x: 1e5, y: 1e5 }, st2, 1);
+    if (t2.reached < 40) fail(`reached stayed at ${t2.reached} after he ran through crumb 40`);
+    // a long trail with nothing in view must not test more than the cap
+    let calls = 0; const fake = { clearLine: () => { calls++; return false; } }; const t3 = new Trail(800); for (let i = 0; i < 700; i++) t3.push(i * 0.6, 0);
+    t3.aim(fake, 0, 0, 0.4, 2); if (calls > 60) fail(`aim tested ${calls} lines (cap 60)`);
+    console.log(`7b. trail: reached stays inside the ring (${tr.reached} >= ${tr.n - tr.cap}), advances past a cut corner (${t2.reached}), aim tests at most ${calls} lines`);
+  }
+
+  // 7c. the edge of the map is inside what is drawn
+  {
+    const G = ground.grid, b = walk.bounds;
+    const inside = b.x0 >= G.x0 + 9.99 && b.x1 <= G.x0 + G.nx * G.step - 9.99 && b.y0 >= G.y0 + 9.99 && b.y1 <= G.y0 + G.ny * G.step - 9.99;
+    if (!inside) fail(`map edge ${JSON.stringify(b)} is not 10 m inside the drawn ground`);
+    console.log(`7c. map edge x ${b.x0.toFixed(0)}..${b.x1.toFixed(0)}, y ${b.y0.toFixed(0)}..${b.y1.toFixed(0)}, drawn ground x ${G.x0.toFixed(0)}..${(G.x0 + G.nx * G.step).toFixed(0)}, y ${G.y0.toFixed(0)}..${(G.y0 + G.ny * G.step).toFixed(0)}`);
+  }
+
+  // 7d. ambientBoxes reuses its boxes and keeps the lane offset; route.at fills an out object
+  {
+    const { World } = await import(new URL('../public/drive/runner.js', import.meta.url).href);
+    const ambient = [{ x: 10, y: 5, h: 0, lane: 1, type: 'sedan', vs: 3 }, { x: 500, y: 0, h: 0, lane: 0, type: 'bus' }, { x: 12, y: 0, h: 0, lane: 0, type: 'bus', deck: true }];
+    const out = []; World.prototype.ambientBoxes.call({ ambient }, 10, 5, 14, out);
+    const first = out[0]; World.prototype.ambientBoxes.call({ ambient }, 10, 5, 14, out);
+    if (out.length !== 1 || out[0] !== first) fail('ambientBoxes did not reuse its box / filter by range and deck');
+    if (Math.abs(out[0].y - 6) > 1e-9 || out[0].hl !== 2.3) fail(`ambientBoxes box wrong: ${JSON.stringify({ x: out[0].x, y: out[0].y, hl: out[0].hl })}`);
+    const q = {}; const r = route.at(50, 2, q); if (r !== q || !(q.x === route.at(50, 2).x)) fail('route.at(out) wrong');
+    console.log('7d. ambientBoxes: pooled, range and deck filtered, lane offset applied; route.at(s, d, out) fills out');
+  }
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nALL CHECKS PASSED');
 process.exit(failures ? 1 : 0);
