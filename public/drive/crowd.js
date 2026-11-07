@@ -607,7 +607,7 @@ export class Crowd {
       pos = new THREE.Vector3(), sc = new THREE.Vector3(), cam = this.camera.position, cap = M.instanceMatrix.count;
     // where the crowd casts shadows (desktop), the people inside the sun's shadow box go first and the shadow pass draws
     // only them (see World.render: same box, same generous margin, so the shadow map is unchanged)
-    const SB = M.castShadow && car ? this.shadowBox : null, cp = SB ? r.at(car.s, car.d) : null;
+    const SB = M.castShadow && car ? this.shadowBox : null, cp = SB ? (this.focus || r.at(car.s, car.d)) : null;   // (focus: {x, y, z}, set by drive.js while the runner is on foot anywhere in the city)
     let ax, ay, lim;
     if (SB) { const zA = new THREE.Vector3().copy(SB.dir).normalize(); ax = new THREE.Vector3(0, 1, 0).cross(zA).normalize(); ay = zA.clone().cross(ax); lim = SB.half() + 25; }
     let lo = 0, hi = 0; const BL = this.blob; if (BL) BL.begin();

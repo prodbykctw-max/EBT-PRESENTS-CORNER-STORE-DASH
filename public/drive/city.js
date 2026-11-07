@@ -206,6 +206,19 @@ export function wallSegments(W) {
   return Float32Array.from(out);
 }
 
+/** the footprints (rings of [x, y]) of every building that is drawn and solid: the walls above without the hero lots and canopies. roam.js uses them as the "never inside a
+ *  building" check on top of the wall segments. (Not isFree: its hero box also covers the store's front sidewalk, where you can run.) */
+export function solidFootprints(W) {
+  const out = [];
+  for (const b of W.buildings) {
+    if (b.canopy || b.pts.length < 3) continue;
+    let cx = 0, cy = 0; for (const [x, y] of b.pts) { cx += x; cy += y; } cx /= b.pts.length; cy /= b.pts.length;
+    if (inHero(cx, cy)) continue;
+    out.push(b.pts);
+  }
+  return out;
+}
+
 /** footprint grid: "is this spot inside a building?" (for placing trees, lamps, benches) */
 function footprintIndex(W) {
   const cell = 40, g = new Map();
@@ -254,7 +267,7 @@ export function buildCity(W, tex, ground, route, props, trees) {
     const far = fog.far / Math.max(0.2, minCos) + 5, far2 = far * far, p = camera.position;
     for (const o of flatOnly) o.visible = o.userData.wbox.distanceToPoint(p) ** 2 < far2;
   };
-  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces, isFree, walls: wallSegments(W), furniture: streetscape.userData.placed, signals: streetscape.userData.signals, cull };
+  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces, isFree, walls: wallSegments(W), footprints: solidFootprints(W), furniture: streetscape.userData.placed, signals: streetscape.userData.signals, cull };
 }
 const FLAT = /^(cover_.*|roads|roads_tile|route_road|route_road_tile|curbs|curbs_tile|junctions|junctions_tile|crosswalks|crosswalks_tile|contact_shadows|contact_shadows_tile)$/;
 

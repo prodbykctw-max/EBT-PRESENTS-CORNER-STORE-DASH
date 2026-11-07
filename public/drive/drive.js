@@ -14,6 +14,7 @@ import { RouteFrame, RunnerCar, World } from './runner.js';
 import { DriveAudio } from './audio.js';
 import { Crowd } from './crowd.js';
 import { heroSegments } from './corral.js';
+import { BODY, PROP_R, walkWorldFor, Trail, integrate, approach, wallPass, killInto, chaseTarget, wishVelocity, camYawStep, angDiff } from './roam.js';
 import { Streetcars } from './tram.js';
 import { Signals } from './signals.js';
 import { Birds } from './birds.js';
@@ -49,6 +50,8 @@ const SKIPFOOT = QA && new URLSearchParams(location.search).has('skipfoot');
 // he walks in; if he's on your tail, he follows you straight in.
 // (he runs a touch slower than you: a clean run up the sidewalk gets away, but every person you run into lets him close)
 const FOOT = { run: 5.6, back: 2.2, bully: 5.3, bullyGo: 0.8, start: 14, carAhead: 30, bullyBehind: 8, stun: 0.9, reach: 0.9, pause: 1.1 };
+// the on-foot camera: this far behind you (m), this high above your feet, aiming this far ahead of you, and never closer than min (walls pull it in to that)
+const ON_FOOT_CAM = { back: 10, up: 6.0, ahead: 7, min: 4 };
 const RACE = { pace: 17, accel: 3.4, hop: 1.6, tail: 4.5, shake: 60, maxLead: 30 };   // 17 m/s: a good run beats him by ~6 s; an average one gets caught late
 // the realistic look's pedestrians (people-alt.js, people-b.js, people-real/): by default every person is a B body (MakeHuman CC0, six body types, real
 // shoes); people-a.js (the hand-built A person) is NOT loaded unless asked for. ?people=none|0|off draws the old box people; ?people=A or AB picks A or the
@@ -267,9 +270,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     return a && b ? Math.max(a.y, b.y) : a ? a.y : b ? b.y : null;
   };
   world.footAt = footAt; world.feet = { surface: feetSurface, rebuild: () => (flat.length ? new TopSurface(flat, 8, nearTri) : null) };   // (rebuild: for measuring the load-time cost)
+  const heroWalls = heroSegments(hero.scene, ground(SPOT.x, SPOT.y));   // (the hand-built row's wall slices: the crowd's corral and the runner's collision world both use them)
   const crowd = world.crowd = new Crowd({
     route, ground, surfAt, heightAt: footAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree, alt: altPeople, blob: ContactBlobs,
-    walls: city.walls, heroWalls: heroSegments(hero.scene, ground(SPOT.x, SPOT.y)), roads: city.streets.index,
+    walls: city.walls, heroWalls, roads: city.streets.index,
     furniture: { ...city.furniture, shelter: [...(city.furniture.shelter || []), ...trams.shelters] },   // riders wait at streetcar platforms too
     onRoute: (x, y) => onRouteRoad(x, y),
     visible: (x, y, z, r) => world.visible(x, y, z, r),
@@ -484,7 +488,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // ---------- state ----------
   let t = TIME_LIMIT, drove = 0, hits = 0, tokens = 0, nearMisses = 0, state = SKIPFOOT ? 'countdown' : 'onfoot', countdown = 3, shake = 0, endT = 0;
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), tmp3 = new THREE.Vector3(), lastCar = new THREE.Vector3(); let lastRz = 0;
-  const camV = { d: 0, px: 0, py: 0, pz: 0, lx: 0, ly: 0, lz: 0 }; let camD = null;   // on-foot camera follow (smoothDamp state)
+  const camV = { dist: 0, px: 0, py: 0, pz: 0, lx: 0, ly: 0, lz: 0 }; let camDist = null;   // on-foot camera: how far behind you it is (smoothDamp state: camV.dist)
   // ---------- stiff lane steering ----------
   // The car sits in one of four lanes, right to left: 0 the right parking lane, 1 your lane, 2 the oncoming lane,
   // 3 the left parking lane (d grows to the left, so that is also smallest d to largest). ◀ ▶ move it one lane.
@@ -681,11 +685,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // before the corner had passed: you and the bully ran into it. Its curb-side line also ran straight through the
   // street trees (s 18, 32, 46) and the bully copied YOUR sideways position at HIS spot on the street, which a few
   // metres back can be inside the wall (he was, for 35 frames at s ~55).
-  const BODY = 0.42;   // half the width of the bully with his arms swinging (measured off the run; you are 0.38)
+  // (BODY, the radius of a person: 0.42 m, half the width of the bully with his arms swinging, measured off the run; you are 0.38. And PROP_R, below: roam.js)
   const WALL_GAP = BODY + 0.3, PROP_GAP = 0.4, SLOPE = 0.35, DETOUR = 0.4, CURB_GAP = BODY + 0.15;
-  // street furniture at body height (radius of the actual models between knee and shoulder, measured off the meshes;
-  // the crowd's own radii are bigger, they keep a polite distance): tree trunks 0.24 m x the tree's scale, poles ~0.2
-  const PROP_R = { tree_round: 0.24, tree_upright: 0.17, lamp: 0.2, signal: 0.17, bench: 0.9, bin: 0.33, hydrant: 0.21, shelter: 1.8 };
   const footProps = [];
   for (const [type, list] of Object.entries({ ...city.furniture, shelter: [...(city.furniture.shelter || []), ...trams.shelters] })) {
     if (!PROP_R[type]) continue;
@@ -749,13 +750,6 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const footLineD = (s, lane = 0) => PATH.line(s, lane);
   // (the GAS pedal used to be relabelled RUN on foot; on foot the pedals are hidden now and you drag to run)
   const gasLabel = () => {};   // the line round the street furniture (the bully's, the autopilot's)
-  // Where you run across the sidewalk is yours: the stick's sideways part (below, footVec) moves you anywhere from just
-  // inside the curb to WALL_GAP off the buildings (and on across the street), and you stay there when you let go.
-  // (It used to be two fixed lines, then ◀ ▶ steps of SIDE_STEP; stepSide is kept for the test tools.)
-  const SIDE_STEP = 0.9;
-  const sideRange = (s) => [PATH.outer(s), PATH.far(s)];   // route d: the building side is more negative; the far end is the far curb of the street, so ◀ (+d) takes you off the curb and across
-  let footSide = null;
-  const stepSide = (dir) => { const [lo, hi] = sideRange(me.s); footSide = THREE.MathUtils.clamp((footSide ?? me.d) + dir * SIDE_STEP, lo, hi); };
   // ---------- on foot you move the way you move in the store ----------
   // (owner, Nov 2026: "instead of a run button, you should be able to run the same way you run inside the store")
   // The whole screen is the controller, like the store's (standalone/csd.js bindTouch): put a thumb down anywhere that
@@ -764,7 +758,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // (the store's STICK_DEAD / STICK_FULL). Up the screen is up the street (the camera is behind you): drag up to run,
   // down to back up, left / right to cross the sidewalk (◀ toward the street), diagonals do both. A mouse drags the
   // same way; the arrow keys / WASD give the same directions. The pedals are hidden until you're in the car.
-  const STICK = { dead: 6, full: 22, travel: 44 }, LAT_RATE = 3.5, LAT_DEAD = 0.15, LAT_LEAD = 0.6;   // LAT_RATE: m/s across the sidewalk at full stick
+  const STICK = { dead: 6, full: 22, travel: 44 };
   const stickEl = document.createElement('div'); stickEl.className = 'drive-stick'; stickEl.setAttribute('aria-hidden', 'true'); stickEl.innerHTML = '<i></i>'; root.appendChild(stickEl);
   const stickKnob = stickEl.firstElementChild;
   let stick = null;   // the drag in progress: { id, ax, ay (the ring), cx, cy (the thumb), x, y (-1..1), on, q }
@@ -812,66 +806,56 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; }
     return { x, y };
   };
-  // street furniture (trees, lamps, signal poles, benches) is solid: you slip round it on the side you're already on
-  // (or the other side when there's no room), easing out before it and back after, so you never run through a trunk
-  const avoidProps = (s, d, cur) => {
-    const [lo, hi] = sideRange(s);
-    for (const o of PATH.props) {
-      // R: your body (0.38 m) and a hand's width of air off the trunk. Ahead of it the clear zone grows from nothing
-      // (2.4 m before the part you could actually touch) to the full R, so when you have to go round on the OTHER side
-      // you cross over well before you reach it, never through it (a straight blend toward the far side ran you
-      // through the middle of the trunk at s 46)
-      const ds = o.s - s, R = o.r + 0.5, od = -o.d, core = o.r + 0.45, a = Math.abs(ds) - core;
-      const k = a <= 0 ? 1 : 1 - THREE.MathUtils.smoothstep(a, 0, ds > 0 ? 2.4 : 0.8);
-      if (ds < -core - 0.8 || ds > core + 4) continue;
-      const half = R * k;
-      // which side: the one with room for you; if both have room, the side you're on (decided by room, not by where you
-      // are this instant, so it can't flip-flop as you cross over)
-      // (room is judged where the trunk stands, not where you are: the sidewalk can narrow on the way to it, and judging
-      // it here switched sides only 1 m before the tree at s 46)
-      const [plo, phi] = sideRange(o.s), roomUp = od + R <= phi + 0.05, roomDown = od - R >= plo - 0.05;
-      const side = roomUp && roomDown ? (cur >= od ? 1 : -1) : roomUp ? 1 : roomDown ? -1 : (cur >= od ? 1 : -1);
-      // where you'd run is on the other side of it: drift over starting 4 m before it (continuously, from wherever
-      // you are), so you're across its line long before you could touch it; then the clear zone holds you off it
-      let want = d;
-      if (side > 0 ? d < od : d > od) { const k2 = 1 - THREE.MathUtils.smoothstep(a, 0, 4); want = THREE.MathUtils.lerp(d, od + side * R, k2); }
-      want = side > 0 ? Math.max(want, od + half) : Math.min(want, od - half);
-      d = THREE.MathUtils.clamp(want, lo, hi);
-    }
-    return d;
+  // ---------- the whole city is yours (roam.js) ----------
+  // (owner, Nov 2026: "I should be able to run through any and every part of the street outside and everything. It shouldn't be any guidelines. I should only not be able to go in the buildings.")
+  // You and the bully live in the world plane (x east, y north): a position, a velocity, a heading. Nothing steers you along the street any more; the only things that stop you
+  // are what is solid. roam.js holds the walls (every building's edges and footprint, the hand-built row's wall slices, the freeway's barriers and piers), every tree, pole, bench,
+  // bin, hydrant and shelter, and the edge of the map; here are the moving things (cars, people, the bully) and how the person is driven. s and d (along and across the route)
+  // are worked out from the position every step, because the traffic and the crowd read them.
+  const walk = walkWorldFor({ city, heroWalls, shelters: trams.shelters, W });
+  const doorP = route.at(doorS, doorD), DOOR = { x: doorP.x, y: doorP.y };   // the driver's door, in the world plane
+  const DOOR_REACH = 1.2;   // m from the door at which you are in
+  const startP = route.at(FOOT.start, footLineD(FOOT.start)), startH = route.at(FOOT.start - FOOT.bullyBehind, footLineD(FOOT.start - FOOT.bullyBehind));
+  for (const [m, p] of [[me, startP], [him, startH]]) Object.assign(m, { x: p.x, y: p.y, vx: 0, vy: 0, kvx: 0, kvy: 0, heading: startP.a, turn: 0, good: { x: p.x, y: p.y }, px: p.x, py: p.y, gx: p.x, gy: p.y });
+  let camYaw = startP.a;   // the way the camera looks (world angle): along the street at the start, then it follows you (updateFoot)
+  const trail = new Trail(); trail.push(him.x, him.y); trail.push(me.x, me.y);   // where you have been: the bully runs it
+  const chase = {};          // where he is running to (roam.js chaseTarget)
+  const syncRoute = (m) => {
+    const pr = route.projectFine(m.x, m.y), c = Math.cos(pr.a), sn = Math.sin(pr.a), vx = m.vx + m.kvx, vy = m.vy + m.kvy;
+    m.s = pr.s; m.d = pr.d; m.v = vx * c + vy * sn; m.dv = -vx * sn + vy * c;   // (along and across the route there: the traffic and the crowd read these)
   };
-  const chosenD = (s) => { const [lo, hi] = sideRange(s); return THREE.MathUtils.clamp(BOT ? footLineD(s) : (footSide ?? footLineD(s)), lo, hi); };
-  // near the car you cut over to its driver's door: a smooth S from your line to the door over the last 9 m
-  const meLine = (s) => { const toCar = doorS - s, k = THREE.MathUtils.smoothstep(9 - Math.abs(toCar), 0, 6); return THREE.MathUtils.lerp(avoidProps(s, chosenD(s), me.d), doorD, k); };
+  // near enough to the route's street for its traffic and its crowd to matter
+  const onStreet = (m) => m.s > -8 && m.s < route.length + 8 && Math.abs(m.d) < route.hw(m.s) + 9;
+  syncRoute(me); syncRoute(him);
   world.others = [him];   // cars see him too
-  Object.assign(me, { s: FOOT.start, d: footLineD(FOOT.start) });
-  Object.assign(him, { s: FOOT.start - FOOT.bullyBehind, d: footLineD(FOOT.start - FOOT.bullyBehind) });
-  for (const p of [me, him]) { p.ps = p.s; p.pd = p.d; }
   me.o.visible = him.o.visible = me.blob.visible = him.blob.visible = !SKIPFOOT;
   root.classList.toggle('onfoot', !SKIPFOOT);   // drive.css: no pedals on foot (you drag, like the store); they come in when you get in
+  const focus = { x: 0, y: 0, z: 0 };   // where the sun's shadow box is centred while you are on foot (world.focus, crowd.focus)
   let footT = 0, found = false, race = null, tauntK = 0, footAcc = 0;
   const TAUNTS = ['HEY! YOU!', 'GET BACK HERE!', 'THOSE ARE MINE!', 'GIMME THAT!'];
-  const footZ = (s, d) => { const p = route.at(s, d), gz = ground(p.x, p.y); return { p, z: Math.max(surfAt(p.x, p.y, gz + 1.2) ?? -Infinity, gz + LEVEL.TERRAIN) }; };
+  // the height of the ground under a foot: the road or the terrain, whichever is higher (a freeway deck is only ever under your feet where it is level with the ground, its walls keep you off the rest)
+  const footZ = (x, y) => { const gz = ground(x, y); return Math.max(surfAt(x, y, gz + 1.2) ?? -Infinity, gz + LEVEL.TERRAIN); };
+  // how far each of you is from the door, as the crow flies, for the race bar and the YOUR CAR distance. Capped at 60 m so luring him far away and doubling back is no exploit
+  const doorDist = (m) => Math.hypot(m.x - DOOR.x, m.y - DOOR.y), BAR_CAP = 60;
+  const barS = (m) => doorS - Math.min(BAR_CAP, doorDist(m));
 
   // --- movement: fixed 1/120 s steps (like the car), drawn between the last two steps ---
-  // Speed eases toward what you're asking for: quick to get going, quick to stop, no kink at either end.
-  // (Old: a flat 10 m/s^2 up and 16 m/s^2 down: 0.52 s to full speed, then a dead stop with a 0.84 m slide.)
-  const speedTo = (m, want, dt, tau, aMax) => { const a = THREE.MathUtils.clamp((want - m.v) / tau, -aMax, aMax); m.v += a * dt; m.acc = a; };
+  // Speed eases toward what you're asking for: quick to get going, quick to stop, no kink at either end (a vector now: a turn is as quick as a start).
   const MOVE = { up: [0.12, 24], down: [0.08, 34], stun: [0.12, 30] };   // [time constant s, max m/s^2]
-  // Sideways: a stiff critically damped spring toward the line, told how fast the line itself is moving sideways
-  // (so it rounds a tree or a bend without lagging). Old: full 4.2 m/s sideways from the first frame and a dead
-  // stop at the end, every 2 m (the band's steps): the jerk.
-  const SIDE = { w: 11, max: 5, acc: 45 };
-  function steerTo(m, target, tVel, dt) {
-    const a = THREE.MathUtils.clamp(SIDE.w * SIDE.w * (target - m.d) + 2 * SIDE.w * (tVel - m.dv), -SIDE.acc, SIDE.acc);
-    m.dv = THREE.MathUtils.clamp(m.dv + a * dt, -SIDE.max, SIDE.max); m.d += m.dv * dt;
-  }
+  const TURN = 16;   // rad/s: how fast a person swings round to face where he is running
+  const faceMove = (m, dt) => {
+    const sp = Math.hypot(m.vx, m.vy); let turn = 0;
+    if (sp > 0.6) { const step = THREE.MathUtils.clamp(angDiff(Math.atan2(m.vy, m.vx), m.heading), -TURN * dt, TURN * dt); m.heading += step; turn = step / dt; }
+    m.turn += (turn - m.turn) * (1 - Math.exp(-dt * 12));
+  };
   // someone you (or he) barge into is knocked aside, away from you, and flinches (hands up). The crowd's own flinch
   // (startle) also steps them 0.9 m toward the buildings, so knocked toward the curb they get pushed that much
-  // further, but never off the curb; with no room on that side they go the other way. (crowd d: + = building side)
+  // further, but never off the curb; with no room on that side they go the other way. (crowd d: + = building side;
+  // route d: + = left, so a person on the left pavement is at +d and one on the right at -d)
   function knock(q, fromD) {
-    const qd = -q.d, lo = crowd.bandAt(-1, q.s)[0], room = q.d - (lo - 0.1);
-    if (qd > fromD && room > 0.4) { q.startle = 0.7; q.shove = -Math.min(0.75, room) - 0.63; }
+    const side = q.g.side, qd = side * q.d, lo = crowd.bandAt(side, q.s)[0], room = q.d - (lo - 0.1);
+    const toCurb = (qd > fromD ? 1 : -1) * side < 0;   // "away from you" is toward the curb on this person's side
+    if (toCurb && room > 0.4) { q.startle = 0.7; q.shove = -Math.min(0.75, room) - 0.63; }
     else { q.startle = 1; q.shove = 0.75; }
   }
   // a stumble you can read: the body rocks (pitch, roll) and settles; amp in radians, the shove adds a sink
@@ -882,150 +866,101 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     for (const h of ev.honks || []) {
       const g = Math.max(0, 1 - h.d / 70); if (g > 0.05) { audio.honkAt(g); if (h.skid) audio.skid(g); }
     }
-    for (const h of ev.runnerHits || []) runnerShove(h.e, h.sp);
+    for (const h of ev.runnerHits || []) { const p = route.at(h.e.s, h.e.d); runnerShove(p.x, p.y); }
   }
-  // A car that couldn't stop in time: a shove, never the end. You are knocked out of its way (the recoil eases out like a
-  // bump into someone on the sidewalk), check to 40 % speed and stagger; the driver has already stood on the brakes.
-  function runnerShove(e) {
+  // A car that couldn't stop in time: a shove, never the end. You are knocked out of its way (away from where it is: a speed that fades over about half a second),
+  // check to 40 % speed and stagger; the driver has already stood on the brakes.
+  function runnerShove(fromX, fromY) {
     if (footT < (me.carHitT || 0)) return;
     me.carHitT = footT + 1.2;
-    const away = me.d >= e.d ? 1 : -1, edge = e.d + away * ((e.W || 1.8) / 2 + BODY + 0.2);
-    me.nudge = edge - meLine(me.s); me.v *= 0.4; me.stun = Math.max(me.stun, 0.55); shake = 0.45;
-    stagger(me, -0.25, away * 0.14, 0.55);
+    const dx = me.x - fromX, dy = me.y - fromY, L = Math.hypot(dx, dy) || 1, side = Math.sign(-dx * Math.sin(me.heading) + dy * Math.cos(me.heading)) || 1;
+    me.vx *= 0.4; me.vy *= 0.4; me.kvx += dx / L * 3.4; me.kvy += dy / L * 3.4; me.stun = Math.max(me.stun, 0.55); shake = 0.45;
+    stagger(me, -0.25, side * 0.14, 0.55);
     pop('WATCH IT!'); audio.crash(0.2); haptic(HAP.bump); tauntK = Math.max(tauntK, 1);
   }
-  // ---------- the street is yours too ----------
-  // Cars, the streetcar, parked cars, cones and barricades are solid: in the street you go round them on whichever side has
-  // room, the way avoidProps takes you round a tree. Each one is checked where it will be over the next 1.8 s as well as where
-  // it is (a car coming at 13 m/s is 23 m further on by then), widened by your body and a hand of air, and your line is moved
-  // to the nearest free lateral position, preferring the side you're already leaning to. With no gap at all you stop and wait
-  // (m.blocked) instead of running into it. (The traffic does its part: traffic.js sees you and brakes or leans away early.)
-  const SP_T = [0, 0.25, 0.5, 0.8, 1.2, 1.8], AIR = 0.28;
-  function streetPath(m, want, dt = 0) {
-    const obs = world.traffic.obs; m.blocked = false;
-    m.hitT = Math.max(0, (m.hitT || 0) - dt); m.release = Math.max(0, (m.release || 0) - dt);
-    if (!obs || !obs.length) { m.avoidSide = undefined; return want; }
-    const rad = BODY + AIR, iv = [];
-    for (const o of obs) {
-      if (o.runner || o.player || o.o === him || Math.abs(o.s - m.s) > 45) continue;
-      const half = o.W / 2 + rad;
-      for (const tau of SP_T) {
-        if (Math.abs((m.s + m.v * tau) - (o.s + o.vs * tau)) >= o.L / 2 + rad * 0.8) continue;
-        const sh = o.vd * tau, grow = 0.08 * tau;
-        iv.push([o.d + Math.min(0, sh) - half - grow, o.d + Math.max(0, sh) + half + grow]);
-      }
-    }
-    if (!iv.length) { m.avoidSide = undefined; return want; }
-    iv.sort((a, b) => a[0] - b[0]);
-    const mg = [iv[0].slice()];
-    for (let k = 1; k < iv.length; k++) { const l = mg[mg.length - 1]; if (iv[k][0] <= l[1]) l[1] = Math.max(l[1], iv[k][1]); else mg.push(iv[k].slice()); }
-    const hit = mg.find((b) => want > b[0] && want < b[1]);
-    if (!hit) { m.avoidSide = undefined; return want; }
-    m.hitT = 0.4;   // (something solid is in the way, as of the last 0.4 s: see holdUp)
-    const [lo, hi] = sideRange(m.s), opts = [];
-    if (hit[0] - 0.02 >= lo) opts.push(hit[0] - 0.02);
-    if (hit[1] + 0.02 <= hi) opts.push(hit[1] + 0.02);
-    if (!opts.length) {
-      // no way round at all: wait for it to clear (m.blocked), but not for ever: holdUp lets you go after 1.5 s, along whichever
-      // edge is nearer, as far inside the street as it allows
-      if (m.release > 0) return THREE.MathUtils.clamp(Math.abs(want - hit[0]) < Math.abs(hit[1] - want) ? hit[0] - 0.02 : hit[1] + 0.02, lo, hi);
-      m.blocked = true; return want;
-    }
-    // the side you're already leaning to (or last chose), unless the other side is much nearer
-    const mid = (hit[0] + hit[1]) / 2;
-    let pick = opts[0];
-    if (opts.length > 1) {
-      const dLow = want - opts[0], dHigh = opts[1] - want, pref = m.avoidSide ?? (m.d < mid ? -1 : 1);
-      pick = Math.abs(dLow - dHigh) < 2.2 ? opts[pref < 0 ? 0 : 1] : dLow < dHigh ? opts[0] : opts[1];
-    }
-    m.avoidSide = pick < mid ? -1 : 1;
-    return pick;
-  }
-  // Something solid across the way that does not move (a car broken down across a street already full of cars, a queue that is not
-  // going anywhere) must not hold you or the bully for the rest of the run: a person who wants to run, is at a standstill and has
-  // had something in the way for 1.5 s is let through (m.release, for 1 s: streetPath then takes the nearer edge instead of waiting).
-  // (m.blocked flickers on and off at a wall, since a stopped person is no longer inside its reach, so it is the standstill that is timed)
-  function holdUp(m, runs, dt) {
-    m.waitT = runs && Math.abs(m.v) < 0.6 && m.hitT > 0 ? (m.waitT || 0) + dt : 0;
-    if (m.waitT > 1.5) { m.release = 1.0; m.waitT = 0; }
-  }
   // ---------- nothing solid is ever walked through ----------
-  // streetPath steers round cars, the streetcar, cones, barricades and the people working the street, and holdUp lets you try the
-  // other edge after a wait, but a steering target is only a wish: the follow lags it, a car can arrive in the same step, and a
-  // street full to both curbs has no free line at all. This is the guarantee behind it, run after ALL the steering of a step, for you
-  // and for the bully: every solid thing in the street is a box (its own length and width, widened by BODY, and swept to wherever it
-  // is now as well as where the traffic last saw it), and if the person ends the step inside one he is put back out of it along
-  // the shallowest way. A thing that is MOVING along the street (a car at speed) is only ever gone round: he is put out sideways, to
-  // the side that has room, and never along its travel (which would carry him along in front of it), and when it hits him this is
-  // the shove (runnerShove) that is seen. A thing that is standing is left by whichever of its four ways is shortest; running into
-  // an end face stops you dead against it, a side is slid along. Every position is kept inside the street (PATH.outer to PATH.far,
-  // which follows the building walls and corners, so a push along the street never ends in a wall), and a person who is still
-  // inside something after all the passes goes back to where he was last clear (or, if that is taken too, the nearest clear spot).
-  // A big correction (a car appearing on top of you) is eased on screen over a few frames (m.ofs) rather than snapped, but the
-  // person himself is already out.
-  function solidPass(m) {
-    const obs = world.traffic.obs; m.ofs ||= { s: 0, d: 0 };
-    const s0 = m.s, d0 = m.d, E = 0.003;
-    const boxes = [];
-    for (const o of obs || []) {
-      if (o.runner || o.player || o.o === him || o.o === me || !o.L || !o.W || Math.abs(o.s - m.s) > 24) continue;
-      const ent = o.o, live = !o.cross && typeof ent.s === 'number' && typeof ent.d === 'number';
-      const os = live ? ent.s : o.s, od = live ? ent.d : o.d;
-      boxes.push({ ent, mv: Math.abs(o.vs) > 2, sLo: Math.min(o.s, os) - o.L / 2 - BODY, sHi: Math.max(o.s, os) + o.L / 2 + BODY, dLo: Math.min(o.d, od) - o.W / 2 - BODY, dHi: Math.max(o.d, od) + o.W / 2 + BODY });
+  // The walls and posts are the end of every step (walls always win, roam.js wallPass). Before them, the things that move:
+  // 1. the route's street: every car, the streetcar, your own parked car, cones, barricades and the people working the street are a box (its own length and width, widened by
+  //    BODY, and swept to wherever it is now as well as where the traffic last saw it). If a person ends a step inside one he is put out of it along the shallowest way. A thing that is
+  //    MOVING (a car at speed) is only ever gone round, sideways, never along its travel (which would carry him along in front of it); when it hits him that is the shove (runnerShove).
+  //    A thing that is standing is left by whichever of its four ways is shortest; a side is slid along.
+  // 2. the cross streets' cars and buses, anywhere in the city, the same way, as the boxes they are drawn as (World.ambientBoxes).
+  // 3. the people of the crowd: you bump them (they are knocked aside, you stumble); the bully just shoves through.
+  const E = 0.003, rBoxes = [], aBoxes = [];
+  function routeBoxes(m, isMe) {
+    const obs = world.traffic.obs; if (!obs || !obs.length) return;
+    rBoxes.length = 0;
+    for (const o of obs) {
+      if (o.runner || o.o === him || o.o === me || o.cross || !o.L || !o.W || Math.abs(o.s - m.s) > 24) continue;
+      const ent = o.o, live = typeof ent.s === 'number' && typeof ent.d === 'number', os = live ? ent.s : o.s, od = live ? ent.d : o.d;
+      rBoxes.push({ mv: Math.abs(o.vs) > 2, sLo: Math.min(o.s, os) - o.L / 2 - BODY, sHi: Math.max(o.s, os) + o.L / 2 + BODY, dLo: Math.min(o.d, od) - o.W / 2 - BODY, dHi: Math.max(o.d, od) + o.W / 2 + BODY });
     }
-    const circles = PATH.props.filter((o) => Math.abs(o.s - m.s) < 8);
-    const inRange = (s, d) => d >= PATH.outer(s) - 0.02 && d <= PATH.far(s) + 0.02;
-    const hitAt = (s, d) => boxes.find((b) => s > b.sLo && s < b.sHi && d > b.dLo && d < b.dHi)
-      || circles.find((o) => { const R = o.r + BODY, ds = s - o.s, dd = d + o.d; return ds * ds + dd * dd < R * R; });
-    const free = (s, d) => inRange(s, d) && !hitAt(s, d);
+    if (!rBoxes.length) return;
     for (let pass = 0; pass < 6; pass++) {
-      const h = hitAt(m.s, m.d); if (!h) break;
+      const pr = route.projectFine(m.x, m.y), s = pr.s, d = pr.d;
+      const h = rBoxes.find((b) => s > b.sLo && s < b.sHi && d > b.dLo && d < b.dHi); if (!h) break;
       // the ways out of it: [cost, axis, target]
-      let ways;
-      if (h.sLo !== undefined) {
-        ways = [[m.d - h.dLo, 'd', h.dLo - E], [h.dHi - m.d, 'd', h.dHi + E]];
-        if (!h.mv) ways.push([m.s - h.sLo, 's', h.sLo - E], [h.sHi - m.s, 's', h.sHi + E]);
-      } else {
-        const R = h.r + BODY, od = -h.d, dd = m.d - od, ds = m.s - h.s, cs = Math.sqrt(Math.max(0, R * R - dd * dd)), cd = Math.sqrt(Math.max(0, R * R - ds * ds));
-        ways = [[m.s - (h.s - cs), 's', h.s - cs - E], [h.s + cs - m.s, 's', h.s + cs + E], [m.d - (od - cd), 'd', od - cd - E], [od + cd - m.d, 'd', od + cd + E]];
-      }
-      ways = ways.filter((w) => (w[1] === 's' ? inRange(w[2], m.d) : inRange(m.s, w[2]))).sort((a, b) => a[0] - b[0]);
-      if (!ways.length) break;
-      const [, axis, to] = ways[0];
-      if (axis === 's') { if ((to < m.s && m.v > 0) || (to > m.s && m.v < 0)) { m.v = 0; m.stopped = true; } m.s = to; }
-      else {
-        if ((to < m.d && m.dv > 0) || (to > m.d && m.dv < 0)) m.dv = 0;
-        if (h.mv && m === me && Math.abs(to - m.d) > 0.12) runnerShove({ d: (h.dLo + h.dHi) / 2, W: h.dHi - h.dLo - 2 * BODY });   // (the box's own centre and width: a cross-street car has no d of its own)   // (a car at speed took him: knocked aside, checked, staggers)
-        m.d = to;
+      const ways = [[d - h.dLo, 'd', h.dLo - E], [h.dHi - d, 'd', h.dHi + E]];
+      if (!h.mv) ways.push([s - h.sLo, 's', h.sLo - E], [h.sHi - s, 's', h.sHi + E]);
+      ways.sort((a, b) => a[0] - b[0]);
+      const c = Math.cos(pr.a), sn = Math.sin(pr.a);
+      const to = (w) => { const ds = w[1] === 's' ? w[2] - s : 0, dd = w[1] === 'd' ? w[2] - d : 0; return { ds, dd, x: m.x + c * ds - sn * dd, y: m.y + sn * ds + c * dd }; };
+      let pick = null; for (const w of ways) { const t = to(w); if (!walk.solid(t.x, t.y, BODY)) { pick = { w, t }; break; } }   // the nearest way out that is not into a wall
+      if (!pick) pick = { w: ways[0], t: to(ways[0]) };
+      m.x = pick.t.x; m.y = pick.t.y;
+      const sg = Math.sign(pick.w[1] === 's' ? pick.t.ds : pick.t.dd);
+      if (pick.w[1] === 's') killInto(m, c * sg, sn * sg); else killInto(m, -sn * sg, c * sg);
+      if (isMe && h.mv && pick.w[1] === 'd' && Math.abs(pick.t.dd) > 0.12) { const q = route.at((h.sLo + h.sHi) / 2, (h.dLo + h.dHi) / 2); runnerShove(q.x, q.y); }   // (a car at speed took him: knocked aside, checked, staggers)
+    }
+  }
+  function ambientBoxPass(m, isMe) {
+    world.ambientBoxes(m.x, m.y, 14, aBoxes);
+    for (const b of aBoxes) {
+      const c = Math.cos(b.h), sn = Math.sin(b.h), Hl = b.hl + BODY, Hw = b.hw + BODY;
+      for (let pass = 0; pass < 3; pass++) {
+        const dx = m.x - b.x, dy = m.y - b.y, u = dx * c + dy * sn, w = -dx * sn + dy * c;
+        if (Math.abs(u) >= Hl || Math.abs(w) >= Hw) break;
+        const ways = [[Hw - w, 'w', Hw + E], [w + Hw, 'w', -Hw - E]];
+        if (b.vs <= 2) ways.push([Hl - u, 'u', Hl + E], [u + Hl, 'u', -Hl - E]);   // (one at speed is only gone round, sideways)
+        ways.sort((p, q) => p[0] - q[0]);
+        const to = (k) => { const du = k[1] === 'u' ? k[2] - u : 0, dw = k[1] === 'w' ? k[2] - w : 0; return { du, dw, x: m.x + c * du - sn * dw, y: m.y + sn * du + c * dw }; };
+        let pick = null; for (const k of ways) { const t = to(k); if (!walk.solid(t.x, t.y, BODY)) { pick = { k, t }; break; } }
+        if (!pick) pick = { k: ways[0], t: to(ways[0]) };
+        m.x = pick.t.x; m.y = pick.t.y;
+        const sg = Math.sign(pick.k[1] === 'u' ? pick.t.du : pick.t.dw);
+        if (pick.k[1] === 'u') killInto(m, c * sg, sn * sg); else killInto(m, -sn * sg, c * sg);
+        if (isMe && b.vs > 2 && Math.abs(pick.t.dw) > 0.12) runnerShove(b.x, b.y);
       }
     }
-    if (!free(m.s, m.d)) {
-      // still inside something, or out of the street: the last clear place, else the nearest clear one
-      m.d = THREE.MathUtils.clamp(m.d, PATH.outer(m.s), PATH.far(m.s));
-      if (!free(m.s, m.d)) {
-        const g = m.good;
-        if (g && free(g.s, g.d)) { m.s = g.s; m.d = g.d; m.v = 0; m.dv = 0; }
-        else {
-          let best = null;
-          for (let k = 0; k <= 48; k++) for (const sg of k ? [-1, 1] : [1]) for (let j = 0; j <= 24; j++) {
-            const s = m.s + sg * k * 0.25, d = PATH.outer(s) + (PATH.far(s) - PATH.outer(s)) * j / 24;
-            if (!free(s, d)) continue;
-            const c = (s - m.s) ** 2 + (d - m.d) ** 2; if (!best || c < best.c) best = { s, d, c };
-          }
-          if (best) { m.s = best.s; m.d = best.d; m.v = 0; m.dv = 0; }
+  }
+  function crowdPass(m, isMe) {
+    for (const q of crowd.people) {
+      if (Math.abs(q.s - m.s) > 3) continue;
+      const side = q.g.side, qd = side * q.d, p = route.at(q.s, qd), dist = Math.hypot(p.x - m.x, p.y - m.y);
+      if (isMe) {
+        if (dist < 0.6 && me.stun <= 0 && (q.bumped || 0) < footT) {
+          q.bumped = footT + 2; me.vx *= 0.45; me.vy *= 0.45; me.stun = 0.35; shake = 0.35;
+          knock(q, me.d);
+          // you bounce off them: a step away from them (as far as the walls allow), so you slide past, not through
+          const L = dist || 1, ax = dist ? (me.x - p.x) / L : -Math.sin(me.heading), ay = dist ? (me.y - p.y) / L : Math.cos(me.heading);
+          me.kvx += ax * 2.4; me.kvy += ay * 2.4;
+          stagger(me, -0.22, (qd > me.d ? 0.12 : -0.12), 0.45);
+          pop('WATCH IT!'); audio.crash(0.15); haptic(HAP.bump); tauntK = Math.max(tauntK, 1);
         }
-      }
+      } else if (dist < 0.75 && !q.shove) knock(q, m.d);
     }
-    if (free(m.s, m.d)) m.good = { s: m.s, d: m.d };
-    const ds = m.s - s0, dd = m.d - d0;
-    // (the person is out; what is drawn eases to him over a few frames when the correction was big)
-    if (Math.abs(ds) > 0.15 || Math.abs(dd) > 0.15) { m.ofs.s -= ds; m.ofs.d -= dd; }
-    if (m.stopped) { m.stopped = false; m.blocked = true; }   // (an end face in the way: stand there, don't run on the spot)
+  }
+  function moveSolid(m, isMe) {
+    syncRoute(m);
+    if (onStreet(m)) { routeBoxes(m, isMe); crowdPass(m, isMe); }
+    ambientBoxPass(m, isMe);
+    wallPass(walk, m, BODY);   // last: walls always win
+    syncRoute(m);
   }
   const GAS_HINT = 'Hold GAS to go!'; let gasHint = 0;
   function getIn() {
     // (runnerOn off: the runner is in the car, so traffic stops treating the spot he got in at as a person standing in the road)
-    state = 'driving'; world.runnerOn = false; gasLabel(false); me.o.visible = me.blob.visible = false; hazards.visible = false; markerSprite.visible = false;
+    state = 'driving'; world.runnerOn = world.runnerFoot = false; world.focus = crowd.focus = null; gasLabel(false); me.o.visible = me.blob.visible = false; hazards.visible = false; markerSprite.visible = false;
     // the drag ends here (a thumb still down is not GAS: the stick never writes keys) and the pedals come in
     endStick(); root.classList.remove('onfoot');
     if (G) G.from(root.querySelectorAll('.drive-pad'), { y: 40, opacity: 0, duration: 0.45, stagger: 0.07, ease: 'back.out(1.5)', clearProps: 'transform,opacity' });
@@ -1037,110 +972,73 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // your thumb was on the street, not on GAS: say where to go now (phones; cleared when you press GAS or after 3 s)
     setHint(!BOT && matchMedia('(pointer: coarse)').matches ? GAS_HINT : ''); gasHint = 3;
     // he runs for his own ride (just behind where he's standing), then he's coming
-    race = { s: him.s - 2, v: 0, hop: RACE.hop + Math.max(0, him.pause), tail: false, shookAt: 0 };
+    race = { s: homeS - 2 - Math.min(BAR_CAP, doorDist(him)), v: 0, hop: RACE.hop + Math.max(0, him.pause), tail: false, shookAt: 0 };
     raceBar.hidden = false;
   }
+  // where the QA autopilot (?bot) wants to go: up the street along the line round the furniture, then in to the driver's door (the same walls, cars and people stop it as stop you)
+  const botWish = (out) => {
+    let tx = DOOR.x, ty = DOOR.y;
+    if (doorDist(me) >= 3.5) {
+      const s2 = Math.min(doorS, me.s + 2.5), k = THREE.MathUtils.smoothstep(9 - Math.abs(doorS - s2), 0, 6), q = route.at(s2, THREE.MathUtils.lerp(footLineD(s2), doorD, k));
+      tx = q.x; ty = q.y;
+    }
+    const dx = tx - me.x, dy = ty - me.y, L = Math.hypot(dx, dy) || 1;
+    out.x = dx / L * FOOT.run; out.y = dy / L * FOOT.run; return out;
+  };
+  const wish = { x: 0, y: 0 };
   function updateFoot(dt) {
     footT += dt;
-    // you: drag up (or hold ↑) to run up the block, as fast as the stick is pushed; down to back up if you overshoot; you
-    // cut over to the driver's door yourself. Anywhere within 45° of straight up is full running speed (the store's
-    // diagonals are full speed too; scaling by the angle made a dodge slower than the bully, who runs 5.3 m/s, and made
-    // ↑+← on a keyboard slower than it was), and a shorter drag is slower.
-    const fv = footVec(), fm = Math.hypot(fv.x, fv.y), up = fm ? -fv.y / fm : 0;
-    const fwd = up > 0 ? fm * Math.min(1, up * Math.SQRT2) : 0, bk = up < 0 ? fm * Math.min(1, -up * Math.SQRT2) : 0;
-    const want = me.stun > 0 || me.blocked ? 0 : BOT ? FOOT.run : fwd > 0 ? FOOT.run * fwd : -FOOT.back * bk;   // (blocked: no way round whatever is in the road ahead: you wait, you don't run into it)
+    // you: the stick (or the arrow keys) is the way you run, as seen from the camera: up the screen is away from the camera, sideways is across the screen, down runs at the
+    // camera, and how far you push is how fast (the store's stick works the same way). Any direction is full speed at full push (the store's diagonals are full speed too).
+    const fv = footVec();
+    if (BOT) botWish(wish); else wishVelocity(fv.x, fv.y, camYaw, FOOT.run, wish);
+    if (me.stun > 0) wish.x = wish.y = 0;
     me.stun = Math.max(0, me.stun - dt);
-    const mv = me.stun > 0 ? MOVE.stun : Math.abs(want) > Math.abs(me.v) && want * me.v >= 0 ? MOVE.up : MOVE.down;
-    speedTo(me, want, dt, mv[0], mv[1]);
-    me.s += me.v * dt;
-    // ◀ ▶ pick your line on the sidewalk (◀ the curb side, ▶ the building side) to get round people; near the car you
-    // cut over to its door
-    // (me.nudge: the recoil from a bump below, a sideways give away from whoever you hit that eases out over ~1 s, kept
-    // inside the sidewalk's edges)
-    me.nudge *= Math.exp(-dt * 1.6);
-    // across the sidewalk: the stick's sideways part moves your line at up to LAT_RATE (a small dead band, so a drag
-    // straight up doesn't drift you toward the street). The line starts from where you actually are when you start
-    // (after going round a tree or being knocked aside it can sit off you, and you'd be steering something you can't see).
-    const lx = BOT ? 0 : -fv.x, lat = Math.sign(lx) * Math.max(0, (Math.abs(lx) - LAT_DEAD) / (1 - LAT_DEAD));   // + = toward the street (◀)
-    me.sideV = 0;
-    if (lat) {
-      // (the line never leads you by more than LAT_LEAD: held against a tree or a car it would otherwise run on behind
-      // it, and the line left behind the trunk then pinned you there when you tried to run on)
-      const [lo, hi] = sideRange(me.s), from = me.latOn ? (footSide ?? me.d) : THREE.MathUtils.clamp(me.d, lo, hi);
-      footSide = THREE.MathUtils.clamp(THREE.MathUtils.clamp(from + lat * LAT_RATE * dt, me.d - LAT_LEAD, me.d + LAT_LEAD), lo, hi); me.sideV = (footSide - from) / dt;
-    }
-    me.latOn = !!lat;
-    if (footSide !== null) { const [lo, hi] = sideRange(me.s); footSide = THREE.MathUtils.clamp(footSide, lo, hi); }
-    // (the recoil is checked against the street furniture again: on its own it pushed you back across a trunk you were
-    // already going round, which is how you ran through the tree at s 46 after bumping someone at s 42)
-    const myLine = (s) => { const L = meLine(s); return me.nudge ? avoidProps(s, Math.min(Math.max(L + me.nudge, Math.min(L, PATH.outer(s))), Math.max(L, PATH.far(s))), me.d) : L; };
-    // ...then round whatever is solid in the street, eased (a first-order follow, 0.11 s) so a car appearing in the way is a
-    // quick lean to the free side, not a jump
-    holdUp(me, me.stun <= 0 && (fwd > 0 || BOT), dt);
-    const L0 = myLine(me.s), L1 = streetPath(me, L0, dt);
-    // while you cross the sidewalk with the stick, the follow and the spring are told how fast your line is actually
-    // moving (as far as the street lets it: nothing while a tree or a car holds it), so you stop where your thumb
-    // stops instead of sliding on about a metre behind it (the store's player stops in 0.025 s)
-    const ff = me.sideV && me.L1 !== undefined ? Math.sign(me.sideV) * Math.min(Math.abs(me.sideV), Math.max(0, Math.sign(me.sideV) * (L1 - me.L1) / dt)) : 0;
-    me.L1 = L1;
-    me.tg = me.tg === undefined ? L1 : me.tg + ff * dt + (L1 - me.tg - ff * dt) * (1 - Math.exp(-dt * 9));
-    steerTo(me, me.tg, (myLine(me.s + 0.2) - myLine(me.s - 0.2)) / 0.4 * me.v + ff, dt);
-    solidPass(me);
-    // run into someone and you stumble (the bully just shoves through them); they get knocked aside, so you don't
-    // run on through their body
-    for (const q of crowd.people) {
-      if (q.g.side !== -1 || Math.abs(q.s - me.s) > 3) continue;
-      const qd = -q.d;
-      if (Math.abs(q.s - me.s) < 0.55 && Math.abs(qd - me.d) < 0.5 && me.stun <= 0 && (q.bumped || 0) < footT) {
-        q.bumped = footT + 2; me.v *= 0.45; me.stun = 0.35; shake = 0.35;
-        knock(q, me.d);
-        // you bounce off them: a step away from them (as far as the sidewalk allows), so you slide past, not through
-        const away = qd < me.d ? 1 : -1, room = away > 0 ? PATH.far(me.s) - me.d : me.d - PATH.outer(me.s);
-        me.nudge = away * Math.max(0, Math.min(0.55, room));
-        stagger(me, -0.22, (qd > me.d ? 0.12 : -0.12), 0.45);
-        pop('WATCH IT!'); audio.crash(0.15); haptic(HAP.bump); tauntK = Math.max(tauntK, 1);
-      }
-      if (Math.abs(q.s - him.s) < 0.7 && Math.abs(qd - him.d) < 0.6 && !q.shove) knock(q, him.d);
-    }
-    if (!found && footT > 0.3 && footT < 0.5) setHint('Drag up to run — get to your car');   // (straight away: there's no button on screen to tell you)
-    if (!found && doorS - me.s < 14) { found = true; audio.token(); setHint('That’s your ride — get in!'); }
+    const mv = me.stun > 0 ? MOVE.stun : Math.hypot(wish.x, wish.y) > Math.hypot(me.vx, me.vy) ? MOVE.up : MOVE.down;
+    me.acc = approach(me, wish.x, wish.y, mv[0], mv[1], dt, me.heading);
+    faceMove(me, dt);
+    // the camera swings in behind you only as far as you push UP, and as fast as you run (roam.js camYawStep)
+    camYaw = camYawStep(camYaw, me.heading, BOT ? 0 : fv.x, BOT ? -1 : fv.y, Math.hypot(me.vx, me.vy) / FOOT.run, dt);
+    integrate(me, dt);
+    moveSolid(me, true);
+    trail.push(me.x, me.y);
+    if (!found && footT > 0.3 && footT < 0.5) setHint('Drag to run — get to your car');   // (straight away: there's no button on screen to tell you)
+    if (!found && doorDist(me) < 14) { found = true; audio.token(); setHint('That’s your ride — get in!'); }
     // the bully: a beat to clock you, then he runs you down; catching you is a shove, not the end
     him.pause = Math.max(0, him.pause - dt);
     const go = footT > FOOT.bullyGo && him.pause <= 0;
-    // closing on you he eases off to your pace instead of slamming into your back (he used to stop dead from 5.3 m/s
-    // in one step when you stopped in front of him)
-    const room = me.s - 0.75 - him.s, chase = Math.min(FOOT.bully, Math.max(0, me.v) + Math.max(0, room) * 4);
-    speedTo(him, go && !him.blocked ? chase : 0, dt, go ? 0.14 : 0.1, go ? 20 : 30);
-    him.s += him.v * dt;
-    if (him.s > me.s - 0.7) { him.s = me.s - 0.7; him.v = Math.min(him.v, Math.max(0, me.v)); }   // right on your back: he matches you
-    // his own line at HIS spot on the street (the one you're on), closing onto you once he's within a few metres,
-    // never past the curb-side edge or the wall where he is
-    const gap = me.s - him.s, close = THREE.MathUtils.smoothstep(4.5 - gap, 0, 3);
-    // (once you're out in the street he comes out after you from further back, not only in the last few metres)
-    const outK = THREE.MathUtils.smoothstep(me.d - PATH.left(me.s), 0.3, 1.5), pull = Math.max(close, outK);
-    const hl = (s) => avoidProps(s, THREE.MathUtils.clamp(THREE.MathUtils.lerp(footLineD(s), me.d, pull), PATH.outer(s), PATH.far(s)), him.d);
-    holdUp(him, go, dt);
-    const H1 = streetPath(him, hl(him.s), dt);
-    him.tg = him.tg === undefined ? H1 : him.tg + (H1 - him.tg) * (1 - Math.exp(-dt * 9));
-    steerTo(him, him.tg, (hl(him.s + 0.2) - hl(him.s - 0.2)) / 0.4 * him.v, dt);
-    solidPass(him);
-    if (go && gap < FOOT.reach && Math.abs(me.d - him.d) < 1 && me.stun <= 0) {
-      // shoved from behind: you lurch forward, stagger and go down on one knee; he stops to gloat
-      me.stun = FOOT.stun; me.v = Math.max(me.v, 0) + 1.2; him.pause = FOOT.pause; shake = 0.7;
+    // He runs at you when he can see you (a clear line for his body), else along your trail to the newest crumb of it he can see. Closing on you he eases off to your pace instead of
+    // slamming into your back (he used to stop dead from 5.3 m/s in one step when you stopped in front of him).
+    chaseTarget(walk, trail, him, me, chase, dt);
+    let ux = chase.tx - him.x, uy = chase.ty - him.y; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+    const gap0 = Math.hypot(me.x - him.x, me.y - him.y) || 1, away = Math.max(0, ((me.vx + me.kvx) * (me.x - him.x) + (me.vy + me.kvy) * (me.y - him.y)) / gap0);   // how fast you are running away from him
+    const sp = !go ? 0 : chase.sees ? Math.min(FOOT.bully, away + Math.max(0, gap0 - 0.75) * 4) : FOOT.bully;
+    him.acc = approach(him, ux * sp, uy * sp, go ? 0.14 : 0.1, go ? 20 : 30, dt, him.heading);
+    faceMove(him, dt);
+    integrate(him, dt);
+    if (gap0 < 0.7) { const k = 0.7 / gap0; him.x = me.x + (him.x - me.x) * k; him.y = me.y + (him.y - me.y) * k; }   // right on your back: he cannot stand inside you
+    moveSolid(him, false);
+    // stuck for good somewhere with no way to you (a trapped corner): put back on your trail a dozen metres behind you once he is far away, never on screen
+    him.stuckT = go && sp > 2 && Math.hypot(him.vx, him.vy) < 0.8 ? (him.stuckT || 0) + dt : 0;
+    if (him.stuckT > 3 && gap0 > 22 && trail.n > 30) { const id = trail.n - 24; him.x = trail.px(id); him.y = trail.py(id); him.vx = him.vy = him.kvx = him.kvy = 0; him.good = { x: him.x, y: him.y }; trail.reached = id; him.stuckT = 0; syncRoute(him); }
+    const gap = Math.hypot(me.x - him.x, me.y - him.y);
+    if (go && gap < FOOT.reach && me.stun <= 0) {
+      // shoved from behind: you lurch away from him, stagger and go down on one knee; he stops to gloat
+      me.stun = FOOT.stun; me.vx += (me.x - him.x) / (gap || 1) * 1.2; me.vy += (me.y - him.y) / (gap || 1) * 1.2; him.pause = FOOT.pause; shake = 0.7;
       stagger(me, 0.5, 0.14 * (Math.random() < 0.5 ? -1 : 1), FOOT.stun, 0.22);
       flash('SHOVED!', 800); audio.crash(0.35); haptic(HAP.crash); tauntK = 1.6;   // no taunt on top of SHOVED!
     }
     tauntK -= dt;
     if (go && tauntK <= 0 && me.stun <= 0 && gap < 9) { tauntK = 2.6; pop(TAUNTS[(Math.random() * TAUNTS.length) | 0]); }
-    // the crowd watches you and the bully (route-space s, d, speed; t = when) and steps out of the way (crowd.js react)
-    crowd.runner = { s: me.s, d: me.d, v: me.v, t: footT }; crowd.chaser = { s: him.s, d: him.d, v: him.v, t: footT };
-    if (Math.abs(me.s - doorS) < 1.4 && Math.abs(me.d - doorD) < 0.6 && me.stun <= 0) getIn();
+    // the crowd watches you and the bully (route-space s, d, speed; t = when) and steps out of the way (crowd.js react). Only along the route's street: that is where the crowd is.
+    crowd.runner = onStreet(me) ? { s: me.s, d: me.d, v: me.v, t: footT } : null; crowd.chaser = onStreet(him) ? { s: him.s, d: him.d, v: him.v, t: footT } : null;
+    if (doorDist(me) < DOOR_REACH && me.stun <= 0) getIn();
   }
   // after you drive off he's still out there for a moment, running for his ride, until he's behind the camera
   function updateHimLeft(dt) {
-    speedTo(him, FOOT.bully * 0.7, dt, 0.2, 12); him.s += him.v * dt;
-    steerTo(him, footLineD(him.s), 0, dt);
-    solidPass(him);
+    const q = route.at(him.s + 4, footLineD(him.s + 4)), dx = q.x - him.x, dy = q.y - him.y, L = Math.hypot(dx, dy) || 1, sp = FOOT.bully * 0.7;
+    him.acc = approach(him, dx / L * sp, dy / L * sp, 0.2, 12, dt, him.heading);
+    faceMove(him, dt); integrate(him, dt); moveSolid(him, false);
     if (car.s - him.s > 25) him.o.visible = him.blob.visible = false;
   }
   // smooth follow that never overshoots, the same at any frame rate (Game Programming Gems 4, "critically damped
@@ -1155,13 +1053,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   }
   /** draw a person between the last two movement steps (al = how far into the next one this frame is) */
   function posePerson(m, dt, al) {
-    // (m.ofs: a big correction from solidPass, eased out on screen)
-    if (m.ofs) { const k = Math.exp(-dt * 18); m.ofs.s *= k; m.ofs.d *= k; if (Math.abs(m.ofs.s) < 1e-3) m.ofs.s = 0; if (Math.abs(m.ofs.d) < 1e-3) m.ofs.d = 0; }
-    const s = m.ps + (m.s - m.ps) * al + (m.ofs ? m.ofs.s : 0), d = m.pd + (m.d - m.pd) * al + (m.ofs ? m.ofs.d : 0);
-    m.ds = s; m.dd = d;
+    const x = m.px + (m.x - m.px) * al, y = m.py + (m.y - m.py) * al;
+    m.gx = x; m.gy = y;   // where he is drawn (the camera follows this)
+    const sp = Math.hypot(m.vx, m.vy), fx = sp > 0.3 ? m.vx / sp : Math.cos(m.heading), fy = sp > 0.3 ? m.vy / sp : Math.sin(m.heading);
     // height: the higher of the ground under you and a step ahead, eased (a 0.32 m curb at s ~76 used to pop you up
     // in one frame, and the camera with you)
-    const here = footZ(s, d), p = here.p, gz = Math.max(here.z, footZ(s + Math.sign(m.v || 1) * 0.35, d).z);
+    const here = footZ(x, y), gz = Math.max(here, footZ(x + fx * 0.35, y + fy * 0.35));
     if (m.zs === undefined) { m.zs = gz; m.zv = 0; }
     m.zs = smoothDamp(m.zs, gz, m, 'zv', gz > m.zs ? 0.05 : 0.08, dt);
     m.z = m.zs;
@@ -1172,34 +1069,25 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       if (u >= 1) m.hit = null;
       else { const e = u < 0.18 ? Math.sin(u / 0.18 * Math.PI / 2) : 1 - THREE.MathUtils.smootherstep(u, 0.18, 1); hp = m.hit.pitch * e; hr = m.hit.roll * e; hs = m.hit.sink * e; }
     }
-    // weight and lean: into the push-off, back when you pull up, into a sidestep
+    // weight and lean: into the push-off, back when you pull up, into a turn (a left turn banks left: roll is the negative of the turn rate)
     const k = 1 - Math.exp(-dt * 10);
     m.lean += (THREE.MathUtils.clamp(m.acc * 0.006, -0.1, 0.12) - m.lean) * k;
-    m.roll += (THREE.MathUtils.clamp(-m.dv * 0.035, -0.13, 0.13) - m.roll) * k;
-    // facing: the street's heading, turned a little toward where you're actually going (a sidestep is a diagonal cut,
-    // not a sideways slide), eased
-    // (you, with the stick, can also move straight across the sidewalk: then you turn toward where you're going and run
-    // there, instead of a standing figure sliding sideways. At running speed this is the same turn as before; the
-    // bully keeps exactly the old rule.)
-    let turn = Math.atan2(m.dv, Math.max(m.v, 2.5)) * 0.7 * THREE.MathUtils.smoothstep(m.v, 0, 1.5);
-    if (m === me) {
-      const across = 1 - THREE.MathUtils.smoothstep(m.v, 0.6, 2.5);
-      turn = THREE.MathUtils.lerp(turn, Math.atan2(m.dv, Math.max(Math.abs(m.v), 0.6)) * THREE.MathUtils.smoothstep(Math.abs(m.dv), 0, 1.5), across);
-    }
-    const head = route.at(s).a + turn;
+    m.roll += (THREE.MathUtils.clamp(-m.turn * 0.06, -0.13, 0.13) - m.roll) * k;
+    // facing: the way he is running (roam.js / faceMove turns the heading at up to 16 rad/s), eased a little on screen
+    const head = m.heading;
     if (m.yaw === null) m.yaw = head;
-    m.yaw += Math.atan2(Math.sin(head - m.yaw), Math.cos(head - m.yaw)) * (1 - Math.exp(-dt * 14));
+    m.yaw += angDiff(head, m.yaw) * (1 - Math.exp(-dt * 14));
     // animation: stand, walk and run blended by speed, all on one clock that advances with the ground you cover
-    const sp = m === me ? Math.hypot(m.v, m.dv) : Math.abs(m.v), wRun = THREE.MathUtils.smoothstep(sp, 1.6, 4.2), moving = THREE.MathUtils.smoothstep(sp, 0.05, 1.0);
+    const wRun = THREE.MathUtils.smoothstep(sp, 1.6, 4.2), moving = THREE.MathUtils.smoothstep(sp, 0.05, 1.0);
     const plant = THREE.MathUtils.lerp(m.plantWalk, m.plantRun, wRun), dur = clips.run.duration;
-    m.phase = (((m.phase + (m === me ? (m.v < -0.3 ? -1 : 1) * sp : m.v) / plant * dt) % dur) + dur) % dur;   // (you: legs run backwards only while you're really backing up; a speed easing to 0 from a back-up never quite gets there)
+    m.phase = (((m.phase + sp / plant * dt) % dur) + dur) % dur;   // (always forwards now: he runs the way he faces, there is no backing up)
     m.act.stand.setEffectiveWeight(1 - moving); m.act.walk.setEffectiveWeight(moving * (1 - wRun)); m.act.run.setEffectiveWeight(moving * wRun);
     m.act.walk.time = m.act.run.time = m.phase; m.act.stand.time = 0;
     m.mixer.update(0);
-    m.o.position.copy(toV3(p.x, p.y, m.zs - (1 - moving) * m.sink - hs));
+    m.o.position.copy(toV3(x, y, m.zs - (1 - moving) * m.sink - hs));
     m.o.rotation.set(m.lean + hp, m.yaw + Math.PI / 2, m.roll + hr, 'YXZ');
     m.blob.visible = m.o.visible;
-    m.blob.position.set(m.o.position.x, here.z + 0.04, m.o.position.z); m.blob.rotation.set(-Math.PI / 2, m.yaw + Math.PI / 2, 0);
+    m.blob.position.set(m.o.position.x, here + 0.04, m.o.position.z); m.blob.rotation.set(-Math.PI / 2, m.yaw + Math.PI / 2, 0);
   }
   // ---------- the race (the bar at the top) ----------
   function updateRace(dt) {
@@ -1222,15 +1110,15 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   }
   const raceBar = root.querySelector('.drive-race'), rYou = raceBar.querySelector('.you'), rHim = raceBar.querySelector('.him'), rGap = raceBar.querySelector('.gap');
   raceBar.hidden = SKIPFOOT;
-  const raceFrom = Math.min(him.s, me.s) - 2;
+  const raceFrom = Math.min(barS(him), barS(me)) - 2;
   function drawRaceBar() {
     if (raceBar.hidden) return;
     const span = spot.s - raceFrom, at = (s) => THREE.MathUtils.clamp((s - raceFrom) / span, 0, 1) * 100 + '%';
-    const youS = state === 'onfoot' ? me.s : car.s, himS = race ? race.s : him.s;
+    const youS = state === 'onfoot' ? barS(me) : car.s, himS = race ? race.s : barS(him);
     const lx = at(youS), hx = at(himS);
     if (rYou.style.left !== lx) rYou.style.left = lx;
     if (rHim.style.left !== hx) rHim.style.left = hx;
-    const gapS = race ? (race.tail ? 0 : (youS - himS) / Math.max(6, race.v || RACE.pace)) : (me.s - him.s) / FOOT.bully;
+    const gapS = race ? (race.tail ? 0 : (youS - himS) / Math.max(6, race.v || RACE.pace)) : (doorDist(him) - doorDist(me)) / FOOT.bully;
     raceBar.classList.toggle('hot', gapS < 2.5);
     setText(rGap, race && race.tail ? 'ON YOUR TAIL!' : state === 'onfoot' ? 'RUN!' : `+${gapS.toFixed(1)}s`);
   }
@@ -1271,11 +1159,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       footAcc += dt;
       while (footAcc >= FIXED) {
         footAcc -= FIXED;
-        for (const p of [me, him]) { p.ps = p.s; p.pd = p.d; }
+        for (const p of [me, him]) { p.px = p.x; p.py = p.y; }
         if (state === 'onfoot') updateFoot(FIXED); else updateHimLeft(FIXED);   // (getIn() may put you in the car mid-way)
       }
       const al = footAcc / FIXED;
-      if (state === 'onfoot') { posePerson(me, dt, al); hazardMat.opacity = Math.floor(now / 380) % 2 ? 1 : 0.12; markerSprite.position.y = 2.9 + Math.sin(now / 180) * 0.15; }
+      if (state === 'onfoot') { posePerson(me, dt, al); focus.x = me.gx; focus.y = me.gy; focus.z = me.zs; world.focus = crowd.focus = focus; hazardMat.opacity = Math.floor(now / 380) % 2 ? 1 : 0.12; markerSprite.position.y = 2.9 + Math.sin(now / 180) * 0.15; }
       if (him.o.visible) posePerson(him, dt, al);
     }
     if (race && state === 'driving') updateRace(dt);
@@ -1351,11 +1239,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     } else {
       // on foot, in the countdown and at the finish the street carries on too: nothing sits frozen in the road. Cars see the
       // runner (world.runner) and brake or swerve for him
-      world.runner = me; world.runnerOn = state === 'onfoot';
+      world.runner = me; world.runnerFoot = state === 'onfoot'; world.runnerOn = world.runnerFoot && onStreet(me);   // (the route's traffic sees you only while you are in or beside its street; the cross streets' cars see you wherever you are)
       trams.update(dt, car);
       streetEvents(world.update(dt, car, drove + footT, 0));
       // (the traffic has moved since the last steering step, and a car can drive onto a person who is standing still: once more, with where everything is now, so a frame never ends with anyone inside anything)
-      if (state === 'onfoot') { solidPass(me); solidPass(him); }
+      if (state === 'onfoot') { moveSolid(me, true); moveSolid(him, false); }
     }
     if (state === 'parked' || state === 'late') {
       endT += dt; setHint('');
@@ -1403,8 +1291,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // camera and car: both kept the car in view on every frame, but that one's soft edge dithered across the deck
     // overhead; this one's edge falls behind the camera. Capped at 25 m so a camera that isn't placed yet (first
     // frame) or is mid-swing can't wipe the whole freeway for a frame.
-    const camGap = Math.hypot(camera.position.x - carRig.position.x, camera.position.z - carRig.position.z);
-    CUT.uCutPos.value.copy(carRig.position);
+    const cutAt = state === 'onfoot' ? me.o.position : carRig.position;   // (on foot it follows the runner, who can be under the Connector anywhere)
+    const camGap = Math.hypot(camera.position.x - cutAt.x, camera.position.z - cutAt.z);
+    CUT.uCutPos.value.copy(cutAt);
     CUT.uCutPos.value.y -= 0.75;
     CUT.uCutR.value = Math.min(25, Math.max(11, camGap + 3));
 
@@ -1433,17 +1322,20 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       targetPos = high.clone().lerp(street, e);
       targetLook = toV3(p.x, p.y, p.z).lerp(toV3(-3, 0, ground(-3, 0) + 4.2), e);
     } else if (state === 'onfoot') {
-      // on foot: high behind you, a little to the street side, looking up the block. High enough to see over the
+      // on foot: high behind you, a little to the left, looking the way the camera faces. High enough to see over the
       // bully on your heels and past the poles at the curb: from 3 m up and 6 m back (the first version) a signal
       // pole beside the camera hid you completely at the start, and the bully, once close, stood between you and the
-      // camera (both checked in the running game). From here you, him and the sidewalk ahead are all in frame.
-      // It follows a sidestep more gently than you make it (camD), so a lane change doesn't swing the whole view.
-      if (camD === null) camD = me.dd;
-      camD = smoothDamp(camD, me.dd, camV, 'd', 0.35, dt);
-      const cp = route.at(me.ds - 10, camD + 0.6);
-      targetPos = toV3(cp.x, cp.y, Math.max(me.zs + 6.0, ground(cp.x, cp.y) + 1.8));
-      const lk = route.at(me.ds + 7, camD + 0.3);
-      targetLook = toV3(lk.x, lk.y, me.zs + 0.9);
+      // camera (both checked in the running game). From here you, him and the street ahead are all in frame.
+      // (Those numbers are the same as when you ran along the street; they are turned by camYaw, the way the camera faces, which
+      // swings in behind you as you run: see camYawStep. It used to be the street's heading, and a gentler follow of a sidestep.)
+      // Walls pull it in: along the line from you back to where it would be, it stops short of the first wall (never closer than 4 m,
+      // the near plane is 2 m) and goes up instead, so a building behind you is looked down over, not through.
+      const cfx = Math.cos(camYaw), cfy = Math.sin(camYaw), clx = -cfy, cly = cfx;
+      const wall = walk.rayHit(me.gx, me.gy, -cfx, -cfy, ON_FOOT_CAM.back + 1), want = THREE.MathUtils.clamp(wall - 0.7, ON_FOOT_CAM.min, ON_FOOT_CAM.back);
+      camDist = camDist === null ? want : smoothDamp(camDist, want, camV, 'dist', want < camDist ? 0.1 : 0.6, dt);   // (in at once, out slowly)
+      const cxw = me.gx - cfx * camDist + clx * 0.6, cyw = me.gy - cfy * camDist + cly * 0.6;
+      targetPos = toV3(cxw, cyw, Math.max(me.zs + ON_FOOT_CAM.up + (ON_FOOT_CAM.back - camDist) * 0.85, ground(cxw, cyw) + 1.8));
+      targetLook = toV3(me.gx + cfx * ON_FOOT_CAM.ahead + clx * 0.3, me.gy + cfy * ON_FOOT_CAM.ahead + cly * 0.3, me.zs + 0.9);
       NEAR_CUT.value = 8;   // trees within 8 m of this camera are not drawn (landscape.js); you are ~12 m away
     } else {
       NEAR_CUT.value = 0;   // the driving camera keeps every tree
@@ -1504,11 +1396,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     sky.follow(camera);
 
     if (RL) {   // the realistic look's shadow box rides a little ahead of the car and moves in whole shadow texels (no shimmer)
-      const fwd = tmp.set(Math.cos(camA), 0, -Math.sin(camA));
-      RL.placeSun(sun, carRig.position, fwd, sun.userData.dir);
+      const yawF = state === 'onfoot' ? camYaw : camA, fwd = tmp.set(Math.cos(yawF), 0, -Math.sin(yawF));   // (on foot the shadow box follows the runner and the way the camera faces)
+      RL.placeSun(sun, state === 'onfoot' ? me.o.position : carRig.position, fwd, sun.userData.dir);
     } else {
-      sun.position.copy(carRig.position).add(tmp.copy(sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35)).multiplyScalar(220));
-      sun.target.position.copy(carRig.position);
+      const sunAt = state === 'onfoot' ? me.o.position : carRig.position;
+      sun.position.copy(sunAt).add(tmp.copy(sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35)).multiplyScalar(220));
+      sun.target.position.copy(sunAt);
     }
 
     // the pedal the engine hears: light throttle to hold speed, more to pull away (never floored for long), none
@@ -1524,7 +1417,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       const cs = Math.round(Math.max(0, t) * 100), mm = Math.floor(cs / 6000);   // (hundredths first, so 59.996 s reads 1:00.00, never 0:60.00)
       setText(hud.time, mm + ':' + ((cs % 6000) / 100).toFixed(2).padStart(5, '0'));
       root.classList.toggle('driving', state !== 'onfoot');   // drive.css: the hint moves up only while driving; on foot the camera is unchanged
-      setText(hud.pos, race ? (car.s >= race.s ? '1/2' : '2/2') : state === 'onfoot' ? (me.s >= him.s ? '1/2' : '2/2') : '—');
+      setText(hud.pos, race ? (car.s >= race.s ? '1/2' : '2/2') : state === 'onfoot' ? (doorDist(me) <= doorDist(him) ? '1/2' : '2/2') : '—');
       posBox.classList.toggle('hot', !raceBar.hidden && raceBar.classList.contains('hot'));
       const cp = state === 'onfoot' ? 0 : state === 'parked' ? 11 : Math.min(10, Math.max(0, Math.floor((car.s - cpFrom) / Math.max(1, spot.s - cpFrom) * 11)));
       setText(hud.cp, cp + '/11'); if (cp > cpSeen && state === 'driving') bump(cpBox, 1.14); cpSeen = cp;
@@ -1532,7 +1425,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     hud.time.classList.toggle('low', t < 10);
     if (t < 10 && state === 'driving') { const sec = Math.ceil(t); if (sec !== lowSec) { lowSec = sec; bump(timeBox, 1.14); } }   // last ten seconds: the clock pulses each second
     setText(hud.speed, Math.round(v * 2.237) + ' mph');
-    setText(hud.dist, Math.max(0, Math.round(state === 'onfoot' ? doorS - me.s : spot.s - car.s)) + ' m');   // on foot the box is YOUR CAR: the way to its door
+    setText(hud.dist, Math.max(0, Math.round(state === 'onfoot' ? doorDist(me) : spot.s - car.s)) + ' m');   // on foot the box is YOUR CAR: the way to its door
     // the next traffic light, readable on a phone (the real lamps are small from up here)
     const nl = state === 'driving' ? signals.next(car.s + 2.5) : null;
     const lightClass = 'drive-light' + (nl ? ' on ' + nl.aspect : '');
@@ -1606,7 +1499,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     snapshot: (q = 0.85) => { city.cull(camera, scene.fog); comic.render(); return renderer.domElement.toDataURL('image/jpeg', q); } });
   // live getters (Object.assign would have frozen their values at assignment time)
   Object.defineProperties(api, { state: { get: () => state }, time: { get: () => t }, race: { get: () => race } });
-  api.foot = { me, him, homeS, homeD, doorS, doorD, path: PATH, get side() { return footSide; }, set side(v) { footSide = v; }, stepSide, stick: null, get drag() { return stick; } };   // stick: {x, y} overrides the input (tests)
+  // stick: {x, y} overrides the input (tests). x, y, heading are world-plane; walls / solidAt are the collision world the runner and the bully use.
+  api.foot = { me, him, homeS, homeD, doorS, doorD, door: DOOR, path: PATH, stick: null, get drag() { return stick; }, get camYaw() { return camYaw; }, trail, walk,
+    get walls() { return walk.segs; }, solidAt: (x, y) => walk.solid(x, y, BODY), clearLine: (x0, y0, x1, y1) => walk.clearLine(x0, y0, x1, y1, BODY), doorDist };
   window.__drive = api;
   return api;
 }

@@ -313,6 +313,31 @@ standard. Nothing about the car models, sizes or looks was changed.
 
 The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tuning in `FOOT` / `RACE` at the top):
 
+- **Free roam (owner, Nov 2026: "run through any and every part of the street outside ... I should only not be able to go in the buildings").**
+  You and the bully live in the **world plane** (x east, y north: position, velocity, heading), not in the route's s/d; `s`, `d`,
+  `v`, `dv` are still filled in every step from `RouteFrame.projectFine` (a Newton-refined `project`) for the hints, the bot and
+  the crowd. Nothing steers you along the street. What stops you is `public/drive/roam.js` (pure arrays and 2D maths, no three.js
+  objects, no `Math.random`, so building it doesn't shift the shared random stream): every building edge (`city.walls`), the
+  hand-built row's wall slices (`heroSegments`), the freeway's barriers/ramps where the deck is 0.3-3.5 m above ground plus its
+  piers, and every tree, pole, bench, bin, hydrant and shelter as a circle (`PROP_R`), in a 10 m hash; `BODY` (0.42 m) is your
+  radius; 3 push-out passes slide you along a wall; if you are still inside one (or inside a building footprint) you go back to the
+  last good spot. Moving things go first (route boxes including your own parked car, the cross streets' cars via
+  `World.ambientBoxes`, the crowd on both sides) and walls always win. The edge of the map is a wall.
+  **Controls** are camera-relative: up the screen is away from the camera, sideways is across the screen, down runs at it; speed is
+  the stick's push times `FOOT.run` in any direction (`wishVelocity`, `approach`). The heading turns toward your velocity at a capped
+  rate. The camera is the same 10 m back / 6 m up / 7 m ahead framing, turned by `camYaw`, which swings in behind you in proportion to
+  the forward part of the drag and your speed (`camYawStep`, at most 1.5 rad/s; pure left/right/down don't orbit). Walls pull the
+  camera in along a 2D ray (never closer than 4 m, raising it instead, always 1.8 m above ground). The overpass cutaway, the sun and
+  shadow box, and the crowd's shadow split follow the runner while you are on foot and go back to the car in `getIn`.
+  **The bully** follows your breadcrumb trail (`Trail`, 0.5 m apart; `chaseTarget`): a clear straight line to you, else the newest
+  clear crumb, else the oldest unreached one, so he follows round corners; same speeds, a catch within `FOOT.reach` is the same shove.
+  **Getting in:** within 1.2 m of the driver's door point (`DOOR`). `race.s = homeS - 2 - min(60, his distance to the door)`; the race
+  bar, YOUR CAR m, 1st/2nd and "That's your ride" use distance to the door. `?bot` still follows `PATH` (route line, then the door).
+  Test hooks: `__drive.foot` has `me`/`him` (x, y, vx, vy, heading, plus s/d), `camYaw`, `trail`, `walls`, `solidAt(x, y)`,
+  `clearLine`, `doorDist`. Node tests: `node tools-roam/collide.test.mjs` (random runs against the real city's walls, no browser);
+  `tools-roam/check_roam.mjs` is the browser script.
+  The paragraphs below were written for the old street-locked run (sidewalk lanes, `stepSide`, `streetPath`): where they talk about
+  lanes, a curb band or the 9 m pull to the door, the code above is the truth.
 - **On foot.** You start on the right sidewalk of Luckie St (s = 14 m) with the bully 8 m behind you. Your car is parked
   at the right curb up the block with its **hazards flashing** and a yellow ▼ over it, in the first stretch of parking
   lane where it sits level (Luckie St is steep: on its cross-slope a car rolls ~10°, so the spot is picked by measuring
