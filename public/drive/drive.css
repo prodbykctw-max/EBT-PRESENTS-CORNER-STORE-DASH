@@ -174,3 +174,6 @@
 .drive-stick.on { opacity: 1; }
 .drive-stick i { position: absolute; left: 28px; top: 28px; width: 40px; height: 40px; border-radius: 50%;
   background: rgba(245,197,24,.85); box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+
+/* the EBT count's label is a small gold E.B.T card (the pink stripe, navy lettering) to match the token cards on the road */
+.drive-box.tok span, .drive-root.real .rb-cell.tok span { display: inline-block; font: 900 9px/1 "Arial Black", "Helvetica Neue", Arial, sans-serif; letter-spacing: .06em; color: #1E2340; background: linear-gradient(#E85D9E 0 22%, #F5C518 22%); border: 1px solid #1E2340; border-radius: 3px; padding: 5px 4px 2px; margin-bottom: 1px; }

@@ -10,7 +10,7 @@ import { loadCityNode } from './node-world.mjs';
 const RUNS = +process.argv[2] || 200, SECS = +process.argv[3] || 20, HZ = 120, DT = 1 / HZ;
 const t0 = Date.now();
 const { W, route, ground, city, walk, roam, heroWalls } = await loadCityNode();
-const { BODY, integrate, approach, wallPass, wishVelocity, camYawStep, Trail, chaseTarget, angDiff, FREEWAY } = roam;
+const { BODY, integrate, approach, wallPass, wishVelocity, steerStick, STEER, camYawStep, Trail, chaseTarget, angDiff, FREEWAY } = roam;
 console.log(`world built in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${walk.nSeg} wall segments (${city.walls.length / 4} building edges, ${heroWalls.length / 4} hero-row slices, rest freeway), ${walk.nCir} posts and piers, ${walk.nRing} footprints, ${city.freeway.pieces.length} elevated roads`);
 
 let failures = 0;
@@ -90,7 +90,7 @@ function onSlab(x, y) {
     for (let k = 0; k < secs * HZ; k++) {
       const w = wishVelocity(sx, sy, yaw, 5.6), m = { vx, vy }; approach(m, w.x, w.y, 0.12, 24, DT); vx = m.vx; vy = m.vy; x += vx * DT; y += vy * DT;
       const sp = Math.hypot(vx, vy); if (sp > 0.6) head = Math.atan2(vy, vx);
-      const y2 = camYawStep(yaw, head, sx, sy, sp / 5.6, DT); tot += Math.abs(y2 - yaw); yaw = y2;
+      const y2 = camYawStep(yaw, sx, sy, sp / 5.6, DT); tot += Math.abs(y2 - yaw); yaw = y2;
     }
     return { yaw: yaw - 0.3, x, y, tot };
   };
@@ -100,6 +100,19 @@ function onSlab(x, y) {
   const ul = run(-0.707, -0.707, 4), ur = run(0.707, -0.707, 4);
   assert(ul.yaw > 3.0 && ur.yaw < -3.0, `up-left/up-right curve opposite ways (${ul.yaw.toFixed(2)}, ${ur.yaw.toFixed(2)} rad in 4 s)`);
   assert(ul.tot / 4 <= 1.5 + 1e-9, 'camera swing never above 1.5 rad/s');
+  // steerStick: a thumb a few degrees off straight up is straight up, a diagonal and straight left/right/down are exact, a flip is at once, and jitter is smoothed
+  {
+    const st = { on: false, a: 0 }, o = { x: 0, y: 0 }, ang = (x, y) => Math.atan2(x, -y) * 180 / Math.PI;
+    steerStick(st, Math.sin(0.12), -Math.cos(0.12), DT, o); assert(Math.abs(o.x) < 0.01 && o.y < -0.99, '7 degrees off up is straight up');
+    for (const [x, y, want] of [[0.707, -0.707, 45], [-0.707, -0.707, -45], [1, 0, 90], [-1, 0, -90], [0.707, 0.707, 135], [-0.707, 0.707, -135], [0.5, -0.866, 30]]) {
+      const s2 = { on: false, a: 0 }; steerStick(s2, x, y, DT, o); const a = ang(o.x, o.y); assert(Math.abs(a - want) < 0.01, `direction ${want} is passed through untouched (${a})`); assert(Math.abs(Math.hypot(o.x, o.y) - Math.hypot(x, y)) < 1e-9, 'length untouched');
+    }
+    const s3 = { on: false, a: 0 }; steerStick(s3, 0, -1, DT, o); steerStick(s3, 0, 1, DT, o); assert(Math.abs(o.y - 1) < 1e-9, 'up to down is at once (no sweep through sideways)');
+    steerStick(s3, 0, 0, DT, o); assert(o.x === 0 && o.y === 0, 'no push, no run');
+    // a push that jumps +-6 degrees every step: the output's angle stays within 1 degree of the middle
+    const s4 = { on: false, a: 0 }; let worst = 0; for (let k = 0; k < 240; k++) { const a = (k % 2 ? 1 : -1) * 6 * Math.PI / 180 + 40 * Math.PI / 180; steerStick(s4, Math.sin(a), -Math.cos(a), DT, o); if (k > 60) worst = Math.max(worst, Math.abs(ang(o.x, o.y) - 40)); }
+    assert(worst < 1.2, `a +-6 degree shake at 120 Hz is smoothed to ${worst.toFixed(2)} degrees`);
+  }
   console.log(`3. controls: up-left swings the camera ${(ul.yaw / 4).toFixed(2)} rad/s (max 1.5), up-right ${(ur.yaw / 4).toFixed(2)}, straight left/right/up/down 0.00`);
 }
 
@@ -165,7 +178,7 @@ console.log(`   ${totalSteps} steps, ${contacts} with a wall contact, ${reverts}
 
 // ---------------------------------------------------------------- 5. the freeway: where the walls are
 {
-  const fw = roam.freewayColliders(city.freeway.pieces, ground);
+  const fw = roam.freewayColliders(city.freeway.pieces, ground, city.freeway.piers);
   console.log(`5. freeway: ${fw.segs.length / 4} wall segments and ${fw.circles.length / 3} pier circles from ${city.freeway.pieces.length} elevated roads`);
   // walking along the middle of every elevated road from either end must not reach a slab that is low enough to fall through
   let blocked = 0, reached = 0;

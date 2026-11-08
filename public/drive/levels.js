@@ -23,10 +23,14 @@ export function standOn(ground, x, y, a, hl, hw) {
 
 /** Top of a freeway deck (before the road lift) at world (x, y) for deck height h above terrain.
  *  High decks ride the smooth shared grade (so a ramp merging into the Connector lines up exactly); low ramp
- *  ends blend onto the real ground (so a ramp lands on the street instead of stepping off a ledge). */
+ *  ends blend onto the real ground (so a ramp lands on the street instead of stepping off a ledge).
+ *  ground.deckLift(x, y) (roads.js raiseDecks, set when the streets are built) is the extra height every deck gets where
+ *  a street passes under it, so the slab clears the street's own hump by a real bridge's headroom; it fades in with
+ *  the same 0-at-1 m, full-at-5 m blend, so a ramp still lands on the ground. One field shared by every deck: decks that
+ *  overlap (a ramp joining the Connector) are lifted together and stay one surface. */
 export function deckTop(ground, x, y, h) {
   const g = ground(x, y);
   if (h <= 0.05) return g;
   const k = Math.min(1, Math.max(0, (h - 1) / 4)), t = k * k * (3 - 2 * k); // 0 below 1 m, 1 above 5 m
-  return Math.max(g + (ground.grade(x, y) - g) * t + h, g);
+  return Math.max(g + (ground.grade(x, y) - g) * t + h + (ground.deckLift ? ground.deckLift(x, y) * t : 0), g);
 }
