@@ -1,0 +1,24 @@
+<!doctype html><meta charset=utf-8><body style="margin:0;background:#8a9099">
+<script type=module>
+// QA viewer for the animal source models: ?m=<url of a glb>&clip=<name>&t=<seconds>&az=<deg>&el=<deg>&d=<distance>&ty=<target height>
+import * as THREE from '/public/drive/vendor/three.module.min.js';
+import { GLTFLoader } from '/public/drive/vendor/GLTFLoader.js';
+const q = new URLSearchParams(location.search);
+const W = +q.get('w') || 640, H = +q.get('h') || 480;
+const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); r.setSize(W, H); document.body.appendChild(r.domElement);
+const sc = new THREE.Scene(); sc.background = new THREE.Color(0x8a9099);
+sc.add(new THREE.HemisphereLight(0xffffff, 0x556070, 1.6)); const dl = new THREE.DirectionalLight(0xffffff, 2.2); dl.position.set(3, 5, 2); sc.add(dl);
+const g = new THREE.Mesh(new THREE.PlaneGeometry(20, 20).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x777777 })); sc.add(g);
+const gl = await new GLTFLoader().loadAsync(q.get('m'));
+const root = gl.scene; sc.add(root);
+window.clips = gl.animations.map((a) => a.name + ':' + a.duration.toFixed(2));
+const mixer = new THREE.AnimationMixer(root);
+const clip = q.get('clip'); if (clip) { const a = gl.animations.find((x) => x.name === clip); mixer.clipAction(a).play(); mixer.setTime(+q.get('t') || 0); }
+root.updateMatrixWorld(true);
+const box = new THREE.Box3().setFromObject(root); window.bbox = [box.min.toArray(), box.max.toArray()];
+const cam = new THREE.PerspectiveCamera(30, W / H, 0.01, 100);
+const az = (+q.get('az') || 30) * Math.PI / 180, el = (+q.get('el') || 15) * Math.PI / 180, d = +q.get('d') || 3, ty = q.get('ty') !== null ? +q.get('ty') : (box.min.y + box.max.y) / 2;
+const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;
+cam.position.set(cx + Math.sin(az) * Math.cos(el) * d, ty + Math.sin(el) * d, cz + Math.cos(az) * Math.cos(el) * d); cam.lookAt(cx, ty, cz);
+r.render(sc, cam); window.done = true;
+</script>

@@ -286,8 +286,9 @@ const SHIRTS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2e2e2e, 0xe8e8e8, 0x3d9a5b, 0x8e
 const BUS_STRIPE = [0x1d5fbf, 0xc62828];
 
 export class World {
-  constructor({ route, props, scene, W, sEnd, audio, surfAt, camera, marks, carSets }) {
+  constructor({ route, props, scene, W, sEnd, audio, surfAt, camera, marks, carSets, animals }) {
     Object.assign(this, { route, scene, W, sEnd, audio, surfAt, camera, marks });
+    this.animals = animals || null;   // the realistic look's dogs (animals.js); null draws the props.glb ones
     this.frustum = new THREE.Frustum(); this._pm = new THREE.Matrix4(); this._sph = new THREE.Sphere();
     this.ents = []; this.tokens = [];
     this.meshes = {};
@@ -873,6 +874,10 @@ export class World {
     e.s += vs * dt; e.d += vd * dt; e.v = 0; e.dd = vd;   // (dd: sideways speed, so cars can see it step into the road)
     if (cr && !e.bolt && !e.crossing) { const R = reach(e.side, hw + e.off); if (e.side * e.d > R) e.d = e.side * R; }
     if (Math.abs(vs) + Math.abs(vd) > 0.2) { e.hd = Math.atan2(vd, vs); e.gait += dt * (e.bolt ? 16 : e.crossing ? 12 : 7); }
+    // for the realistic dog (animals.js; the comic look's dog_a / dog_b swap above is untouched): the metres walked (its feet keep pace with the ground), which gait (0 standing,
+    // 1 walking, 2 running: eased, so it breaks into a trot and settles) and whether it is stopped to sniff. No random numbers.
+    const sp = Math.hypot(vs, vd), tg = sp < 0.2 ? 0 : e.bolt || e.crossing ? 2 : 1;
+    e.gp = (e.gp || 0) + sp * dt; e.gw = (e.gw || 0) + Math.max(-dt * 3, Math.min(dt * 3, tg - (e.gw || 0))); e.sniff = tg === 0 && !e.bolt && !e.crossing && e.pause > 0;
   }
 
   /** The cross-street vehicles (and buses) within `range` m of a point, as the boxes they are drawn as: { x, y (centre), h (heading), hl, hw (half length, half width), vs (speed) }.
@@ -903,6 +908,7 @@ export class World {
     const lo = {}, hi = {}; for (const k in this.meshes) { lo[k] = 0; hi[k] = 0; }
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e3 = new THREE.Euler(), c = new THREE.Color(), one = new THREE.Vector3(1, 1, 1), pos = new THREE.Vector3();
     const sc3 = new THREE.Vector3(); let halos = 0;
+    const AN = this.animals; if (AN) AN.beginDogs();
     const SB = this.shadowBox, cp = this.focus || this.route.at(car.s, car.d);   // (focus: {x, y, z} where the sun's shadow box is centred; drive.js sets it while the runner is on foot, anywhere in the city)
     let ax, ay, lim;
     if (SB) {
@@ -965,7 +971,10 @@ export class World {
       if (e.flying) { z += e.fz; roll = e.spin; pitch = e.spin * 0.7; }
       if (afoot) { pitch = 0; roll = 0; }
       const big = HAZARD_SCALE[e.type];                                       // drawn bigger than life: they read on a phone
-      put(e.type === 'dog' ? (Math.sin(e.gait) > 0 ? 'dog_a' : 'dog_b') : e.type, p.x, p.y, z, yaw, e.color, roll, pitch, big ? sc3.setScalar(big) : one, e.cid);
+      if (AN && AN.dogs && e.type === 'dog') {   // the realistic dog: one instance with its gait state (the props.glb dog_a / dog_b are not drawn)
+        m4.compose(pos.set(p.x, z, -p.y), q.setFromEuler(e3.set(pitch, yaw - Math.PI / 2, roll, 'YXZ')), sc3.setScalar(big || 1));
+        AN.dog(m4, c.set(e.color), { gw: e.gw || 0, dist: e.gp || 0, sniff: !!e.sniff, id: e.cid ?? e.s }, big || 1, t);
+      } else put(e.type === 'dog' ? (Math.sin(e.gait) > 0 ? 'dog_a' : 'dog_b') : e.type, p.x, p.y, z, yaw, e.color, roll, pitch, big ? sc3.setScalar(big) : one, e.cid);
       if (HALO[e.type] && !e.flying && !e.hitDone && Math.abs(e.d) < this.route.hw(e.s) + 0.3 && e.s > car.s - 4 && e.s - car.s < 110 && halos < 200) {
         const [rad, col] = HALO[e.type], pulse = 1 + 0.12 * Math.sin(t * 7 + e.s);
         if (inStreet && surf === undefined) surf = this.surfAt(p.x, p.y, p.z + 1.2);
@@ -973,6 +982,7 @@ export class World {
         this.halo.setMatrixAt(halos, m4); this.halo.setColorAt(halos, c.set(col)); halos++;
       }
     }
+    if (AN) AN.endDogs();
     for (const a of this.ambient) if (a.x !== undefined) {
       const ah = a.rh ?? a.h, ox = -Math.sin(ah) * a.lane, oy = Math.cos(ah) * a.lane, x = (a.rx ?? a.x) + ox, y = (a.ry ?? a.y) + oy, g = this.route.ground;
       const [hl, hw] = VEHICLE[a.type];

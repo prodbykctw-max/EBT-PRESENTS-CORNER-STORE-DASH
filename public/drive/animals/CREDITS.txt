@@ -1,0 +1,20 @@
+The animals of the realistic look (public/drive/animals.js): the stray dogs and the pigeons. Built by drive/tools/animals/build_animals.py (+ build_pigeon.py).
+With ?animals=none (or in the comic look) none of these files is loaded and the props.glb dogs and birds are drawn.
+
+DOG   dog.webp, dog_n.webp, and the dog's mesh / skeleton / walk, run, idle and sniff poses in animals.bin
+      "PitBull" by Joseph AYYAD (Sketchfab @Joseph.AD)   https://sketchfab.com/3d-models/pitbull-2be37d5b9f754ed4bcc2d8f41b23a1d7
+      Licence: CC Attribution 4.0   https://creativecommons.org/licenses/by/4.0/
+      CHANGES MADE HERE: scaled to the game's dog size and turned to face -z; the loose debris / claw specks around the paws were left out; the textures were downscaled to
+      1024 px WebP; the poses were baked into a bone-matrix texture (animals.json / animals.bin); the coat colour is changed per dog in the shader (the white markings,
+      skin, nose and eyes keep their own colours). The "Armature.008|Walkl", "Run", "IDdle" and "Eat" animations of the source are what the dog plays.
+
+PIGEON  pigeon.webp, and the pigeon's mesh / skeleton / poses in animals.bin
+      "Pigeon" by kenchoo (Sketchfab)   https://sketchfab.com/3d-models/pigeon-ddd5ef4a94eb4159937a9de25c45697c
+      Licence: CC Attribution 4.0   https://creativecommons.org/licenses/by/4.0/
+      which is itself based on "Pigeon #1" by NMC BC (Sketchfab)   https://skfb.ly/oQsJv   (CC Attribution)
+      CHANGES MADE HERE: scaled and turned to face -z; the texture is the source's own image downscaled to 1024 px WebP; a second, cheaper level of detail (900 triangles);
+      the source has no wings (they are painted on a folded body), so the flying pigeon's two wings are NEW geometry made by build_pigeon.py (flat feather strips textured
+      with the feather patches of the source texture) with four new joints; the pecking and flying poses are made here by turning joint groups of the source skeleton
+      (legs trailed back in flight, body pitched and neck folded down to peck). The standing and idle pigeon is the source model with the source's idle animation.
+
+Credit line on the title screen (standalone/shell2.html): "Dog: "PitBull" by Joseph AYYAD, pigeon: "Pigeon" by kenchoo after NMC BC (CC BY 4.0), modified".

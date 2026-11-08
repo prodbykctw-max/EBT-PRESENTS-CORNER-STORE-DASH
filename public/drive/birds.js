@@ -14,14 +14,16 @@ const SPECIES = {
 };
 const pickSpecies = () => { const all = Object.values(SPECIES), tot = all.reduce((a, s) => a + s.w, 0); let r = Math.random() * tot; for (const s of all) if ((r -= s.w) <= 0) return s; return all[0]; };
 const CAP = 200;
+const REAL_RANGE = 170;   // m: how far from the camera the realistic pigeons are drawn (animals.js)
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (a) => a[(Math.random() * a.length) | 0];
 
 export class Birds {
   /** groundAt(x, y): height of the walkable surface there; roofAt(x, y): top of whatever is there (roofs, decks);
    *  isFree(x, y): not inside a building */
-  constructor({ scene, props, route, roofAt, groundAt, isFree, trees = [], occupied = () => false, visible, mobile, sEnd }) {
+  constructor({ scene, props, route, roofAt, groundAt, isFree, trees = [], occupied = () => false, visible, mobile, sEnd, animals, camera }) {
     Object.assign(this, { route, visible, roofAt, groundAt });
+    this.animals = animals && animals.pigeons ? animals : null; this.camera = camera || null;   // the realistic look's birds (animals.js)
     this.max = mobile ? 2 : 3; this.flocks = []; this.next = rnd(3, 6);
     const mat = propMaterial();
     this.meshes = ['bird', 'crow'].flatMap((m) => ['up', 'down', 'sit'].map((k) => {
@@ -93,6 +95,19 @@ export class Birds {
       m4.compose(p.set(x, z, -y), q.setFromEuler(e.set(pitch, yaw - Math.PI / 2, 0, 'YXZ')), sc.setScalar(sp.scale));
       this.meshes[k].setMatrixAt(i, m4); this.meshes[k].setColorAt(i, c.set(color)); counts[k]++;
     };
+    // the realistic birds (animals.js; the pigeon model for every species): drawn within REAL_RANGE of the camera, the rest are too small to see (the props.glb birds are drawn at any distance)
+    const AN = this.animals, cam = this.camera ? this.camera.position : null, tint = new THREE.Color();
+    const inRange = (x, y) => !cam || (x - cam.x) ** 2 + (-y - cam.z) ** 2 < REAL_RANGE * REAL_RANGE;
+    const putReal = (x, y, z, yaw, pitch, color, pose) => {
+      m4.compose(p.set(x, z, -y), q.setFromEuler(e.set(pitch, yaw - Math.PI / 2, 0, 'YXZ')), sc.setScalar(sp.scale));
+      if (sp === SPECIES.pigeon) { const g = ((color >> 16 & 255) + (color >> 8 & 255) + (color & 255)) / 765, m = 0.78 + (g - 0.19) * 1.3; tint.setRGB(m, m, m); }   // the old plumage greys, as a brightness around the photo's own colours
+      else tint.setRGB((color >> 16 & 255) / 150, (color >> 8 & 255) / 150, (color & 255) / 150);   // crows and grackles: there is no crow model, so the pigeon is drawn nearly black (grackles with their blue-purple sheen), bigger or smaller by the species' scale
+      AN.pigeon(m4, tint, pose, cam);
+    };
+    // pecking: the head goes down in a bump once per cycle (the cycle the old pose used: sin(t * peck * 3 + ph) > 0.55 is the part from 0.09 to 0.41 of it)
+    const dipOf = (b) => { const x = (t * b.peck * 3 + b.ph) / (2 * Math.PI), k = (x - Math.floor(x) - 0.09) / 0.32; return k > 0 && k < 1 ? Math.sin(Math.PI * k) ** 0.7 : 0; };
+    const flapping = (b, keep) => keep || (t + b.glide) % 2.6 < 1.8;
+    if (AN) AN.beginBirds();
     // flap-and-glide: bursts of wingbeats, then a short glide with the wings held down (0 = wings up, 1 = down)
     const pose = (b, keep) => ((keep || (t + b.glide) % 2.6 < 1.8) && Math.sin((t + b.ph) * b.rate * 2 * Math.PI) > 0 ? 0 : 1);
     for (const f of this.flocks) {
@@ -103,7 +118,8 @@ export class Birds {
         else {
           for (const b of f.birds) {                     // milling about: pecking, turning
             const peck = Math.sin(t * b.peck * 3 + b.ph) > 0.55 ? 0.55 : 0;
-            put(2, f.x + b.ox, f.y + b.oy, b.gz, b.yaw + Math.sin(t * 0.3 + b.ph) * 0.4, peck, b.color);
+            if (AN) { if (inRange(f.x, f.y)) putReal(f.x + b.ox, f.y + b.oy, b.gz, b.yaw + Math.sin(t * 0.3 + b.ph) * 0.4, 0, b.color, { t, ph: b.ph, dip: dipOf(b) }); }
+            else put(2, f.x + b.ox, f.y + b.oy, b.gz, b.yaw + Math.sin(t * 0.3 + b.ph) * 0.4, peck, b.color);
           }
           continue;
         }
@@ -111,10 +127,11 @@ export class Birds {
       if (f.lifted) {                                    // each bird on its own after take-off
         let any = false;
         for (const b of f.birds) {
-          if (f.t < b.delay) { put(2, b.x, b.y, b.z, b.yaw, 0, b.color); any = true; continue; }
+          if (f.t < b.delay) { if (AN) { if (inRange(b.x, b.y)) putReal(b.x, b.y, b.z, b.yaw, 0, b.color, { t, ph: b.ph, dip: 0 }); } else put(2, b.x, b.y, b.z, b.yaw, 0, b.color); any = true; continue; }
           b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; b.vz = Math.max(0.6, b.vz - 2.2 * dt);
           if (this.visible(b.x, b.y, b.z, 1)) any = true;
-          put(pose(b, f.t < 1.4), b.x, b.y, b.z, Math.atan2(b.vy, b.vx), -0.35 * Math.min(1, b.vz / 4), b.color);
+          if (AN) { if (inRange(b.x, b.y)) putReal(b.x, b.y, b.z, Math.atan2(b.vy, b.vx), -0.35 * Math.min(1, b.vz / 4), b.color, { fly: ((t + b.ph) * b.rate) % 1, glide: !flapping(b, f.t < 1.4), unfold: Math.min(1, (f.t - b.delay) / 0.3) }); }   // (the wings grow out of the shoulders over the first 0.3 s)
+          else put(pose(b, f.t < 1.4), b.x, b.y, b.z, Math.atan2(b.vy, b.vx), -0.35 * Math.min(1, b.vz / 4), b.color);
         }
         if (!any && f.t > 2) f.dead = true;
         continue;
@@ -126,11 +143,13 @@ export class Birds {
       if ((f.seen && !on) || f.t > 32 || Math.hypot(f.x - car.pose.x, f.y - car.pose.y) > 260) f.dead = !on;
       const yaw = Math.atan2(f.vy, f.vx), cs = Math.cos(yaw), sn = Math.sin(yaw);
       for (const b of f.birds) {
+        if (AN) { if (inRange(f.x, f.y)) putReal(f.x + b.ox * cs - b.oy * sn, f.y + b.ox * sn + b.oy * cs, f.z + b.oz, yaw, 0, b.color, { fly: ((t + b.ph) * b.rate) % 1, glide: !flapping(b, false), unfold: 1 }); continue; }
         const k = pose(b, false);
         put(k, f.x + b.ox * cs - b.oy * sn, f.y + b.ox * sn + b.oy * cs, f.z + b.oz + (k === 0 ? 0.08 : 0), yaw, 0, b.color);
       }
     }
     this.flocks = this.flocks.filter((f) => !f.dead);
+    if (AN) AN.endBirds();
     this.meshes.forEach((im, k) => { im.count = counts[k]; uploadUsed(im.instanceMatrix, im.count); uploadUsed(im.instanceColor, im.count); });
   }
 }

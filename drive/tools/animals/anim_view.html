@@ -1,0 +1,37 @@
+<!doctype html><meta charset=utf-8><body style="margin:0;background:#8a9099">
+<script type=module>
+// QA viewer for the baked animals (public/drive/animals.js): ?kind=dog&gw=0..2&dist=<m walked>&sniff=1&coat=8a5a32&az=&el=&d=&w=&h=
+//   ?kind=pigeon&pose=sit|peck|fly|glide&u=<cycle 0..1>  (see below)
+import * as THREE from '/public/drive/vendor/three.module.min.js';
+import { Animals, loadAnimalData } from '/public/drive/animals.js';
+const q = new URLSearchParams(location.search), W = +q.get('w') || 640, H = +q.get('h') || 480;
+const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); r.setSize(W, H); document.body.appendChild(r.domElement);
+r.shadowMap.enabled = true; r.toneMapping = THREE.NeutralToneMapping;
+const sc = new THREE.Scene(); sc.background = new THREE.Color(0x8a9099);
+sc.add(new THREE.HemisphereLight(0xdfe8ff, 0x606058, 1.3)); const dl = new THREE.DirectionalLight(0xfff2dd, 2.6); dl.position.set(3, 5, 2); dl.castShadow = true; sc.add(dl);
+const gr = new THREE.Mesh(new THREE.PlaneGeometry(30, 30).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x6f6f6c, roughness: 1 })); gr.receiveShadow = true; sc.add(gr);
+const pack = await loadAnimalData(false); const A = new Animals(pack, sc, {});
+window.info = { dog: A.dogMeta && { clips: A.dogMeta.clips }, pigeon: A.pigeonMeta && { clips: A.pigeonMeta.clips } };
+const kind = q.get('kind') || 'dog', m4 = new THREE.Matrix4(), cam = new THREE.PerspectiveCamera(28, W / H, 0.01, 100);
+const sc1 = +q.get('scale') || 1, yaw = (+q.get('yaw') || 0) * Math.PI / 180;
+if (kind === 'dog') {
+  const n = +q.get('n') || 1;
+  A.beginDogs();
+  for (let k = 0; k < n; k++) { m4.compose(new THREE.Vector3(k * 1.6 - (n - 1) * 0.8, 0, 0), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(sc1, sc1, sc1));
+    const coat = (q.get('coat') || '2a2420').split(',')[k % (q.get('coat') || '2a2420').split(',').length];
+    A.dog(m4, new THREE.Color('#' + coat), { gw: +q.get('gw') || 0, dist: +q.get('dist') || 0, sniff: q.get('sniff') === '1', id: k }, sc1, +q.get('t') || 0); }
+  A.endDogs();
+}
+if (kind === 'pigeon') {
+  const n = +q.get('n') || 1, mode = q.get('pose') || 'sit'; A.beginBirds();
+  for (let k = 0; k < n; k++) {
+    m4.compose(new THREE.Vector3(k * 0.7 - (n - 1) * 0.35, mode === 'sit' || mode === 'peck' ? 0 : 0.5, 0), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(sc1, sc1, sc1));
+    const p = mode === 'sit' ? { t: +q.get('t') || 0, ph: k, dip: 0 } : mode === 'peck' ? { t: 0, ph: k, dip: +q.get('dip') || 1 } : { fly: ((+q.get('u') || 0) + k * 0.13) % 1, glide: mode === 'glide', unfold: q.get('unfold') === null ? 1 : +q.get('unfold') };
+    A.pigeon(m4, new THREE.Color(1, 1, 1), p, q.get('far') === '1' ? new THREE.Vector3(0, 0, 50) : new THREE.Vector3(0, 0, 1));
+  }
+  A.endBirds();
+}
+const az = (+q.get('az') || 40) * Math.PI / 180, el = (+q.get('el') || 12) * Math.PI / 180, d = +q.get('d') || 4, ty = q.get('ty') !== null ? +q.get('ty') : 0.5;
+cam.position.set(Math.sin(az) * Math.cos(el) * d, ty + Math.sin(el) * d, Math.cos(az) * Math.cos(el) * d); cam.lookAt(0, ty, 0);
+r.render(sc, cam); window.done = true;
+</script>
