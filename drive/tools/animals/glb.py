@@ -76,7 +76,7 @@ class Rig:
         k = int(np.searchsorted(ts, t) - 1); f = (t - ts[k]) / (ts[k + 1] - ts[k])
         if interp == 'STEP': return vs[k]
         return slerp(vs[k], vs[k + 1], f) if path == 'rotation' else vs[k] + (vs[k + 1] - vs[k]) * f
-    def pose(self, name, t, override=None):
+    def pose(self, name, t, override=None, tshift=None, qhook=None):
         """world matrices of every node at time t of clip `name` (override: {node: (t,q,s)} replaces the sampled local TRS)"""
         ch = self.anims.get(name, {}) if name else {}
         n = len(self.nodes); W = [None] * n
@@ -84,9 +84,13 @@ class Rig:
             if W[i] is not None: return W[i]
             nd = self.nodes[i]
             if ch and any(k[0] == i for k in ch) and 'matrix' not in nd:
-                tt = self.sample(ch, i, 'translation', t, nd.get('translation', [0, 0, 0]))
-                qq = self.sample(ch, i, 'rotation', t, nd.get('rotation', [0, 0, 0, 1]))
-                ss = self.sample(ch, i, 'scale', t, nd.get('scale', [1, 1, 1]))
+                ti = t
+                if tshift and i in tshift:   # (a loop: the node reads the clip at its own, wrapped, time)
+                    T = max(c[0].max() for c in ch.values()); ti = (t + tshift[i]) % T
+                tt = self.sample(ch, i, 'translation', ti, nd.get('translation', [0, 0, 0]))
+                qq = self.sample(ch, i, 'rotation', ti, nd.get('rotation', [0, 0, 0, 1]))
+                if qhook and i in qhook: qq = qhook[i](qq)
+                ss = self.sample(ch, i, 'scale', ti, nd.get('scale', [1, 1, 1]))
                 L = trs(tt, qq, ss)
             else: L = self.local(i)
             if override and i in override: L = override[i](L)

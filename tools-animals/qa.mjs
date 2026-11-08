@@ -65,13 +65,19 @@ if (mode === 'stills') {
     const u = await p.evaluate(() => window.__drive.snapshot(0.9)); fs.writeFileSync(`${OUT}/${tag}_${name}.jpg`, Buffer.from(u.split(',')[1], 'base64'));
   };
   // dog stills: position of the dog now
-  const dogNow = () => p.evaluate(() => { const d = window.__drive, w = d.world, e = w.ents.find((x) => x.type === 'dog'); const q = w.route.at(e.s, e.d); const g = w.footAt ? w.footAt(q.x, q.y, q.z + 1.2) : null; return { x: q.x, y: g ?? q.z, z: -q.y, a: q.a, hd: e.hd, gw: e.gw, gp: e.gp, s: e.s }; });
+  const dogNow = () => p.evaluate(() => { const d = window.__drive, w = d.world, e = w.ents.find((x) => x.type === 'dog'); const q = w.route.at(e.s, e.d); const g = w.footAt ? w.footAt(q.x, q.y, q.z + 1.2) : null; return { x: q.x, y: g ?? q.z, z: -q.y, a: q.a, hd: e.hd, gw: e.gw, gp: e.gp, s: e.s, ap: e.ap, ad: e.ad, sniff: e.sniff, pause: e.pause, walk: e.walk, d: e.d }; });
   for (let k = 0; k < 3; k++) {
     await p.evaluate(() => { const d = window.__drive; for (let i = 0; i < 9; i++) d.tick(1 / 60); });
     const g = await dogNow();
     // side view: the camera on the road side of the dog, perpendicular to the route (scene x = x, z = -y; the route heading a is in x-y)
     const nx = Math.sin(g.a), nz = Math.cos(g.a);   // perpendicular in the scene plane
     await shot('dog' + k, [g.x - nx * 3.2, g.y + 1.0, g.z - nz * 3.2 * -1], [g.x, g.y + 0.6, g.z], 38);
+  }
+  // close-ups of the dog walking: a fawn coat, then the dark coat as authored
+  for (const [nm, col] of [['dogwalk', 0xa0703f], ['dogdark', 0x2a2420]]) {
+    await p.evaluate((c) => { const d = window.__drive; d.world.ents.find((x) => x.type === 'dog').color = c; for (let i = 0; i < 11; i++) d.tick(1 / 60); }, col);
+    const g = await dogNow(); const nx = Math.sin(g.a), nz = Math.cos(g.a);
+    console.log('DOGSTATE', nm, JSON.stringify(g)); await shot(nm, [g.x - nx * 3.6, g.y + 0.9, g.z + nz * 3.6], [g.x, g.y + 0.55, g.z], 22);
   }
   // a crossing dog
   await p.evaluate(() => { const d = window.__drive, e = d.world.ents.find((x) => x.type === 'dog'); e.crossing = -e.side; e.crossed = true; e.pause = -1; for (let i = 0; i < 70; i++) d.tick(1 / 60); });

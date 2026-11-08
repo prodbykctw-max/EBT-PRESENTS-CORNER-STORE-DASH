@@ -48,12 +48,18 @@ void animSkin(vec3 p, vec3 n, out vec3 po, out vec3 no) {
 `;
 
 const FRAG_COAT = /* glsl */`
-// the coat: the texture's fur (grey, nearly no chroma) is recoloured by the instance colour, keeping its light and dark; white markings stay white; skin, nose, tongue and eyes keep their own colour
+// the coat. The model's own diffuse texture is the fur: a dark coat as authored (the instance colour is dark), or, for a lighter instance colour, the SAME texture re-mapped: every fur texel keeps
+// how light or dark it is against the texture's typical fur (r), so the grain, the shading folds and the darker saddle stay, and r goes through the new colour with a little extra contrast
+// and a richer, deeper tone where it is dark, instead of a flat multiply. White markings stay white and skin, nose, tongue and eyes keep their own colour.
 vec3 al = diffuseColor.rgb;
 float lum = dot(al, vec3(0.2126, 0.7152, 0.0722)), chroma = max(al.r, max(al.g, al.b)) - min(al.r, min(al.g, al.b));
-float fur = 1.0 - smoothstep(uFur.y, uFur.y * 2.4, chroma), mark = smoothstep(uFur.z, uFur.z * 2.2, lum);
-vec3 tinted = vColor.rgb * clamp(lum / uFur.x, 0.35, 2.6);
-diffuseColor.rgb = mix(al, mix(tinted, al, mark), fur);
+float fur = 1.0 - smoothstep(uFur.y * 1.5, uFur.y * 4.0, chroma), mark = smoothstep(uFur.z * 0.3, uFur.z * 1.0, lum);
+float coatLum = dot(vColor.rgb, vec3(0.2126, 0.7152, 0.0722)), light = smoothstep(0.055, 0.085, coatLum);
+float r = clamp(lum / uFur.x, 0.25, 3.2);
+vec3 hue = vColor.rgb / max(max(vColor.r, max(vColor.g, vColor.b)), 1e-3);
+vec3 remap = vColor.rgb * pow(r, 1.35) * pow(hue, vec3(1.6 * (1.0 - min(r, 1.0))));
+vec3 white = vec3(lum) * mix(vec3(1.0), hue, 0.2);
+diffuseColor.rgb = mix(al, mix(remap, white, mark), fur * light);
 `;
 const FRAG_TINT = /* glsl */`diffuseColor.rgb *= vColor.rgb;`;
 
@@ -146,19 +152,24 @@ export class Animals {
     }
   }
 
-  /** the dog pose for one instance. clip weights: gw 0 = standing (idle, or sniffing when `sniff`), 1 = walking, 2 = running; `dist`: metres walked (so the feet keep pace with the ground: the clips'
-   *  stride is their own, measured when they were baked); `scale`: how much bigger than baked it is drawn */
-  dog(m4, color, { gw, dist, sniff, id }, scale = 1, t = this.t) {
+  /** the dog pose for one instance. clip weights: gw 0 = standing (idle, or sniffing when `sniff`), 1 = trotting, 2 = running (a longer, faster trot): eased by the caller.
+   *  Both gaits are the same trot cycle (drive/tools/animals/gait.py), the run with a longer swing, so they are read at the same cycle position and blend into each other.
+   *  The cycle position is advanced by the metres walked (`dist`) over the stride of the gait it is in, so the planted feet keep pace with the ground; it lives on `st`
+   *  (the dog's own record) because the stride changes while the gait eases from one to the other and a position computed from the total distance would jump. */
+  dog(m4, color, { gw, dist, sniff, id, st }, scale = 1, t = this.t) {
     const H = this.dogs, i = H.next(); if (i < 0) return;
     const C = this.dogMeta.clips, A = H.iA.array, B = H.iB.array, o = i * 4;
     const rest = sniff ? C.sniff : C.idle, restU = t / rest.dur + id * 0.37;
-    const phase = (c) => dist / (c.speed * c.dur * scale);
+    const sw = C.walk.speed * C.walk.dur, sr = C.run.speed * C.run.dur, stride = (sw + (sr - sw) * Math.max(0, Math.min(1, gw - 1))) * scale;
+    if (st.ap === undefined || dist < st.ad) st.ap = dist / stride; else st.ap += (dist - st.ad) / stride;
+    st.ad = dist;
+    const u = st.ap + id * 0.21;
     let ca, ua, cb, ub, mix;
     if (gw <= 0.001) { ca = rest; ua = restU; mix = 0; }
-    else if (gw < 1) { ca = rest; ua = restU; cb = C.walk; ub = phase(C.walk) + id * 0.21; mix = gw; }
-    else if (gw === 1) { ca = C.walk; ua = phase(C.walk) + id * 0.21; mix = 0; }
-    else if (gw < 2) { ca = C.walk; ua = phase(C.walk) + id * 0.21; cb = C.run; ub = phase(C.run) + id * 0.21; mix = gw - 1; }
-    else { ca = C.run; ua = phase(C.run) + id * 0.21; mix = 0; }
+    else if (gw < 1) { ca = rest; ua = restU; cb = C.walk; ub = u; mix = gw; }
+    else if (gw === 1) { ca = C.walk; ua = u; mix = 0; }
+    else if (gw < 2) { ca = C.walk; ua = u; cb = C.run; ub = u; mix = gw - 1; }
+    else { ca = C.run; ua = u; mix = 0; }
     const fa = frameAt(ca, ua); A[o] = fa[0]; A[o + 1] = fa[1]; A[o + 2] = fa[2]; A[o + 3] = mix;
     if (mix > 0) { const fb = frameAt(cb, ub); B[o] = fb[0]; B[o + 1] = fb[1]; B[o + 2] = fb[2]; }
     H.mesh.setMatrixAt(i, m4); H.mesh.setColorAt(i, color);

@@ -973,7 +973,7 @@ export class World {
       const big = HAZARD_SCALE[e.type];                                       // drawn bigger than life: they read on a phone
       if (AN && AN.dogs && e.type === 'dog') {   // the realistic dog: one instance with its gait state (the props.glb dog_a / dog_b are not drawn)
         m4.compose(pos.set(p.x, z, -p.y), q.setFromEuler(e3.set(pitch, yaw - Math.PI / 2, roll, 'YXZ')), sc3.setScalar(big || 1));
-        AN.dog(m4, c.set(e.color), { gw: e.gw || 0, dist: e.gp || 0, sniff: !!e.sniff, id: e.cid ?? e.s }, big || 1, t);
+        AN.dog(m4, c.set(e.color), { gw: e.gw || 0, dist: e.gp || 0, sniff: !!e.sniff, id: e.cid ?? e.s, st: e }, big || 1, t);
       } else put(e.type === 'dog' ? (Math.sin(e.gait) > 0 ? 'dog_a' : 'dog_b') : e.type, p.x, p.y, z, yaw, e.color, roll, pitch, big ? sc3.setScalar(big) : one, e.cid);
       if (HALO[e.type] && !e.flying && !e.hitDone && Math.abs(e.d) < this.route.hw(e.s) + 0.3 && e.s > car.s - 4 && e.s - car.s < 110 && halos < 200) {
         const [rad, col] = HALO[e.type], pulse = 1 + 0.12 * Math.sin(t * 7 + e.s);

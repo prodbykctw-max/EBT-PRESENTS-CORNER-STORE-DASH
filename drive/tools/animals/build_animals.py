@@ -106,27 +106,28 @@ def build_dog(blob, meta):
     lo, hi = P0.min(0), P0.max(0); s = DOG_LEN / (hi[2] - lo[2]); zc = (lo[2] + hi[2]) / 2
     Tout = np.diag([-s, s, -s, 1.0]); Tout[2, 3] = s * zc; Tout[1, 3] = -s * lo[1] * 0   # feet are at y = 0 in the source already
     print('dog: source extent', (hi - lo).round(3), 'scale', round(s, 4), '-> body', ((hi - lo) * s).round(3), 'm')
+    import gait
+    names = [rig.nodes[j]['name'] for j in rig.joints]
+    tr = gait.Trot(rig, 'Armature.008|Walkl', names, s, None)
+    # the ground: where the planted toe sits in the standing pose
+    y0 = min(rig.pose('Armature.008|IDdle', 0.0)[tr.toe[k]][1, 3] for k in gait.LEGS)
     clips = {}; frames = []; start = 0
-    for key, src, n in [('idle', 'IDdle', 40), ('walk', 'Walkl', 30), ('run', 'Run', 20), ('sniff', 'Eat', 36)]:
+    for key, src, n in [('idle', 'IDdle', 40), ('sniff', 'Eat', 36)]:
         fr, dur = sample_clip(rig, 'Armature.008|' + src, n, Tout)
         clips[key] = {'start': start, 'n': n, 'dur': float(dur)}; frames.append(fr); start += n
+    # the two gaits: a trot (diagonal legs together) from the Walkl clip, strides 1.6x and 3x the source's, front and back balanced so no foot skates
+    for key, Ab, n in [('walk', 1.5, 36), ('run', 2.3, 36)]:
+        Af = tr.balance(Ab); sp = tr.stance_speeds(Ab, Af); v = float(np.mean(list(sp.values())))
+        ny = []; fr = []
+        for i in range(n):
+            W = tr.pose(i * tr.T / n, Ab, Af); ny.append(y0 - min(W[tr.toe[k]][1, 3] for k in gait.LEGS))   # lift or lower the body so the lowest foot is on the ground
+        ny = np.array(ny); k3 = np.ones(3) / 3; ny = np.convolve(np.r_[ny[-1:], ny, ny[:1]], k3, 'valid')
+        for i in range(n):
+            T2 = Tout.copy(); T2[1, 3] += s * ny[i]
+            fr.append(frame_mats(rig, tr.pose(i * tr.T / n, Ab, Af), T2))
+        clips[key] = {'start': start, 'n': n, 'dur': float(tr.T), 'speed': v}; frames.append(np.stack(fr)); start += n
+        print('  gait', key, 'back amp', Ab, 'front amp', round(Af, 2), 'stance speeds m/s', {k: round(x, 2) for k, x in sp.items()}, 'stride', round(v * tr.T, 2), 'm/cycle, body dy range', round(float(ny.min() * s), 3), round(float(ny.max() * s), 3))
     F = np.concatenate(frames)
-    # stride: the distance the body moves per cycle, from how fast the planted toes slide back. (measured in the source units, here in metres)
-    names = [rig.nodes[j]['name'] for j in rig.joints]
-    def stance_speed(clip, toes, th):
-        v = []
-        for tn in toes:
-            k = names.index(tn); c = clips[clip]; seg = F[c['start']:c['start'] + c['n']]
-            # toe position of each frame: the joint matrix applied to the joint's own rest origin
-            rest = np.linalg.inv(rig.ibm[k])[:3, 3]; pts = np.einsum('fij,j->fi', seg[:, k], np.r_[rest, 1])
-            y, z = pts[:, 1], pts[:, 2]; st = y < th; m = st[:-1] & st[1:]
-            dz = (z[1:] - z[:-1]) * c['n'] / c['dur']
-            if m.any(): v.append(float(np.median(dz[m])))   # +z is backwards (the dog faces -z): the body goes forward at this speed
-        return v
-    sw = stance_speed('walk', ['backToes_R_05', 'backToes_L_042', 'frontToes_R_021', 'frontToes_L_037'], 0.02 * s * 1.0 + 0.004)
-    sr = stance_speed('run', ['backToes_R_05', 'backToes_L_042', 'frontToes_R_021', 'frontToes_L_037'], 0.12 * s + 0.004)
-    print('  stance speeds m/s  walk', np.round(sw, 3), ' run', np.round(sr, 3))
-    clips['walk']['speed'] = float(np.mean(sw)); clips['run']['speed'] = float(np.mean(sr))    # m/s of ground at playback 1x (before the run-time scale)
     tex, tw = pack_frames(F); bt = blob.add('dog.bones', tex.view(np.uint16))
     nm = {'near': write_mesh(blob, 'dog.near', P, N, U, J, Wt, I)}
     meta['dog'] = {'mesh': nm, 'frames': {'count': int(F.shape[0]), 'width': tw, 'data': bt}, 'clips': clips, 'joints': int(F.shape[1]), 'length': DOG_LEN, 'scale': float(s)}
@@ -137,7 +138,7 @@ def build_dog(blob, meta):
     furpx = (chroma < 0.03) & (lum < 0.12); meta['dog']['fur'] = [round(float(np.median(lum[furpx])), 4), 0.03, 0.2]
     print('  fur lightness', meta['dog']['fur'], 'fur texels', round(float(furpx.mean()), 2), 'chroma p50/p90', np.percentile(chroma, [50, 90]).round(3))
     meta['dog']['textures'] = {'albedo': 'dog.webp', 'normal': 'dog_n.webp'}
-    print('  dog.webp', webp(albedo, os.path.join(OUT, 'dog.webp'), 82, 1024), 'B   dog_n.webp', webp(normal, os.path.join(OUT, 'dog_n.webp'), 86, 1024), 'B')
+    print('  dog.webp', webp(albedo, os.path.join(OUT, 'dog.webp'), 82, 2048), 'B   dog_n.webp', webp(normal, os.path.join(OUT, 'dog_n.webp'), 90, 1024), 'B')
     return F, P, J, Wt, rig
 
 def main(only=None):

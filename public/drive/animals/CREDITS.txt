@@ -1,12 +1,12 @@
 The animals of the realistic look (public/drive/animals.js): the stray dogs and the pigeons. Built by drive/tools/animals/build_animals.py (+ build_pigeon.py).
 With ?animals=none (or in the comic look) none of these files is loaded and the props.glb dogs and birds are drawn.
 
-DOG   dog.webp, dog_n.webp, and the dog's mesh / skeleton / walk, run, idle and sniff poses in animals.bin
+DOG   dog.webp, dog_n.webp, and the dog's mesh / skeleton / trot, run, idle and sniff poses in animals.bin
       "PitBull" by Joseph AYYAD (Sketchfab @Joseph.AD)   https://sketchfab.com/3d-models/pitbull-2be37d5b9f754ed4bcc2d8f41b23a1d7
       Licence: CC Attribution 4.0   https://creativecommons.org/licenses/by/4.0/
-      CHANGES MADE HERE: scaled to the game's dog size and turned to face -z; the loose debris / claw specks around the paws were left out; the textures were downscaled to
-      1024 px WebP; the poses were baked into a bone-matrix texture (animals.json / animals.bin); the coat colour is changed per dog in the shader (the white markings,
-      skin, nose and eyes keep their own colours). The "Armature.008|Walkl", "Run", "IDdle" and "Eat" animations of the source are what the dog plays.
+      CHANGES MADE HERE: scaled to the game's dog size and turned to face -z; the loose debris / claw specks around the paws were left out; the normal map was downscaled to
+      1024 px WebP (the colour texture is kept at 2048 px); the poses were baked into a bone-matrix texture (animals.json / animals.bin); the coat colour is changed per dog in the shader (the white markings,
+      skin, nose and eyes keep their own colours). The "Armature.008|Walkl", "IDdle" and "Eat" animations of the source are what the dog plays; the walk and run are the source's Walkl re-timed into a trot with a longer swing at the hip (drive/tools/animals/gait.py).
 
 PIGEON  pigeon.webp, and the pigeon's mesh / skeleton / poses in animals.bin
       "Pigeon" by kenchoo (Sketchfab)   https://sketchfab.com/3d-models/pigeon-ddd5ef4a94eb4159937a9de25c45697c

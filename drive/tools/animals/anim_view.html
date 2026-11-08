@@ -19,7 +19,7 @@ if (kind === 'dog') {
   A.beginDogs();
   for (let k = 0; k < n; k++) { m4.compose(new THREE.Vector3(k * 1.6 - (n - 1) * 0.8, 0, 0), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(sc1, sc1, sc1));
     const coat = (q.get('coat') || '2a2420').split(',')[k % (q.get('coat') || '2a2420').split(',').length];
-    A.dog(m4, new THREE.Color('#' + coat), { gw: +q.get('gw') || 0, dist: +q.get('dist') || 0, sniff: q.get('sniff') === '1', id: k }, sc1, +q.get('t') || 0); }
+    A.dog(m4, new THREE.Color('#' + coat), { gw: +q.get('gw') || 0, dist: +q.get('dist') || 0, sniff: q.get('sniff') === '1', id: k, st: {} }, sc1, +q.get('t') || 0); }
   A.endDogs();
 }
 if (kind === 'pigeon') {
@@ -33,5 +33,6 @@ if (kind === 'pigeon') {
 }
 const az = (+q.get('az') || 40) * Math.PI / 180, el = (+q.get('el') || 12) * Math.PI / 180, d = +q.get('d') || 4, ty = q.get('ty') !== null ? +q.get('ty') : 0.5;
 cam.position.set(Math.sin(az) * Math.cos(el) * d, ty + Math.sin(el) * d, Math.cos(az) * Math.cos(el) * d); cam.lookAt(0, ty, 0);
+if (A.dogs) { const mt = A.dogs.mesh.material, dr = q.get('drop'); if (dr === 'albedo' || dr === 'both') mt.map = null; if (dr === 'normal' || dr === 'both') mt.normalMap = null; mt.needsUpdate = true; }   // ?drop=albedo|normal: proves each texture is used
 r.render(sc, cam); window.done = true;
 </script>
