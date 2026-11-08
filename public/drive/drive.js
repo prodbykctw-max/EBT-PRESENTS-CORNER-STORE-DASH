@@ -14,7 +14,7 @@ import { RouteFrame, RunnerCar, World } from './runner.js';
 import { DriveAudio } from './audio.js';
 import { Crowd } from './crowd.js';
 import { heroSegments } from './corral.js';
-import { BODY, PROP_R, walkWorldFor, Trail, integrate, approach, wallPass, killInto, chaseTarget, wishVelocity, camYawStep, angDiff } from './roam.js';
+import { BODY, PROP_R, walkWorldFor, Trail, integrate, approach, wallPass, killInto, chaseTarget, wishVelocity, steerStick, camYawStep, angDiff } from './roam.js';
 import { Streetcars } from './tram.js';
 import { Signals } from './signals.js';
 import { Birds } from './birds.js';
@@ -1012,20 +1012,20 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const dx = tx - me.x, dy = ty - me.y, L = Math.hypot(dx, dy) || 1;
     out.x = dx / L * FOOT.run; out.y = dy / L * FOOT.run; return out;
   };
-  const wish = { x: 0, y: 0 };
+  const wish = { x: 0, y: 0 }, steer = { on: false, a: 0 }, fvOut = { x: 0, y: 0 };
   function updateFoot(dt) {
     footT += dt;
     // you: the stick (or the arrow keys) is the way you run, as seen from the camera: up the screen is away from the camera, sideways is across the screen, down runs at the
     // camera, and how far you push is how fast (the store's stick works the same way). Any direction is full speed at full push (the store's diagonals are full speed too).
-    const fv = footVec();
+    const raw = footVec(), fv = steerStick(steer, raw.x, raw.y, dt, fvOut);   // (the thumb's direction eased and a small cone round straight up counts as straight: roam.js steerStick)
     if (BOT) botWish(wish); else wishVelocity(fv.x, fv.y, camYaw, FOOT.run, wish);
     if (me.stun > 0) wish.x = wish.y = 0;
     me.stun = Math.max(0, me.stun - dt);
     const mv = me.stun > 0 ? MOVE.stun : Math.hypot(wish.x, wish.y) > Math.hypot(me.vx, me.vy) ? MOVE.up : MOVE.down;
     me.acc = approach(me, wish.x, wish.y, mv[0], mv[1], dt, me.heading);
     faceMove(me, dt);
-    // the camera swings in behind you only as far as you push UP, and as fast as you run (roam.js camYawStep)
-    camYaw = camYawStep(camYaw, me.heading, BOT ? 0 : fv.x, BOT ? -1 : fv.y, Math.hypot(me.vx, me.vy) / FOOT.run, dt);
+    // the camera swings round with what the thumb asks for (not with where you are facing: that was a loop), as fast as you run (roam.js camYawStep)
+    camYaw = camYawStep(camYaw, BOT ? 0 : fv.x, BOT ? -1 : fv.y, Math.hypot(me.vx, me.vy) / FOOT.run, dt);
     integrate(me, dt);
     moveSolid(me, true);
     trail.push(me.x, me.y);
@@ -1312,25 +1312,18 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     spotGroup.visible = state === 'driving' || state === 'countdown';
     // the lines follow the lane being steered to (a lane tap swings them across); with the autopilot, the line it is steering
     if (guide) guide.update(state === 'driving', drawS, drawD, (ss) => { if (BOT) return car.targetD; let k = laneK; if (laneAt(ss, k) === null) k = k === 0 ? 1 : 2; return laneAt(ss, k); });
-    // overpass cutaway follows the car (a soft hole in anything above it). Still needed from behind: the Connector's
-    // deck underside is only ~2.1 m above the route around s=1056 m, so the chase camera passes through the slab, and
-    // without the hole the deck walls off the view ahead (checked in the running game, same frame with and without).
-    // The shader cuts freeway concrete more than 2.2 m above uCutPos (roads.js:92); that was set for the overhead
-    // camera. At the bottom of the deck's dip (s~1051-1059) the underside is only 1.81 m above the car (measured by
-    // ray-cast in the game), so it stayed solid and hid the car completely from the chase camera. Placing uCutPos
-    // 0.75 m below the car starts the cut at 1.45 m: just above the roof. Compared frame for frame: the car is clear
-    // at 1056 m, and at 1050 / 1063 m it changes 0.4% / 1% of the screen (the low end of a ramp slab near the car).
-    // Radius: 11 m (the original) reaches the camera when parked (8 m back), but at speed the camera trails 12-14 m
-    // back, inside the slab and outside the circle, and the screen filled with concrete (car hidden on 10 of 41
-    // frames at 46 mph). So the circle grows to reach 3 m past the camera. Tried against a circle centred between
-    // camera and car: both kept the car in view on every frame, but that one's soft edge dithered across the deck
-    // overhead; this one's edge falls behind the camera. Capped at 25 m so a camera that isn't placed yet (first
-    // frame) or is mid-swing can't wipe the whole freeway for a frame.
+    // overpass cutaway: a soft hole in anything above the runner. ON FOOT it is still needed: that camera is 6 m up and 10 m back, which is
+    // inside the Connector's slab under it (the slab's top is ~6.7 m over the street). The DRIVING camera no longer needs it: the Connector
+    // used to clear the route by 1.9 m, so the chase camera ran through the slab and the deck walled off the view ahead (that is why the
+    // hole existed, started 1.45 m over the car and grew to reach the camera at speed); roads.js raiseDecks now gives it 5.4 m, and
+    // measured over s = 1015-1100 m the camera is never inside the slab (closest 1.8 m under it in the comic look, 2.5 m in the real look;
+    // the car's roof is 3.9 m under it) and the car and road ahead are fully in view with the cut off (tools-bridge/shots.mjs). So while
+    // driving the hole is off, and you see the bridge you are driving under.
     const cutAt = state === 'onfoot' ? me.o.position : carRig.position;   // (on foot it follows the runner, who can be under the Connector anywhere)
     const camGap = Math.hypot(camera.position.x - cutAt.x, camera.position.z - cutAt.z);
     CUT.uCutPos.value.copy(cutAt);
     CUT.uCutPos.value.y -= 0.75;
-    CUT.uCutR.value = Math.min(25, Math.max(11, camGap + 3));
+    CUT.uCutR.value = state === 'onfoot' ? Math.min(25, Math.max(11, camGap + 3)) : 0.001;
 
     // camera: rear third-person chase view, low and close behind the car, anchored on the car's own position so it
     // follows every lane change.
@@ -1560,7 +1553,7 @@ const HUD_HTML_REAL = `
     <div class="rb-cell"><span>CHECKPOINT</span><b class="drive-cp">0/11</b></div>
   </div>
   <div class="drive-row2">
-    <div class="rb-cell tok"><span>EBT</span><b class="drive-tokens">0</b></div>
+    <div class="rb-cell tok"><span>E.B.T</span><b class="drive-tokens">0</b></div>
     <div class="drive-race" hidden><div class="track"><b class="flag">STORE</b><i class="hd him" aria-label="The bully"></i><i class="hd you" aria-label="You"></i></div><span class="gap"></span></div>
     <div class="rb-cell"><span>SPEED</span><b class="drive-speed">0 mph</b></div>
     <div class="rb-cell"><span>STORE</span><b class="drive-dist">—</b></div>
@@ -1588,7 +1581,7 @@ const HUD_HTML = `
 <div class="drive-hud">
   <div class="drive-box"><span>TIME</span><b class="drive-time">60.0</b></div>
   <div class="drive-box"><span>STORE</span><b class="drive-dist">—</b></div>
-  <div class="drive-box tok"><span>EBT</span><b class="drive-tokens">0</b></div>
+  <div class="drive-box tok"><span>E.B.T</span><b class="drive-tokens">0</b></div>
   <div class="drive-box"><span>SPEED</span><b class="drive-speed">0 mph</b></div>
 </div>
 <div class="drive-race" hidden><div class="track"><b class="flag">STORE</b><i class="hd him" aria-label="The bully"></i><i class="hd you" aria-label="You"></i></div><span class="gap"></span></div>
