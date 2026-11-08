@@ -125,7 +125,7 @@ obstacles and collisions line up exactly with what's painted on the road.
   - **Cost:** only people near the car or on camera are simulated. Only those the camera can see
     are drawn, with a margin that grows with distance, so nobody ever pops in. Phones skip crowd
     shadows.
-- **Pickups:** EBT tokens in lines and weaves (+25). A NEAR MISS against oncoming traffic is +50.
+- **Pickups:** EBT tokens in lines and weaves (+25). Each token is a gold "E.B.T" credit card (`ebtCard` in `runner.js`: one canvas texture, one rounded slab, the title card's gold / pink / navy), 1.5 m wide, turning about its vertical axis but lingering face-on to the camera; the pickup box is unchanged. The HUD's EBT label is a small matching card (`drive.css`, end). A NEAR MISS against oncoming traffic is +50.
 - **Density:** an in-lane event every 75–110 m, tightening slightly as the run goes on.
 - **Traffic flow:** every car in the street (ours, oncoming and parked cars pulling out) is driven by `traffic.js`, see
   "Traffic: how the cars drive" below. Oncoming traffic is still a steady stream of singles and 2-3 car platoons that

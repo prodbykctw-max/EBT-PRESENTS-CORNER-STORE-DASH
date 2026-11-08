@@ -285,6 +285,50 @@ const PAINT = [0xb8bcc2, 0x1d1f24, 0xe9e9e6, 0x7a1a1a, 0x1f3c78, 0x5a5f66, 0x245
 const SHIRTS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2e2e2e, 0xe8e8e8, 0x3d9a5b, 0x8e44ad, 0xff8c1a, 0x1abc9c, 0x7f8c8d];
 const BUS_STRIPE = [0x1d5fbf, 0xc62828];
 
+/** The EBT token: a gold credit-card (85.6 x 54 mm, 1.585:1) that reads "E.B.T" on both faces, in the title card's gold / pink / navy (shell2.html).
+ *  1.5 x 0.946 m so it is about as big on screen as the old 1.1 m coin; the pickup box is in World.step and is unchanged. One shared canvas texture
+ *  (a 512x323 map, also the emissive map so the lettering stays readable in shade) and one rounded extruded slab for all 260 instances. The slab's uv
+ *  is planar from x,y (the back face is mirrored so the lettering is not reversed); its edge samples the texture's navy border.
+ *  three.js draws Math.random for the id of every Shape, geometry, texture and material, so all of that is made on a private generator. */
+let cardRnd = 0x2545f491;
+const cardRandom = () => { cardRnd ^= cardRnd << 13; cardRnd ^= cardRnd >>> 17; cardRnd ^= cardRnd << 5; return (cardRnd >>> 0) / 4294967296; };
+const CARD_BURN = 8;   // draws the old coin's geometry + material took from the shared stream that the private build above no longer takes (measured: tools-ebtcard/)
+function ebtCard(T) {
+  const real = Math.random; Math.random = cardRandom;
+  try {
+    const W = 1.5, H = 0.946, R = 0.1, D = 0.06;
+    const sh = new T.Shape();
+    sh.moveTo(-W / 2 + R, -H / 2); sh.lineTo(W / 2 - R, -H / 2); sh.absarc(W / 2 - R, -H / 2 + R, R, -Math.PI / 2, 0, false);
+    sh.lineTo(W / 2, H / 2 - R); sh.absarc(W / 2 - R, H / 2 - R, R, 0, Math.PI / 2, false);
+    sh.lineTo(-W / 2 + R, H / 2); sh.absarc(-W / 2 + R, H / 2 - R, R, Math.PI / 2, Math.PI, false);
+    sh.lineTo(-W / 2, -H / 2 + R); sh.absarc(-W / 2 + R, -H / 2 + R, R, Math.PI, Math.PI * 1.5, false);
+    const geo = new T.ExtrudeGeometry(sh, { depth: D, bevelEnabled: false, curveSegments: 5 });
+    geo.translate(0, 0, -D / 2);
+    const pos = geo.attributes.position, nor = geo.attributes.normal, uv = geo.attributes.uv;
+    for (let i = 0; i < pos.count; i++) uv.setXY(i, nor.getZ(i) < -0.5 ? 0.5 - pos.getX(i) / W : 0.5 + pos.getX(i) / W, 0.5 + pos.getY(i) / H);
+    // the face
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 323;
+    const g = cv.getContext('2d');
+    const rr = (x, y, w, h, r) => { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); };
+    g.fillStyle = '#1E2340'; g.fillRect(0, 0, 512, 323);                                     // navy edge band
+    rr(10, 10, 492, 303, 26); g.fillStyle = '#F5C518'; g.fill();                              // gold card
+    g.save(); rr(10, 10, 492, 303, 26); g.clip();
+    const gr = g.createLinearGradient(0, 0, 512, 0); gr.addColorStop(0, '#C2255C'); gr.addColorStop(1, '#E85D9E');
+    g.fillStyle = gr; g.fillRect(0, 36, 512, 50); g.restore();                                // pink stripe
+    rr(34, 118, 70, 54, 9); g.fillStyle = '#B98A00'; g.fill(); g.strokeStyle = '#1E2340'; g.lineWidth = 3; g.stroke();   // chip
+    g.beginPath(); g.moveTo(34, 145); g.lineTo(104, 145); g.moveTo(69, 118); g.lineTo(69, 172); g.stroke();
+    const fam = '"Arial Black", "Helvetica Neue", Impact, Arial, sans-serif';
+    let fs = 150; g.font = '900 ' + fs + 'px ' + fam;
+    const tw = g.measureText('E.B.T').width; if (tw > 370) { fs = Math.floor(fs * 370 / tw); g.font = '900 ' + fs + 'px ' + fam; }
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = '#E85D9E'; g.fillText('E.B.T', 306 + 5, 210 + 5);                          // pink drop shadow
+    g.fillStyle = '#1E2340'; g.fillText('E.B.T', 306, 210);
+    const map = new T.CanvasTexture(cv); map.colorSpace = T.SRGBColorSpace; map.anisotropy = 4;
+    const mat = new T.MeshStandardMaterial({ map, emissiveMap: map, emissive: 0xffffff, emissiveIntensity: 0.45, metalness: 0.25, roughness: 0.45 });
+    return { geo, mat };
+  } finally { Math.random = real; }
+}
+
 export class World {
   constructor({ route, props, scene, W, sEnd, audio, surfAt, camera, marks, carSets }) {
     Object.assign(this, { route, scene, W, sEnd, audio, surfAt, camera, marks });
@@ -307,9 +351,11 @@ export class World {
     this.carSet = null; this.carSets = {}; this._cid = 0;
     if (carSets) for (const [name, mk] of Object.entries(carSets)) this.carSets[name] = mk(scene, this.meshes, CAP);
     this.setCarSet(Object.keys(this.carSets)[0] || null);
-    // EBT tokens: gold discs with an emissive rim, spinning
-    const tg = new THREE.CylinderGeometry(0.55, 0.55, 0.12, 20); tg.rotateX(Math.PI / 2);
-    this.tokenMesh = new THREE.InstancedMesh(tg, new THREE.MeshStandardMaterial({ color: 0xffc81a, metalness: 0.85, roughness: 0.25, emissive: 0x6b4a00, emissiveIntensity: 0.6 }), 260);
+    // EBT tokens: gold "E.B.T" cards (credit-card proportions), spinning; the geometry, texture and material are made on a private random
+    // generator so the shared Math.random stream (traffic, crowd, planner) is drawn exactly as the old coin drew it (see ebtCard)
+    const card = ebtCard(THREE);
+    this.tokenMesh = new THREE.InstancedMesh(card.geo, card.mat, 260);
+    for (let k = 0; k < CARD_BURN; k++) Math.random();
     this.tokenMesh.count = 0; this.tokenMesh.frustumCulled = false; scene.add(this.tokenMesh);
     // hazard halos: a glowing warning ring on the road under every cone, barricade, dog or person in the street
     // ahead, so obstacles read at a glance on a phone
@@ -1001,7 +1047,10 @@ export class World {
     for (const tk of this.tokens) {
       if (!tk.alive || tk.s < win0 || tk.s > win1 || n >= 260) continue;
       const p = this.route.at(tk.s, tk.d);
-      m4.compose(pos.set(p.x, p.z + LEVEL.ROUTE + 1.0 + Math.sin(t * 3 + tk.s) * 0.12, -p.y), q.setFromEuler(e3.set(0, spin + tk.s, 0)), one);
+      // the card turns about its vertical axis but lingers face-on to the camera (a + PI/2 is the angle at which its face looks along the road, so the
+      // camera behind the car sees it square): the phase is slowed near face-on and quick through the edge-on moment, so "E.B.T" reads
+      const ph = spin + tk.s;
+      m4.compose(pos.set(p.x, p.z + LEVEL.ROUTE + 1.0 + Math.sin(t * 3 + tk.s) * 0.12, -p.y), q.setFromEuler(e3.set(0, p.a + Math.PI / 2 + ph - 0.45 * Math.sin(2 * ph), 0)), one);
       this.tokenMesh.setMatrixAt(n++, m4);
     }
     this.tokenMesh.count = n; uploadUsed(this.tokenMesh.instanceMatrix, n);
