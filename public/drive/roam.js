@@ -238,13 +238,38 @@ export function wishVelocity(sx, sy, yaw, run, out = { x: 0, y: 0 }) {
   return out;
 }
 
-/** The camera swings in behind the runner only as much as the thumb pushes UP and as fast as he runs (so up-left and up-right curve, like a car in GTA);
- *  straight left or right runs across the screen without the view orbiting; straight down runs at the camera. Returns the new camera yaw. */
-export const CAMYAW = { rate: 1.5, ease: 0.4 };   // rad/s at full push and full speed; radians off straight at which the swing reaches that rate
-export function camYawStep(yaw, heading, sx, sy, speedFrac, dt) {
-  const fwd = Math.max(0, -sy), delta = angDiff(heading, yaw);
-  const rate = CAMYAW.rate * Math.min(1, fwd) * Math.min(1, Math.max(0, speedFrac)) * Math.min(1, Math.abs(delta) / CAMYAW.ease);
-  return yaw + Math.sign(delta) * Math.min(Math.abs(delta), rate * dt);
+/** The thumb, cleaned up (owner, Nov 2026: "running seems to serpentine and not stay straight... smooth the steering like Grand Theft Auto").
+ *  A real thumb is never dead straight and it shakes: at the stick's 22 px full push, 2 px of wobble is a 5 degree swing of the direction. So the DIRECTION of the push
+ *  (its angle from straight up) is eased with a short time constant (STEER.tau; the length of the push goes through untouched, the speed already eases in drive.js) and
+ *  a small cone around straight up counts as straight up (between STEER.d0 and STEER.d1 the angle is blended back to the real one, so it is exactly the thumb's angle from
+ *  STEER.d1 on, and a diagonal or straight left/right are not touched). A new push (from rest) or a flip of more than STEER.snap (up to down) takes the new direction at once.
+ *  st = { on, a } is kept between calls; returns out = { x, y } (x screen-right, y screen-down, length at most 1) like the raw stick. */
+export const STEER = { tau: 0.09, d0: 8 * Math.PI / 180, d1: 28 * Math.PI / 180, snap: 2.0 };
+export function steerStick(st, sx, sy, dt, out = { x: 0, y: 0 }) {
+  const m = Math.min(1, Math.hypot(sx, sy));
+  if (m < 1e-3) { st.on = false; out.x = out.y = 0; return out; }
+  const a = Math.atan2(sx, -sy);   // from straight up, positive to the right
+  if (!st.on || Math.abs(angDiff(a, st.a)) > STEER.snap) st.a = a; else st.a += angDiff(a, st.a) * (1 - Math.exp(-dt / STEER.tau));
+  st.on = true;
+  const ab = Math.abs(st.a);
+  let g = 1;   // the cone: 0 up to d0, smoothstep to 1 at d1, only in the forward half
+  if (ab < STEER.d1) { const t = Math.max(0, (ab - STEER.d0) / (STEER.d1 - STEER.d0)); g = t * t * (3 - 2 * t); }
+  const A = st.a * g;
+  out.x = Math.sin(A) * m; out.y = -Math.cos(A) * m;
+  return out;
+}
+
+/** The camera swings in behind you like the one in Grand Theft Auto: it follows what the thumb asks for (the cleaned-up stick), NOT where the runner is facing (the
+ *  heading lags the velocity, and a camera that chases the heading while the run direction is read off the camera is a loop that wanders: it made a thumb a few degrees off
+ *  straight up curve the camera round and round, and a shaky thumb weave it). The swing is the sideways part of the push times its forward part (sin A cos A): zero when
+ *  straight up (it runs straight and the camera stays put), the most at the diagonal, zero again at straight left or right (those run across the screen without the view
+ *  orbiting), none for anything backwards; times how fast you are running. A steady push gives a steady turn, a circle of one radius; let go and it stops at once.
+ *  (sx, sy) is steerStick's output. Returns the new camera yaw. */
+export const CAMYAW = { rate: 2.1 };   // x sin A cos A (at most 0.5): 1.05 rad/s at the diagonal, full push and full speed, a circle about 6 m in radius at a run (the old swing at its diagonal was about 1.06 rad/s)
+export function camYawStep(yaw, sx, sy, speedFrac, dt) {
+  const m = Math.hypot(sx, sy); if (m < 1e-6) return yaw;
+  const s = sx / m, f = Math.max(0, -sy / m);   // sin A and cos A (forward half only)
+  return yaw - CAMYAW.rate * s * f * Math.min(1, m) * Math.min(1, Math.max(0, speedFrac)) * dt;
 }
 
 // ------------------------------------------------------------------ moving a person
