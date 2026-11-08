@@ -20,6 +20,8 @@ SRC = os.path.join(HERE, 'src'); OUT = os.path.join(ROOT, 'public', 'drive', 'an
 os.makedirs(OUT, exist_ok=True)
 
 DOG_LEN = 1.24        # m, nose to tail tip: what the old props.glb dog measured (HAZARD_SCALE 1.5 is applied on top at run time, as before)
+FRONT_WALK, FRONT_RUN = 1.3, 1.7   # how far the front legs' swing is scaled: the most that keeps the source mesh's shoulder closed (the back legs are balanced to it)
+CREASE_DEPTH = 0.09   # source units (the body is 3.7 long): how far below the smoothed coat a vertex sits to count as fully in shade
 DOG_DROP = [2]         # pieces of pitbull.glb not drawn (filled in below once looked at)
 PIG_LEN = 0.50        # m, beak to tail tip of the standing pigeon (the old prop_bird_sit was 0.46; species scale 2 is applied at run time, as before)
 
@@ -78,7 +80,7 @@ def simplify(P, N, U, Wt, I, target_tris, err=0.05):
     print('    simplified', len(I) // 3, '->', n // 3, 'tris')
     return keep, inv
 
-def write_mesh(blob, name, P, N, U, J, Wt, I):
+def write_mesh(blob, name, P, N, U, J, Wt, I, ao=None):
     """P (n,3) f32, N (n,3), U (n,2), J (n,4) joint ids, Wt (n,4) weights, I indices; returns the blob entry"""
     n = len(P); assert n < 65536
     nb = np.zeros((n, 4), np.int8); nb[:, :3] = np.clip(np.round(N / np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-9) * 127), -127, 127)
@@ -88,7 +90,24 @@ def write_mesh(blob, name, P, N, U, J, Wt, I):
     e['pos'] = blob.add(name + '.pos', P.astype(np.float32)); e['nor'] = blob.add(name + '.nor', nb)
     e['uv'] = blob.add(name + '.uv', U.astype(np.float32)); e['joint'] = blob.add(name + '.joint', J.astype(np.uint8))
     e['weight'] = blob.add(name + '.weight', wq); e['index'] = blob.add(name + '.index', I.astype(np.uint16))
+    if ao is not None: e['ao'] = blob.add(name + '.ao', np.clip(np.round(ao * 255), 0, 255).astype(np.uint8))
     return e
+
+def crease_ao(P, N, I, depth):
+    """0..1 per vertex: how deep the vertex sits below the smoothed surface around it (the armpits, the groin, the crease down the chest where the legs join: the
+    source texture paints these pockets with its pale marking, which reads as a hole when a leg moves, so the shader darkens them like the shade they are in).
+    `depth` (the same units as P) is the depth that counts as fully shaded."""
+    key = np.round(P / 1e-4).astype(np.int64); _, inv = np.unique(key, axis=0, return_inverse=True); inv = inv.reshape(-1); n = inv.max() + 1
+    W = np.zeros((n, 3)); np.add.at(W, inv, P); cnt = np.bincount(inv, minlength=n)[:, None]; Pw = W / cnt
+    f = inv[I].reshape(-1, 3)
+    import scipy.sparse as sp
+    e = np.r_[f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]]; e = np.r_[e, e[:, ::-1]]
+    M = sp.coo_matrix((np.ones(len(e)), (e[:, 0], e[:, 1])), shape=(n, n)).tocsr(); M.data[:] = 1; deg = np.asarray(M.sum(1))
+    S = Pw.copy()
+    for _ in range(14): S = 0.5 * S + 0.5 * (M @ S) / np.maximum(deg, 1)
+    Nw = np.zeros((n, 3)); np.add.at(Nw, inv, N); Nw /= np.maximum(np.linalg.norm(Nw, axis=1, keepdims=True), 1e-9)
+    d = ((S - Pw) * Nw).sum(1)            # > 0: the smoothed surface lies outside the vertex: a pocket
+    return np.clip(d / depth, 0, 1)[inv]
 
 def sample_clip(rig, clip, n, Tout, extra=None):
     """n evenly spaced frames over one loop of a source clip (the last key is the first: a loop), as (n, J, 3, 4)"""
@@ -116,8 +135,8 @@ def build_dog(blob, meta):
         fr, dur = sample_clip(rig, 'Armature.008|' + src, n, Tout)
         clips[key] = {'start': start, 'n': n, 'dur': float(dur)}; frames.append(fr); start += n
     # the two gaits: a trot (diagonal legs together) from the Walkl clip, strides 1.6x and 3x the source's, front and back balanced so no foot skates
-    for key, Ab, n in [('walk', 1.5, 36), ('run', 2.3, 36)]:
-        Af = tr.balance(Ab); sp = tr.stance_speeds(Ab, Af); v = float(np.mean(list(sp.values())))
+    for key, Af, n in [('walk', FRONT_WALK, 36), ('run', FRONT_RUN, 36)]:
+        Ab = tr.balance_back(Af); sp = tr.stance_speeds(Ab, Af); v = float(np.mean(list(sp.values())))
         ny = []; fr = []
         for i in range(n):
             W = tr.pose(i * tr.T / n, Ab, Af); ny.append(y0 - min(W[tr.toe[k]][1, 3] for k in gait.LEGS))   # lift or lower the body so the lowest foot is on the ground
@@ -129,7 +148,8 @@ def build_dog(blob, meta):
         print('  gait', key, 'back amp', Ab, 'front amp', round(Af, 2), 'stance speeds m/s', {k: round(x, 2) for k, x in sp.items()}, 'stride', round(v * tr.T, 2), 'm/cycle, body dy range', round(float(ny.min() * s), 3), round(float(ny.max() * s), 3))
     F = np.concatenate(frames)
     tex, tw = pack_frames(F); bt = blob.add('dog.bones', tex.view(np.uint16))
-    nm = {'near': write_mesh(blob, 'dog.near', P, N, U, J, Wt, I)}
+    ao = crease_ao(P, N, I, CREASE_DEPTH); print('  crease shade: vertices over 0.5', int((ao > 0.5).sum()), 'of', len(ao), 'mean', round(float(ao.mean()), 3))
+    nm = {'near': write_mesh(blob, 'dog.near', P, N, U, J, Wt, I, ao)}
     meta['dog'] = {'mesh': nm, 'frames': {'count': int(F.shape[0]), 'width': tw, 'data': bt}, 'clips': clips, 'joints': int(F.shape[1]), 'length': DOG_LEN, 'scale': float(s)}
     albedo = Image.open(io.BytesIO(g.image(0)[0])); normal = Image.open(io.BytesIO(g.image(1)[0]))
     # the coat shader (animals.js FRAG_COAT): typical fur lightness (linear), the chroma below which a texel is fur, the lightness above which it is a white marking

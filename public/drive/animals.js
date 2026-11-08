@@ -31,7 +31,7 @@ export async function loadAnimalData(mobile = false) {
 
 // ------------------------------------------------------------------ the skinning shader (shared by the lit material and the shadow's depth material)
 const SKIN_DECL = /* glsl */`
-attribute vec4 aJoint; attribute vec4 aWeight; attribute vec4 iA; attribute vec4 iB;   // iA: frame, next frame, how far between; and how much of iB's pose to fade in. iB: the same for the other clip
+attribute vec4 aJoint; attribute vec4 aWeight; attribute float aAO; varying float vAO; attribute vec4 iA; attribute vec4 iB;   // iA: frame, next frame, how far between; and how much of iB's pose to fade in. iB: the same for the other clip
 uniform highp sampler2D tBones;
 vec4 boneRow(int j, int r, vec4 f) { return mix(texelFetch(tBones, ivec2(j * 3 + r, int(f.x)), 0), texelFetch(tBones, ivec2(j * 3 + r, int(f.y)), 0), f.z); }
 void animSkin(vec3 p, vec3 n, out vec3 po, out vec3 no) {
@@ -53,13 +53,17 @@ const FRAG_COAT = /* glsl */`
 // and a richer, deeper tone where it is dark, instead of a flat multiply. White markings stay white and skin, nose, tongue and eyes keep their own colour.
 vec3 al = diffuseColor.rgb;
 float lum = dot(al, vec3(0.2126, 0.7152, 0.0722)), chroma = max(al.r, max(al.g, al.b)) - min(al.r, min(al.g, al.b));
-float fur = 1.0 - smoothstep(uFur.y * 1.5, uFur.y * 4.0, chroma), mark = smoothstep(uFur.z * 0.3, uFur.z * 1.0, lum);
+float fur = 1.0 - smoothstep(uFur.y * 2.4, uFur.y * 6.0, chroma), mark = smoothstep(uFur.z * 0.3, uFur.z * 1.0, lum);
 float coatLum = dot(vColor.rgb, vec3(0.2126, 0.7152, 0.0722)), light = smoothstep(0.055, 0.085, coatLum);
-float r = clamp(lum / uFur.x, 0.25, 3.2);
-vec3 hue = vColor.rgb / max(max(vColor.r, max(vColor.g, vColor.b)), 1e-3);
-vec3 remap = vColor.rgb * pow(r, 1.35) * pow(hue, vec3(1.6 * (1.0 - min(r, 1.0))));
-vec3 white = vec3(lum) * mix(vec3(1.0), hue, 0.2);
+vec3 coat = mix(vec3(coatLum), vColor.rgb, 0.58) * 0.9;   // a natural tan: the painted colours of COATS pulled toward grey and a little darker
+float r = clamp(lum / uFur.x, 0.25, 2.2);
+vec3 hue = coat / max(max(coat.r, max(coat.g, coat.b)), 1e-3);
+vec3 remap = coat * pow(r, 1.35) * pow(hue, vec3(1.6 * (1.0 - min(r, 1.0))));
+// the pale underside, chest and inner legs (the texture's white markings): a cream of the coat, so what shows where a leg swings is fur in shade, not a cold grey patch
+vec3 cream = coat * 1.0 * clamp(lum / 0.35, 0.75, 1.0);
+vec3 white = mix(vec3(lum) * mix(vec3(1.0), hue, 0.2), cream, light);
 diffuseColor.rgb = mix(al, mix(remap, white, mark), fur * light);
+diffuseColor.rgb *= mix(1.0, 0.3, vAO);   // the pockets where the legs join the body (baked, build_animals.py crease_ao): in shade, whatever the texture paints there
 `;
 const FRAG_TINT = /* glsl */`diffuseColor.rgb *= vColor.rgb;`;
 
@@ -69,9 +73,9 @@ function litMaterial(tBones, map, normalMap, kind, fur) {
   m.onBeforeCompile = (sh) => {
     sh.uniforms.tBones = { value: tBones }; if (kind === 'dog') sh.uniforms.uFur = { value: new THREE.Vector3(...fur) };
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n' + SKIN_DECL)
-      .replace('#include <beginnormal_vertex>', 'vec3 animP, objectNormal; animSkin(position, normal, animP, objectNormal); objectNormal = normalize(objectNormal);')
+      .replace('#include <beginnormal_vertex>', 'vAO = aAO; vec3 animP, objectNormal; animSkin(position, normal, animP, objectNormal); objectNormal = normalize(objectNormal);')
       .replace('#include <begin_vertex>', 'vec3 transformed = animP;');
-    sh.fragmentShader = (kind === 'dog' ? sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uFur;') : sh.fragmentShader)
+    sh.fragmentShader = (kind === 'dog' ? sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uFur; varying float vAO;') : sh.fragmentShader)
       .replace('#include <color_fragment>', kind === 'dog' ? FRAG_COAT : FRAG_TINT);
   };
   m.customProgramCacheKey = () => 'animals-' + kind;
@@ -99,6 +103,7 @@ function geometry(buf, e) {
   g.setAttribute('uv', new THREE.BufferAttribute(view(e.uv, Float32Array).slice(), 2));
   g.setAttribute('aJoint', new THREE.BufferAttribute(new Float32Array(view(e.joint, Uint8Array)), 4));
   g.setAttribute('aWeight', new THREE.BufferAttribute(new Float32Array(view(e.weight, Uint8Array)).map((v) => v / 255), 4));
+  if (e.ao) g.setAttribute('aAO', new THREE.BufferAttribute(new Float32Array(view(e.ao, Uint8Array)).map((v) => v / 255), 1));
   g.setIndex(new THREE.BufferAttribute(view(e.index, Uint16Array).slice(), 1));
   return g;
 }

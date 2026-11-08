@@ -77,3 +77,12 @@ class Trot:
             if f > b: hi = mid
             else: lo = mid
         return (lo + hi) / 2
+
+    def balance_back(self, Af):
+        """the back scale that makes the back feet slide back as fast as the front ones, for a front scale held where the shoulder stays closed"""
+        lo, hi = 0.5 * Af, 2.5 * Af
+        for _ in range(18):
+            mid = (lo + hi) / 2; s = self.stance_speeds(mid, Af); f = (s['fR'] + s['fL']) / 2; b = (s['bR'] + s['bL']) / 2
+            if b > f: hi = mid
+            else: lo = mid
+        return (lo + hi) / 2

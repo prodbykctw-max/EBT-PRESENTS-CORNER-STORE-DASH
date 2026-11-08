@@ -74,10 +74,15 @@ if (mode === 'stills') {
     await shot('dog' + k, [g.x - nx * 3.2, g.y + 1.0, g.z - nz * 3.2 * -1], [g.x, g.y + 0.6, g.z], 38);
   }
   // close-ups of the dog walking: a fawn coat, then the dark coat as authored
+  const saved = await p.evaluate(() => { const c = window.__drive.three.camera; return { p: c.position.toArray(), q: c.quaternion.toArray(), f: c.fov }; });
   for (const [nm, col] of [['dogwalk', 0xa0703f], ['dogdark', 0x2a2420]]) {
-    await p.evaluate((c) => { const d = window.__drive; d.world.ents.find((x) => x.type === 'dog').color = c; for (let i = 0; i < 11; i++) d.tick(1 / 60); }, col);
+    await p.evaluate((c) => { const d = window.__drive; d.world.ents.find((x) => x.type === 'dog').color = c; d.tick(1 / 60); }, col);
     const g = await dogNow(); const nx = Math.sin(g.a), nz = Math.cos(g.a);
-    console.log('DOGSTATE', nm, JSON.stringify(g)); await shot(nm, [g.x - nx * 3.6, g.y + 0.9, g.z + nz * 3.6], [g.x, g.y + 0.55, g.z], 22);
+    console.log('DOGSTATE', nm, JSON.stringify(g)); await shot(nm, [g.x - nx * 4.6, g.y + 1.0, g.z + nz * 4.6], [g.x, g.y + 0.7, g.z], 70); await shot(nm, [g.x - nx * 4.6, g.y + 1.0, g.z + nz * 4.6], [g.x, g.y + 0.7, g.z], 22);   // (twice: what is drawn follows the camera of the frame before)
+    // is the dog in the frame? (its position projected through the camera that took the shot)
+    console.log('DRAWN', nm, JSON.stringify(await p.evaluate(() => { const w = window.__drive.world, e = w.ents.find((x) => x.type === 'dog'); return { n: w.animals.dogs.n, alive: e.alive, color: e.color, gw: e.gw }; })));
+    console.log('IN-FRAME', nm, JSON.stringify(await p.evaluate(([x, y, z]) => { const d = window.__drive, v = new d.three.THREE.Vector3(x, y, z).project(d.three.camera); return [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(3)]; }, [g.x, g.y + 0.55, g.z])));
+    await p.evaluate((sv) => { const d = window.__drive, cam = d.three.camera; cam.position.set(...sv.p); cam.quaternion.set(...sv.q); cam.fov = sv.f; cam.updateProjectionMatrix(); cam.updateMatrixWorld(true); for (let i = 0; i < 14; i++) d.tick(1 / 60); }, saved);   // (back to the game camera: what is drawn follows it)
   }
   // a crossing dog
   await p.evaluate(() => { const d = window.__drive, e = d.world.ents.find((x) => x.type === 'dog'); e.crossing = -e.side; e.crossed = true; e.pause = -1; for (let i = 0; i < 70; i++) d.tick(1 / 60); });
