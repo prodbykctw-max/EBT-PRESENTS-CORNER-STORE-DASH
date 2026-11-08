@@ -325,8 +325,9 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   `World.ambientBoxes`, the crowd on both sides) and walls always win. The edge of the map is a wall.
   **Controls** are camera-relative: up the screen is away from the camera, sideways is across the screen, down runs at it; speed is
   the stick's push times `FOOT.run` (6.4 m/s; was 5.6, raised Nov 2026 so you can open a lead on the bully's 5.3) in any direction (`wishVelocity`, `approach`). The heading turns toward your velocity at a capped
-  rate. The camera is the same 10 m back / 6 m up / 7 m ahead framing, turned by `camYaw`, which swings in behind you in proportion to
-  the forward part of the drag and your speed (`camYawStep`, at most 1.5 rad/s; pure left/right/down don't orbit). Walls pull the
+  rate. The stick goes through `steerStick` first (roam.js, `STEER`): its direction is eased (0.09 s) so finger shake doesn't reach the run, and a cone of about 8 degrees round straight up
+  counts as straight up (blended back to the real angle by 28 degrees, so diagonals and left/right/down are exact). The camera is the same 10 m back / 6 m up / 7 m ahead framing, turned by `camYaw`, which swings
+  with what the thumb asks for, GTA style (`camYawStep`: 2.1 rad/s x sin A x cos A of the eased stick x speed, so 1.05 rad/s at the diagonal; zero when straight up, straight left/right or backwards), NOT with the runner's heading: a camera that chased the heading, while the run direction was read off the camera, was a loop that curved a thumb 5 degrees off up round in circles and weaved a shaky one. Walls pull the
   camera in along a 2D ray (never closer than 4 m, raising it instead, always 1.8 m above ground). The overpass cutaway, the sun and
   shadow box, and the crowd's shadow split follow the runner while you are on foot and go back to the car in `getIn`.
   **The bully** follows your breadcrumb trail (`Trail`, 0.5 m apart; `chaseTarget`): a clear straight line to you, else the newest

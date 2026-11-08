@@ -14,7 +14,7 @@ import { RouteFrame, RunnerCar, World } from './runner.js';
 import { DriveAudio } from './audio.js';
 import { Crowd } from './crowd.js';
 import { heroSegments } from './corral.js';
-import { BODY, PROP_R, walkWorldFor, Trail, integrate, approach, wallPass, killInto, chaseTarget, wishVelocity, camYawStep, angDiff } from './roam.js';
+import { BODY, PROP_R, walkWorldFor, Trail, integrate, approach, wallPass, killInto, chaseTarget, wishVelocity, steerStick, camYawStep, angDiff } from './roam.js';
 import { Streetcars } from './tram.js';
 import { Signals } from './signals.js';
 import { Birds } from './birds.js';
@@ -1003,20 +1003,20 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const dx = tx - me.x, dy = ty - me.y, L = Math.hypot(dx, dy) || 1;
     out.x = dx / L * FOOT.run; out.y = dy / L * FOOT.run; return out;
   };
-  const wish = { x: 0, y: 0 };
+  const wish = { x: 0, y: 0 }, steer = { on: false, a: 0 }, fvOut = { x: 0, y: 0 };
   function updateFoot(dt) {
     footT += dt;
     // you: the stick (or the arrow keys) is the way you run, as seen from the camera: up the screen is away from the camera, sideways is across the screen, down runs at the
     // camera, and how far you push is how fast (the store's stick works the same way). Any direction is full speed at full push (the store's diagonals are full speed too).
-    const fv = footVec();
+    const raw = footVec(), fv = steerStick(steer, raw.x, raw.y, dt, fvOut);   // (the thumb's direction eased and a small cone round straight up counts as straight: roam.js steerStick)
     if (BOT) botWish(wish); else wishVelocity(fv.x, fv.y, camYaw, FOOT.run, wish);
     if (me.stun > 0) wish.x = wish.y = 0;
     me.stun = Math.max(0, me.stun - dt);
     const mv = me.stun > 0 ? MOVE.stun : Math.hypot(wish.x, wish.y) > Math.hypot(me.vx, me.vy) ? MOVE.up : MOVE.down;
     me.acc = approach(me, wish.x, wish.y, mv[0], mv[1], dt, me.heading);
     faceMove(me, dt);
-    // the camera swings in behind you only as far as you push UP, and as fast as you run (roam.js camYawStep)
-    camYaw = camYawStep(camYaw, me.heading, BOT ? 0 : fv.x, BOT ? -1 : fv.y, Math.hypot(me.vx, me.vy) / FOOT.run, dt);
+    // the camera swings round with what the thumb asks for (not with where you are facing: that was a loop), as fast as you run (roam.js camYawStep)
+    camYaw = camYawStep(camYaw, BOT ? 0 : fv.x, BOT ? -1 : fv.y, Math.hypot(me.vx, me.vy) / FOOT.run, dt);
     integrate(me, dt);
     moveSolid(me, true);
     trail.push(me.x, me.y);
