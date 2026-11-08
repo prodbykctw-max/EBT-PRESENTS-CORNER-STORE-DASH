@@ -1551,7 +1551,7 @@ const HUD_HTML_REAL = `
     <div class="rb-cell"><span>CHECKPOINT</span><b class="drive-cp">0/11</b></div>
   </div>
   <div class="drive-row2">
-    <div class="rb-cell tok"><span>EBT</span><b class="drive-tokens">0</b></div>
+    <div class="rb-cell tok"><span>E.B.T</span><b class="drive-tokens">0</b></div>
     <div class="drive-race" hidden><div class="track"><b class="flag">STORE</b><i class="hd him" aria-label="The bully"></i><i class="hd you" aria-label="You"></i></div><span class="gap"></span></div>
     <div class="rb-cell"><span>SPEED</span><b class="drive-speed">0 mph</b></div>
     <div class="rb-cell"><span>STORE</span><b class="drive-dist">—</b></div>
@@ -1579,7 +1579,7 @@ const HUD_HTML = `
 <div class="drive-hud">
   <div class="drive-box"><span>TIME</span><b class="drive-time">60.0</b></div>
   <div class="drive-box"><span>STORE</span><b class="drive-dist">—</b></div>
-  <div class="drive-box tok"><span>EBT</span><b class="drive-tokens">0</b></div>
+  <div class="drive-box tok"><span>E.B.T</span><b class="drive-tokens">0</b></div>
   <div class="drive-box"><span>SPEED</span><b class="drive-speed">0 mph</b></div>
 </div>
 <div class="drive-race" hidden><div class="track"><b class="flag">STORE</b><i class="hd him" aria-label="The bully"></i><i class="hd you" aria-label="You"></i></div><span class="gap"></span></div>
