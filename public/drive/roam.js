@@ -23,9 +23,10 @@ const normalsOf = (p) => p.map((_, i) => {   // roads.js normals(): the left-han
   let dx = b[0] - a[0], dy = b[1] - a[1]; const L = Math.hypot(dx, dy) || 1;
   return [-dy / L, dx / L];
 });
-/** pieces: the elevated roads of roads.js (buildStreets(...).freeway.pieces): { p: [[x, y, ground, h]...], width, lift }. Returns wall segments (ax, ay, bx, by)
- *  and pier circles (x, y, r), flat arrays. */
-export function freewayColliders(pieces, ground) {
+/** pieces: the elevated roads of roads.js (buildStreets(...).freeway.pieces): { p: [[x, y, ground, h]...], width, lift }. piers: the flat [x, y, ...] of every
+ *  column that roads.js stood (buildStreets(...).freeway.piers: it moves bents off the streets, so the circles are taken from it, never re-derived here).
+ *  Returns wall segments (ax, ay, bx, by) and pier circles (x, y, r), flat arrays. */
+export function freewayColliders(pieces, ground, piers = []) {
   const segs = [], circles = [];
   const seg = (ax, ay, bx, by) => { if (Math.hypot(bx - ax, by - ay) > 0.02) segs.push(ax, ay, bx, by); };
   for (const r of pieces) {
@@ -40,9 +41,7 @@ export function freewayColliders(pieces, ground) {
       seg(x + nx * E, y + ny * E, x - nx * E, y - ny * E);
     };
     const at = (i, T) => (T - up[i]) / (up[i + 1] - up[i]);   // where along the stretch from sample i to i + 1 the deck's height passes T
-    let run = 0, nextPier = 12;
     for (let i = 0; i < p.length; i++) {
-      if (i) run += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
       if (i + 1 >= p.length) { if (cls[i] === 1) cap(i); continue; }   // a deck that ends with its slab still low: closed
       if (i === 0 && cls[0] === 1) cap(0);
       const A = p[i], B = p[i + 1];
@@ -54,13 +53,9 @@ export function freewayColliders(pieces, ground) {
         if (lo === 0) cap(i, Math.min(1, Math.max(0, at(i, FREEWAY.LO))));
         if (hi === 2) cap(i, Math.min(1, Math.max(0, at(i, FREEWAY.HI))));
       }
-      // pier bents (same placement as roads.js): two round columns, or one in the middle of a narrow deck
-      if (A[3] > 3 && run >= nextPier) {
-        nextPier = run + 26;
-        for (const o of hw > 5 ? [-(hw - 1.6), hw - 1.6] : [0]) circles.push(A[0] + n[i][0] * o, A[1] + n[i][1] * o, FREEWAY.PIER_R);
-      }
     }
   }
+  for (let k = 0; k + 1 < piers.length; k += 2) circles.push(piers[k], piers[k + 1], FREEWAY.PIER_R);
   return { segs: Float64Array.from(segs), circles: Float64Array.from(circles) };
 }
 
@@ -320,7 +315,7 @@ export function furnitureCircles(furniture) {
 /** The one collision world: the buildings (their edges and footprints), the hand-built row, the freeway's barriers and piers, every post and tree, and the edge of the map.
  *  city: buildCity()'s result · heroWalls: heroSegments() · shelters: [[x, y]] streetcar platforms · W: world.json */
 export function walkWorldFor({ city, heroWalls, shelters = [], W }) {
-  const fw = freewayColliders(city.freeway.pieces || [], city.ground);
+  const fw = freewayColliders(city.freeway.pieces || [], city.ground, city.freeway.piers || []);
   const furniture = { ...city.furniture, shelter: [...(city.furniture.shelter || []), ...shelters] };
   const E = W.elevation, PAD = 150;   // 150 m of (flat, empty) ground past the data's edge to run on...
   // ...but never past what is drawn: the terrain mesh covers the elevation grid plus makeGround's PAD (400 m) all round (city.ground.grid), and the edge stays 10 m inside that

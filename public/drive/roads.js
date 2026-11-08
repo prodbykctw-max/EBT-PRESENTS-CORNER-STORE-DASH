@@ -313,8 +313,10 @@ export function buildStreets(W, ground, route, tex) {
   const crosswalks = new THREE.Mesh(pg, new THREE.MeshStandardMaterial({ color: 0xe9e8e2, roughness: 0.7, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8 }));
   crosswalks.receiveShadow = true; crosswalks.name = 'crosswalks';
 
-  // 5) elevated freeway: deck + structure
-  const fw = buildFreeway(elevated, ground, tex);
+  // 5) elevated freeway: first lift every deck to a real bridge's headroom over the streets under it, then build deck + structure
+  const elev = new ElevIndex(elevated);
+  raiseDecks(elev, [...runs, R], ground);
+  const fw = buildFreeway(elevated, ground, tex, index, elev);
 
   const group = new THREE.Group(); group.add(junctions, roadsMesh, routeMesh, curbs, crosswalks);
   return { group, roadsMesh, routeMesh, junctions, freeway: fw, index, runs, routeMarks: R.marks, surfaces: [roadsMesh, routeMesh, fw.deck],
@@ -353,8 +355,137 @@ function junctionPads(W, runs, R, ground, tex, corners = []) {
   return mesh;
 }
 
+// ------------------------------------------------------------------ freeway headroom and pier placement
+// WHY THE DECK WAS LOW. world.json gives every freeway node "h" metres (7 for a bridge span, from build_world.mjs DECK) above a shared
+// grade, and levels.js deckTop() puts the top at  smooth grade + h  where the grade is the DEM blurred over ~120 m, so it irons out
+// the street's own hump. Under the Connector the route climbs a 4.9 m ridge (s~1056 m: ground 4.9 m, grade 1.1 m), so the slab (1.3 m
+// thick) cleared the road by only 1.9 m, and other streets by 2.5-5 m. Nothing ever looked at what was under the deck.
+// WHY PIERS STOOD IN STREETS. Bents were dropped every 26 m along each deck's centre line, with no look at what is beneath.
+// The fix (below): raiseDecks() measures the headroom over every street under a deck and raises the shared deck-height field
+// (ground.deckLift, read by deckTop) until it is DECK_CLEAR; planBents() then slides each bent along the deck, or pulls its columns
+// in, until every column is off every street, and never leaves more than MAX_SPAN between bents.
+export const DECK_CLEAR = 5.3;   // m from the road surface up to the slab's underside (real freeways over a city street: 4.9-5.5 m; the bent caps hang 1 m lower, still over 4.3 m)
+export const SLAB = 1.3;         // slab thickness (the soffit sits this far under the deck top)
+const MAX_SPAN = 40;             // longest gap between bents on one deck
+const COL_R = 0.6, COL_CLEAR = 1.3;   // column radius; how far past a street's edge (its curb) a column must stand
+
+class ElevIndex { // spatial grid of the elevated road segments (every piece of an elevated road that is off the ground at all)
+  constructor(pieces, cell = 30) {
+    this.cell = cell; this.g = new Map();
+    for (const r of pieces) for (let i = 0; i + 1 < r.p.length; i++) {
+      const A = r.p[i], B = r.p[i + 1]; if (Math.max(A[3], B[3]) <= 0.05) continue;
+      const hw = r.width / 2 + 1, c = cell;
+      for (let gx = Math.floor((Math.min(A[0], B[0]) - hw) / c); gx <= Math.floor((Math.max(A[0], B[0]) + hw) / c); gx++)
+        for (let gy = Math.floor((Math.min(A[1], B[1]) - hw) / c); gy <= Math.floor((Math.max(A[1], B[1]) + hw) / c); gy++) {
+          const k = gx + ',' + gy; if (!this.g.has(k)) this.g.set(k, []); this.g.get(k).push([r, i]);
+        }
+    }
+  }
+  /** every slab segment whose footprint (plus `pad`) holds (x, y): { r, A, B, u (0-1 along), h (deck height there), d (distance to its centre line) } */
+  at(x, y, pad = 0) {
+    const out = [];
+    for (const [r, i] of this.g.get(Math.floor(x / this.cell) + ',' + Math.floor(y / this.cell)) || []) {
+      const A = r.p[i], B = r.p[i + 1], dx = B[0] - A[0], dy = B[1] - A[1], u = Math.max(0, Math.min(1, ((x - A[0]) * dx + (y - A[1]) * dy) / (dx * dx + dy * dy || 1)));
+      const d = Math.hypot(x - A[0] - u * dx, y - A[1] - u * dy);
+      if (d < r.width / 2 + pad) out.push({ r, A, B, u, d, h: A[3] + (B[3] - A[3]) * u });
+    }
+    return out;
+  }
+}
+
+/** Raise the deck-height field so every slab clears every street under it by DECK_CLEAR (see the note above). Sets ground.deckLift. */
+function raiseDecks(elev, streets, ground) {
+  ground.deckLift = null;                       // measure against the unlifted deck
+  const need = new Map();                       // 2 m cell → [x, y, lift wanted]
+  for (const s of streets) {
+    const n = normals(s.p);
+    for (let i = 0; i + 1 < s.p.length; i++) {
+      const [ax, ay] = s.p[i], [bx, by] = s.p[i + 1], L = Math.hypot(bx - ax, by - ay), w = (s.widths ? (s.widths[i] + s.widths[i + 1]) / 2 : s.width) / 2;
+      for (let t = 0; t < L; t += 2) {
+        const f = t / L;
+        for (const o of [-w, 0, w]) {           // both edges and the middle: the hump can be anywhere across the street
+          const x = ax + (bx - ax) * f + n[i][0] * o, y = ay + (by - ay) * f + n[i][1] * o;
+          for (const e of elev.at(x, y)) {
+            if (e.h < 5) continue;              // a ramp still climbing (or landing): lifting it that much would make it steeper than any ramp, and it fades the lift out below 5 m anyway
+            const clear = deckTop(ground, x, y, e.h) + e.r.lift - SLAB - (ground(x, y) + LEVEL.ROAD);
+            const F = Math.min(6, DECK_CLEAR + 0.1 - clear);
+            if (F <= 0.02) continue;
+            const key = Math.round(x / 2) + ',' + Math.round(y / 2), q = need.get(key);
+            if (!q || q[2] < F) need.set(key, [x, y, F]);
+          }
+        }
+      }
+    }
+  }
+  if (!need.size) return;
+  // a smooth bump of height F around each spot, falling off at ≤ ~2 % extra grade, the highest wins; stored on a 4 m grid
+  const C = 4, ss = (v) => v * v * (3 - 2 * v);
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const [x, y, F] of need.values()) { const R = Math.max(30, 80 * F); x0 = Math.min(x0, x - R); y0 = Math.min(y0, y - R); x1 = Math.max(x1, x + R); y1 = Math.max(y1, y + R); }
+  x0 = Math.floor(x0 / C) * C - C; y0 = Math.floor(y0 / C) * C - C;
+  const nx = Math.ceil((x1 - x0) / C) + 2, ny = Math.ceil((y1 - y0) / C) + 2, Z = new Float32Array(nx * ny);
+  for (const [x, y, F] of need.values()) {
+    const R = Math.max(30, 80 * F);
+    for (let j = Math.max(0, Math.floor((y - R - y0) / C)); j <= Math.min(ny - 1, Math.ceil((y + R - y0) / C)); j++)
+      for (let i = Math.max(0, Math.floor((x - R - x0) / C)); i <= Math.min(nx - 1, Math.ceil((x + R - x0) / C)); i++) {
+        const d = Math.hypot(x0 + i * C - x, y0 + j * C - y); if (d >= R) continue;
+        const v = F * (1 - ss(d / R)); if (v > Z[j * nx + i]) Z[j * nx + i] = v;
+      }
+  }
+  ground.deckLift = (x, y) => {
+    const fx = (x - x0) / C, fy = (y - y0) / C; if (fx < 0 || fy < 0 || fx >= nx - 1 || fy >= ny - 1) return 0;
+    const i = fx | 0, j = fy | 0, u = fx - i, v = fy - j;
+    return (Z[j * nx + i] * (1 - u) + Z[j * nx + i + 1] * u) * (1 - v) + (Z[(j + 1) * nx + i] * (1 - u) + Z[(j + 1) * nx + i + 1] * u) * v;
+  };
+}
+
+/** Where the bents (pairs of round columns + a cap beam) stand, for one elevated road: every ~26 m, but never with a column on a street
+ *  (nor on a lower deck), never more than MAX_SPAN apart. Returns [{ i (sample), o (lateral offsets of the columns) }]. `stats` counts what had to move. */
+function planBents(r, n, ground, index, elev, stats) {
+  const p = r.p, hw = r.width / 2, run = [0];
+  for (let i = 1; i < p.length; i++) run.push(run[i - 1] + Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]));
+  const edge = hw - 1.6;
+  const variants = hw > 5 ? [[-edge, edge], [-edge * 0.8, edge * 0.8], [-edge * 0.6, edge * 0.6], [-edge * 0.4, edge * 0.4], [0]] : [[0], [-(hw - 1.4), hw - 1.4]];
+  const top = (i) => deckTop(ground, p[i][0], p[i][1], p[i][3]) + r.lift - SLAB;       // the soffit
+  const offRoad = (x, y, rad, own, colTop) => {
+    if (index.covering(x, y, null, rad + COL_CLEAR)) return false;                       // on (or within a curb of) a street
+    for (const e of elev.at(x, y, rad + 0.6)) {                                          // standing in another deck's roadway
+      if (e.r === own) continue;
+      const T = deckTop(ground, x, y, e.h) + e.r.lift, S = e.h > 1.7 ? T - SLAB : ground(x, y);
+      if (Math.abs(T - (colTop + 1.0 + SLAB)) > 2.5 && T > ground(x, y) - 0.3 && S < colTop + 0.2) return false;   // (not the same slab merging in)
+    }
+    return true;
+  };
+  const ok = (i, o, strict) => {
+    const colTop = top(i) - 1.0;
+    for (const off of o) if (!offRoad(p[i][0] + n[i][0] * off, p[i][1] + n[i][1] * off, COL_R, r, colTop)) return false;
+    if (strict) for (let k = -4; k <= 4; k++) { const off = hw * 0.25 * k; if (index.covering(p[i][0] + n[i][0] * off, p[i][1] + n[i][1] * off, null, 0.5)) return false; }   // and the cap beam (1 m under the slab) not over a street
+    return true;
+  };
+  const out = []; let last = null, want = 12, wide = false;   // wide: a street under the deck is wider than the span limit, so look further for the far side
+  while (want < run[p.length - 1]) {
+    const reach = last === null || wide ? 1e9 : last + MAX_SPAN;
+    const cand = []; for (let i = 0; i + 1 < p.length; i++) if (p[i][3] > 3 && run[i] >= want - 13 && run[i] <= Math.min(want + 13, reach)) cand.push(i);
+    if (!cand.length) { if (!wide) last = null; want += wide ? 6 : 26; continue; }      // a low stretch: the slab is on the ground there
+    cand.sort((a, b) => Math.abs(run[a] - want) - Math.abs(run[b] - want));
+    let pick = null;
+    for (const strict of [true, false]) { for (const i of cand) { for (const o of variants) if (ok(i, o, strict)) { pick = { i, o, strict }; break; } if (pick) break; } if (pick) break; }
+    if (!pick && last !== null) {                                                        // nothing in reach of the nominal spot: anywhere up to the span limit
+      const far = []; for (let i = 0; i + 1 < p.length; i++) if (p[i][3] > 3 && run[i] > last + 8 && run[i] <= reach) far.push(i);
+      far.sort((a, b) => Math.abs(run[a] - want) - Math.abs(run[b] - want));
+      for (const i of far) { for (const o of variants) if (ok(i, o, false)) { pick = { i, o, strict: false }; break; } if (pick) break; }
+    }
+    if (!pick) { wide = last !== null; want += 6; continue; }                            // (the first bent of a deck just waits for open ground)
+    if (Math.abs(run[pick.i] - want) > 1 || pick.o !== variants[0]) stats.moved++;
+    stats.bents++; if (!pick.strict) stats.capOverStreet++;
+    if (last !== null) { const gap = run[pick.i] - last; stats.maxSpan = Math.max(stats.maxSpan, gap); if (gap > MAX_SPAN + 0.01) (stats.longSpans ||= []).push([+p[pick.i][0].toFixed(0), +p[pick.i][1].toFixed(0), r.id, +gap.toFixed(1)]); }
+    out.push(pick); last = run[pick.i]; want = last + 26; wide = false;
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------ freeway structure
-function buildFreeway(list, ground, tex) {
+function buildFreeway(list, ground, tex, index, elev) {
   const c = { pos: [], uv: [], idx: [] };
   const quad = (a, b, cc, d, ua = 0, ub = 1, va = 0, vb = 1) => { // a,b,c,d: [x,y,z] world (z up), CCW seen from outside
     const k = c.pos.length / 3;
@@ -362,10 +493,11 @@ function buildFreeway(list, ground, tex) {
     c.uv.push(ua, va, ub, va, ub, vb, ua, vb);
     c.idx.push(k, k + 1, k + 2, k, k + 2, k + 3);
   };
-  const piers = [], caps = [], decks = [];
+  const piers = [], caps = [], decks = [], pierXY = [], stats = { bents: 0, moved: 0, capOverStreet: 0, maxSpan: 0 };
   for (const r of list) {
     const p = r.p, n = normals(p), hw = r.width / 2;
-    let run = 0, nextPier = 12;
+    let run = 0;
+    const bents = new Map(planBents(r, n, ground, index, elev, stats).map((b) => [b.i, b.o]));
     for (let i = 0; i < p.length; i++) {
       if (i) run += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
       if (i + 1 < p.length && p[i][3] > 2.5) decks.push([p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], hw + 3]);
@@ -391,14 +523,12 @@ function buildFreeway(list, ground, tex) {
         const zA = deckTop(ground, A[0], A[1], A[3]) + r.lift - 1.3, zB = deckTop(ground, B[0], B[1], B[3]) + r.lift - 1.3;
         quad([...Rr(A, i), zA], [...L(A, i), zA], [...L(B, i + 1), zB], [...Rr(B, i + 1), zB]);
       }
-      // pier bents: two round columns + a cap beam, every ~26 m where the deck is high enough to walk under
-      if (A[3] > 3 && run >= nextPier) {
-        nextPier = run + 26;
-        const a = Math.atan2(B[1] - A[1], B[0] - A[0]), zTop = deckTop(ground, A[0], A[1], A[3]) + r.lift - 1.3;
-        const cols = hw > 5 ? [-(hw - 1.6), hw - 1.6] : [0];
-        for (const o of cols) {
+      // pier bents: two round columns + a cap beam about every 26 m where the deck is high enough to walk under (planBents: never on a street)
+      if (bents.has(i)) {
+        const a = Math.atan2(B[1] - A[1], B[0] - A[0]), zTop = deckTop(ground, A[0], A[1], A[3]) + r.lift - SLAB;
+        for (const o of bents.get(i)) {
           const x = A[0] + n[i][0] * o, y = A[1] + n[i][1] * o, g = ground(x, y) + LEVEL.TERRAIN;
-          piers.push([x, y, g, zTop - 1.0 - g]);
+          piers.push([x, y, g, zTop - 1.0 - g]); pierXY.push(x, y);
         }
         caps.push([A[0], A[1], zTop - 1.0, a, hw * 2 - 0.8]);
       }
@@ -432,5 +562,5 @@ function buildFreeway(list, ground, tex) {
   }
   deck.castShadow = true;
   const group = new THREE.Group(); group.name = 'freeway'; group.add(deck, structure, columns, capMesh);
-  return { group, deck, decks, pieces: list };   // (pieces: every elevated road with its draped samples [x, y, ground, h] and lift: roam.js builds the walls round them from the same data)
+  return { group, deck, decks, pieces: list, piers: pierXY, stats };   // (pieces: every elevated road with its draped samples [x, y, ground, h] and lift, and piers: the flat [x, y, ...] of every column: roam.js builds its walls and pier circles from the same data)
 }

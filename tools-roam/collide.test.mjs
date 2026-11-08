@@ -165,7 +165,7 @@ console.log(`   ${totalSteps} steps, ${contacts} with a wall contact, ${reverts}
 
 // ---------------------------------------------------------------- 5. the freeway: where the walls are
 {
-  const fw = roam.freewayColliders(city.freeway.pieces, ground);
+  const fw = roam.freewayColliders(city.freeway.pieces, ground, city.freeway.piers);
   console.log(`5. freeway: ${fw.segs.length / 4} wall segments and ${fw.circles.length / 3} pier circles from ${city.freeway.pieces.length} elevated roads`);
   // walking along the middle of every elevated road from either end must not reach a slab that is low enough to fall through
   let blocked = 0, reached = 0;
