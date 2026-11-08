@@ -113,6 +113,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       return sets.filter(Boolean);
     } catch (e) { console.warn('car sets unavailable, drawing the usual cars:', e?.message || e); return null; }
   }) : null;
+  // the realistic look's animals (animals.js: the stray dogs and the pigeons, from animals/): same rule again (nothing is requested before the realistic look has loaded; a failure or a
+  // late load costs only the new animals: the props.glb dogs and birds are drawn). ?animals=none keeps the old ones (QA).
+  const animalsOff = /^(none|0|off|false|no)$/i.test(new URLSearchParams(location.search).get('animals') || '');
+  const animalsReady = realReady && !animalsOff ? realReady.then(async (pack) => {
+    if (!pack) return null;
+    try { const m = await import('./animals.js'); return { m, data: await m.loadAnimalData(MOBILE) }; }
+    catch (e) { console.warn('realistic animals unavailable, drawing the usual ones:', e?.message || e); return null; }
+  }) : null;
   // the realistic look's pedestrians: same rule as the cars (nothing is requested before the realistic look has loaded; the comic look, ?people=none and a
   // failed realistic look never fetch them; a failure only costs the new people, the drive starts with the old ones)
   const peopleKinds = peopleKindsFromURL();
@@ -226,18 +234,19 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const spot = { s: spotS, d: route.parkD(spotS, -1) ?? route.lane(spotS, 0) - 0.35 };
   // car sets (cars.js): only with the realistic look (RL); the comic look, ?cars=none and a failed load draw the props.glb cars
   const carSets = {};
-  let altPeople = null, ContactBlobs = null;
-  if (RL && (carsReady || peopleReady || contactReady)) {
+  let altPeople = null, ContactBlobs = null, animals = null;
+  if (RL && (carsReady || peopleReady || contactReady || animalsReady)) {
     // the cars and the pedestrians are optional downloads: the drive waits for them only a few seconds after everything it needs has loaded, then starts with
     // the old ones. (One await for both, and no other await from here to the crowd below: whatever draws Math.random while the drive waits cannot
     // interleave with the crowd's own draws, so the crowd's layout does not depend on whether the new people load.)
     const WAIT_MS = 8000;
     const within = (p, what) => { if (!p) return Promise.resolve(null); let timer; return Promise.race([p, new Promise((ok) => { timer = setTimeout(() => { console.warn(what + ' still loading, drawing the usual ones'); ok(null); }, WAIT_MS); })]).finally(() => clearTimeout(timer)); };
-    const [got, alt, blobs] = await Promise.all([within(carsReady, 'car sets'), within(peopleReady, 'pedestrians'), within(contactReady, 'contact shadows')]);
+    const [got, alt, blobs, anim] = await Promise.all([within(carsReady, 'car sets'), within(peopleReady, 'pedestrians'), within(contactReady, 'contact shadows'), within(animalsReady, 'animals')]);
     for (const r of got || []) carSets[r[0]] = r[1];
     altPeople = alt; ContactBlobs = blobs;
+    if (anim) { try { animals = new anim.m.Animals(anim.data, scene, { mobile: MOBILE }); } catch (e) { console.warn('realistic animals unavailable, drawing the usual ones:', e?.message || e); } }   // (made under a private random generator: the shared stream is untouched)
   }
-  const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks, carSets });
+  const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks, carSets, animals });
   for (const cs of Object.values(world.carSets)) cs.shadowOnly(renderer);   // the cars' shadow proxies are drawn in the sun's shadow pass only
   // the sun's shadow box, so the props that can't cast a shadow into it skip the shadow pass (World.render)
   world.shadowBox = { dir: sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35), half: () => Math.max(sun.shadow.camera.right, sun.shadow.camera.top) };
@@ -291,7 +300,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const groundAt = (x, y) => Math.max(surfAt(x, y, ground(x, y) + 1.2) ?? -Infinity, ground(x, y) + LEVEL.TERRAIN);
   const birds = world.birds = new Birds({ scene, props: props.scene, route, roofAt, groundAt, isFree: city.isFree, sEnd: spot.s,
     trees: [...(city.furniture.tree_round || []), ...(city.furniture.tree_upright || [])],
-    occupied: (s, d) => world.ents.some((e) => e.alive && Math.abs(e.s - s) < 7 && Math.abs(e.d - d) < 2.5), visible: (x, y, z, r) => world.visible(x, y, z, r), mobile: MOBILE });
+    occupied: (s, d) => world.ents.some((e) => e.alive && Math.abs(e.s - s) < 7 && Math.abs(e.d - d) < 2.5), visible: (x, y, z, r) => world.visible(x, y, z, r), mobile: MOBILE, animals, camera });
   const carModel = carGltf.scene;
   if (RL) RL.upgradeCar(carModel, realTex);   // clearcoat paint, real glass and rubber (before the brake lamps are looked for just below)
   carModel.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
