@@ -125,9 +125,9 @@ test('live rules match the game source', () => {
 
 test('honest live runs validate', () => {
   assert.equal(validateLive(liveWon), null);
-  // with a drive: 41.37 s left, 12 tokens, 3 near misses, clean, no hits
-  const bonus = Math.round(41.37 * 50 + 12 * 25 + 3 * 50 + 500 + 300);
-  assert.equal(validateLive(liveRun({ score: 1900 + bonus, drive: { bonus, time_left: 41.37, tokens: 12, near_misses: 3 } })), null);
+  // with a drive: 30.5 s left, 12 tokens, 3 near misses, clean, no hits
+  const bonus = Math.round(30.5 * 50 + 12 * 25 + 3 * 50 + 500 + 300);
+  assert.equal(validateLive(liveRun({ score: 1900 + bonus, drive: { bonus, time_left: 30.5, tokens: 12, near_misses: 3 } })), null);
   // caught with 3 items, with or without RICE & BEANS
   assert.equal(validateLive(liveRun({ score: 300, items: 3, won: false })), null);
   assert.equal(validateLive(liveRun({ score: 400, items: 3, won: false })), null);
@@ -144,6 +144,7 @@ test('impossible live runs are rejected', () => {
   assert.ok(validateLive(liveRun({ score: 99999, drive: { bonus: 99999 - 1900, time_left: 70, tokens: 0, near_misses: 0 } })));
   assert.ok(validateLive(liveRun({ score: 1900 + 100, drive: { bonus: 100, time_left: 99, tokens: 0, near_misses: 0 } })));
   assert.ok(validateLive(liveRun({ score: 1900 + 100, drive: { bonus: 100, time_left: 1, tokens: 9999, near_misses: 0 } })));
+  assert.ok(validateLive(liveRun({ score: 800 + 500 + 1500, run_seconds: 0 })));   // paid at the register with no time spent in the store
   assert.ok(LIVE_MAX_SCORE < 100000);
 });
 
@@ -196,8 +197,8 @@ test('honest v3 runs validate', () => {
   // perfect: combo all the way, beat him out, never caught, 20 s
   assert.equal(validateLive3(run3({ score: 2100 + 500 + 2500 + 2000 + 1000, items_points: 2100, run_seconds: 20, beat_out: true, no_catch: true })), null);
   // with a drive bonus
-  const bonus = Math.round(41.37 * 50 + 12 * 25 + 3 * 50 + 500 + 300);
-  assert.equal(validateLive3(run3({ score: 3300 + 1000 + bonus, no_catch: true, drive: { bonus, time_left: 41.37, tokens: 12, near_misses: 3 } })), null);
+  const bonus = Math.round(30.5 * 50 + 12 * 25 + 3 * 50 + 500 + 300);
+  assert.equal(validateLive3(run3({ score: 3300 + 1000 + bonus, no_catch: true, drive: { bonus, time_left: 30.5, tokens: 12, near_misses: 3 } })), null);
   // caught with 3 items in a streak
   assert.equal(validateLive3(run3({ score: 600, items: 3, items_points: 600, won: false })), null);
   assert.equal(validateLive3(run3({ score: 0, items: 0, items_points: 0, won: false })), null);
@@ -226,4 +227,90 @@ test('v3 runs post through the Worker', async () => {
   assert.equal(res.status, 201);
   const bad = await worker.fetch(post(run3({ score: 3301 })), { DB: fakeDB() });
   assert.equal(bad.status, 400);
+});
+
+// ── plausibility bounds (W1b): the forged payload from the audit, a realistic one, and the source the bounds come from ──
+import { DRIVE, DRIVE_MAX_TIME_LEFT, DRIVE_MAX_TOKENS, DRIVE_MIN_SECONDS, STORE, STORE_MIN_SECONDS } from '../worker/score-rules.js';
+
+// what the audit posted: all 7 items in 0 s, every drive maximum, every bonus. Its parts add up (24,400) so only the bounds stop it.
+const forged = { v: 3, name: 'ACE', items: 7, items_points: 2100, run_seconds: 0, won: true, beat_out: true, no_catch: true, score: 24400,
+  drive: { bonus: 15800, time_left: 70, tokens: 260, near_misses: 100 } };
+// a plausible good run: 45 s in the store, all 7 with a combo, caught once, a clean park with 18 s left
+const realistic = (() => {
+  const items_points = comboPointsOptions(7)[3];
+  const drive = { time_left: 18.4, tokens: 42, near_misses: 6 };
+  drive.bonus = Math.round(drive.time_left * 50 + drive.tokens * 25 + drive.near_misses * 50 + 500 + 300);
+  return { v: 3, name: 'KCT', items: 7, items_points, run_seconds: 45, won: true, beat_out: false, no_catch: false, drive,
+    score: items_points + 500 + speedBonus3(45) + drive.bonus };
+})();
+
+test('the forged 24,400 payload from the audit is rejected, and each bound works on its own', () => {
+  assert.equal(forged.score, 2100 + 500 + 3000 + 2000 + 1000 + 15800);   // its parts add up, so only the bounds catch it
+  assert.ok(validateLive3(forged));
+  assert.equal(validateLive3(realistic), null);
+  assert.ok(validateLive3({ ...realistic, run_seconds: 0, score: realistic.score - speedBonus3(45) + speedBonus3(0) }), 'store run of 0 s');
+  const dr = (o) => { const d = { ...realistic.drive, ...o }; d.bonus = Math.round(d.time_left * 50 + d.tokens * 25 + d.near_misses * 50 + 800); return { ...realistic, drive: d, score: realistic.score - realistic.drive.bonus + d.bonus }; };
+  assert.equal(validateLive3(dr({})), null);
+  assert.ok(validateLive3(dr({ time_left: 70 })), 'a full clock left means a 0 s drive');
+  assert.ok(validateLive3(dr({ time_left: 40 })), 'the route cannot be driven in 30 s');
+  assert.ok(validateLive3(dr({ tokens: 260 })), 'more tokens than the route holds');
+  assert.ok(validateLive3(dr({ tokens: DRIVE_MAX_TOKENS + 1 })));
+  assert.equal(validateLive3(dr({ time_left: Math.floor(DRIVE_MAX_TIME_LEFT * 100) / 100, tokens: DRIVE_MAX_TOKENS })), null, 'the limits themselves are allowed');
+  // v2 (pages cached before v3) has the same bounds, so it is no way round them
+  assert.ok(validateLive(liveRun({ score: 800 + 500 + 1500 + 15800, run_seconds: 0, drive: { bonus: 15800, time_left: 70, tokens: 260, near_misses: 100 } })));
+});
+
+test('a realistic v3 run posts through the Worker; the forged one does not', async () => {
+  const DB = fakeDB();
+  assert.equal((await worker.fetch(post(realistic), { DB })).status, 201);
+  assert.equal((await worker.fetch(post(forged), { DB })).status, 400);
+  assert.equal(DB.rows.length, 1);
+});
+
+test('derived bounds have sensible values', () => {
+  assert.ok(STORE_MIN_SECONDS > 4 && STORE_MIN_SECONDS < 10, String(STORE_MIN_SECONDS));
+  assert.ok(DRIVE_MIN_SECONDS > 30 && DRIVE_MIN_SECONDS < 40);
+  assert.equal(DRIVE_MAX_TOKENS, 120);
+  // the fastest legitimate payload the older tests use stays valid
+  assert.equal(validateLive3(run3({ score: 2100 + 500 + 2500 + 2000 + 1000, items_points: 2100, run_seconds: 20, beat_out: true, no_catch: true })), null);
+});
+
+test('bounds match the game source they were derived from', () => {
+  const read = (f) => readFileSync(new URL(f, import.meta.url), 'utf8');
+  const csd = read('../standalone/csd.js'), drive = read('../public/drive/drive.js'), runner = read('../public/drive/runner.js');
+  // store
+  assert.match(csd, /var PSPEED=260,/);
+  assert.match(csd, /PICK_R=36;/);
+  assert.match(csd, /SPAWN_P=\{x:415,y:1380\}/);
+  assert.match(csd, /var PADS=\[\[452,348,500,468\],\[452,528,500,648\],\[452,704,500,824\]\];/);
+  assert.match(csd, /player\.x>p\[0\]-6&&player\.x<p\[2\]\+6&&player\.y>p\[1\]-6&&player\.y<p\[3\]\+6/);
+  assert.match(csd, /if\(m>1\)\{ x\/=m; y\/=m; \}/);                     // the stick is never longer than 1
+  assert.match(csd, /S\.runSecs=Math\.floor\(S\.runT\)/);
+  const spots = [...csd.matchAll(/\{id:"([^"]+)",\s*x:(\d+),\s*y:(\d+),/g)];
+  assert.equal(spots.length, STORE.ITEMS.length);
+  for (const m of spots) assert.ok(STORE.ITEMS.some(([x, y]) => x === +m[2] && y === +m[3]), `item ${m[1]} is in STORE.ITEMS`);
+  // drive
+  assert.match(drive, /const FOOT = \{[^}]*start: 14, carAhead: 30,/);
+  assert.match(drive, /for \(let s = firstS; s < firstS \+ 70; s \+= 1\)/);
+  assert.match(drive, /Math\.abs\(car\.s - spot\.s\) < 2\) park\(\)/);
+  assert.match(drive, /const spotS = route\.project\(SPOT\.x, SPOT\.y\)\.s;/);
+  assert.match(drive, /const SPOT = \{ x: 0, y: 9\.0,/);
+  assert.match(drive, /if \(!api\.freezeClock\) t -= dt;/);
+  assert.doesNotMatch(drive, /(?<![\w.])t \+= /);                              // nothing ever adds time back
+  assert.match(runner, /step\(dt, \{ targetD, brake, gas = 0, top = 30,/);
+  const stepCall = drive.slice(drive.indexOf('car.step(FIXED, {'), drive.indexOf('});', drive.indexOf('car.step(FIXED, {')));
+  assert.ok(stepCall.length > 40);
+  assert.doesNotMatch(stepCall, /\btop\b|cruise/);                    // drive.js never asks for a faster car
+  // tokens: one place makes them, 8 per event, with the spacing used for DRIVE_MAX_TOKENS
+  assert.equal([...runner.matchAll(/this\.tokens\.push/g)].length, 1);
+  assert.match(runner, /let s = 70, k = 0;\s*while \(s < sStop - 95\)/);
+  assert.match(runner, /for \(let q = 0; q < 8; q\+\+\) this\.tokens\.push/);
+  assert.match(runner, /s \+= rnd\(75, 110\) \* \(1 - Math\.min\(0\.25, k \* 0\.015\)\)/);
+  assert.match(drive, /sEnd: spot\.s/);
+});
+
+test('the route really puts the store at s = 1122', { timeout: 120000 }, async () => {
+  const { loadCityNode } = await import('../tools-roam/node-world.mjs');
+  const { route } = await loadCityNode();
+  assert.equal(route.project(0, 9.0).s, DRIVE.SPOT_S);
 });
