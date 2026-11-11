@@ -1704,9 +1704,20 @@ function submitScore(){
     localLB.push(entry); localLB.sort(function(a,b){return b.score-a.score;});
     renderBoard(localLB,entry,"OFFLINE — SAVED ON THIS DEVICE ONLY");
   }
+  // the server answered "no" (a 4xx: the score failed its checks, or too many tries): that is not being offline
+  function rejected(status,j){
+    try{ console.warn("score not accepted",status,j&&j.error); }catch(e){}
+    if(status===429){ el("submitRow").style.display=""; el("lbNote").textContent="TOO MANY TRIES — TRY AGAIN IN A MINUTE"; }
+    else renderBoard(localLB,null,"SCORE NOT ACCEPTED — NOT SAVED");
+  }
   fetch(API_BASE+"/api/scores",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
-    .then(function(r){ return r.json().then(function(j){ if(!r.ok) throw j; return j; }); })
+    .then(function(r){ return r.json().catch(function(){return null;}).then(function(j){
+      if(!r.ok && r.status>=400 && r.status<500){ rejected(r.status,j); return null; }
+      if(!r.ok || !j) throw j;
+      return j;
+    }); })
     .then(function(res){
+      if(!res) return;
       return fetch(API_BASE+"/api/scores?limit=10").then(function(r){return r.json();}).then(function(top){
         var rows=(top.scores||[]).map(function(x){return {initials:String(x.name),score:Number(x.score)};});
         var inTop=rows.some(function(x){return x.initials===entry.initials&&x.score===entry.score;});
