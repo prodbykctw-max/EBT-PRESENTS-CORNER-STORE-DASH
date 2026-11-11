@@ -112,9 +112,10 @@ async function api(request, env, url) {
       }
 
       if (url.pathname === '/api/scores' && request.method === 'POST') {
-        // same-origin only: a browser on another site always sends its Origin
+        // same-origin only. A browser always sends Origin on a POST (same-origin included), so a request with
+        // none (curl, a script) is not the game and is refused like any other site.
         const origin = request.headers.get('origin');
-        if (origin && origin !== url.origin && origin !== PAGES_ORIGIN) return json({ error: 'forbidden' }, 403);
+        if (origin !== url.origin && origin !== PAGES_ORIGIN) return json({ error: 'forbidden' }, 403);
         if (env.SCORE_LIMIT) {
           const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
           const { success } = await env.SCORE_LIMIT.limit({ key: ip });

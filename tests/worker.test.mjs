@@ -73,6 +73,17 @@ test('POST from another origin is 403', async () => {
   assert.equal(env.DB.rows.length, 0);
 });
 
+test('POST with no Origin header is 403 (curl / scripts), nothing stored', async () => {
+  const env = { DB: fakeDB() };
+  const req = new Request(ORIGIN + '/api/scores', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(perfect) });
+  assert.equal(req.headers.get('origin'), null);
+  const r = await worker.fetch(req, env);
+  assert.equal(r.status, 403);
+  assert.equal(env.DB.rows.length, 0);
+  // the Worker's own origin and the Pages origin still get in (see also the Pages test below)
+  assert.equal((await worker.fetch(post(perfect), env)).status, 201);
+});
+
 test('rate limit: 6th POST in the window is 429', async () => {
   const env = { DB: fakeDB(), SCORE_LIMIT: limiter(5) };
   const codes = [];
