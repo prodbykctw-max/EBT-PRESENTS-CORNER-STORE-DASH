@@ -227,3 +227,23 @@ test('v3 runs post through the Worker', async () => {
   const bad = await worker.fetch(post(run3({ score: 3301 })), { DB: fakeDB() });
   assert.equal(bad.status, 400);
 });
+
+test('live names must be exactly three letters A-Z (what the game sends)', async () => {
+  const names = ['KCT', 'EBT', 'AAA'];
+  for (const name of names) assert.equal((await worker.fetch(post(run3({ score: 3300, name })), { DB: fakeDB() })).status, 201, name);
+  const bad = ['', 'KC', 'KCTW', 'kct', 'K C', 'K.T', 'K1T', 'KÇT', 'КСТ', '<b>', 'SHOPPER', 'A'.repeat(16), ' KCT', 'KCT\n', null, 42, ['K', 'C', 'T']];
+  for (const name of bad) {
+    const DB = fakeDB();
+    const r = await worker.fetch(post(run3({ score: 3300, name })), { DB });
+    assert.equal(r.status, 400, JSON.stringify(name));
+    assert.deepEqual(await r.json(), { error: 'invalid name' });
+    assert.equal(DB.rows.length, 0);
+  }
+  // v2 (cached pages) sends the same three letters
+  assert.equal((await worker.fetch(post({ ...liveWon, name: 'KCTW' }), { DB: fakeDB() })).status, 400);
+  // the client picks its three letters only from LETTERS, and posts them joined
+  const csd = readFileSync(new URL('../standalone/csd.js', import.meta.url), 'utf8');
+  assert.match(csd, /LETTERS="ABCDEFGHIJKLMNOPQRSTUVWXYZ", initials=\["E","B","T"\]/);
+  assert.match(csd, /var entry=\{initials:initials\.join\(""\),score:S\.score\}/);
+  assert.match(csd, /name:entry\.initials/);
+});

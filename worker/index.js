@@ -33,6 +33,10 @@ const withCors = (res) => {
   return out;
 };
 
+// The live game (v: 2 / 3) sends exactly three capital letters. The v1 build, still served under /src, lets a player
+// type up to 16 characters, so cleanName stays for it.
+const LIVE_NAME = /^[A-Z]{3}$/;
+
 function cleanName(value) {
   return String(value ?? '')
     .replace(/[^\p{L}\p{N} _.-]/gu, '')
@@ -126,6 +130,8 @@ async function api(request, env, url) {
         // v: 2 is the live game (drive + store); anything else is the v1 modular build's rules
         const problem = payload.v === 3 ? validateLive3(payload) : payload.v === 2 ? validateLive(payload) : validate(payload);
         if (problem) return json({ error: problem }, 400);
+        // the live game only ever sends three letters A-Z (standalone/csd.js: `initials`, picked from LETTERS)
+        if ((payload.v === 2 || payload.v === 3) && !LIVE_NAME.test(payload.name)) return json({ error: 'invalid name' }, 400);
         return json(await addScore(env, payload, request), 201);
       }
 
