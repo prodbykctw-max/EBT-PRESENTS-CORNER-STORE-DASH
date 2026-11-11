@@ -1,8 +1,12 @@
 /**
- * QA pass. Two layers:
+ * QA pass. Three layers:
  *   1. Headless logic checks — run always, no dependencies. Flood-fill the map,
  *      then drive a bot through a full run to prove the game is winnable.
- *   2. Browser smoke test — runs only if puppeteer is installed (npm i).
+ *      (These cover the v1 prototype in public/src, which is no longer the live game.)
+ *   2. Browser smoke test of that v1 prototype — only if puppeteer is installed (npm i).
+ *   3. Browser test of the LIVE game, public/standalone.html (what the Worker serves at /):
+ *      boots, plays a store run through window.__csd, and checks the score it posts against the
+ *      Worker's own rules and what the end screen says for each answer the server can give.
  *
  * Usage: npm run qa
  */
@@ -19,7 +23,7 @@ const check = (label, ok, detail = '') => {
 };
 
 console.log('\nCorner Store Dash — QA\n');
-console.log('Map integrity');
+console.log('Map integrity (v1 prototype)');
 
 const maze = new Maze();
 check('map rows are all 19 wide', MAP.every((r) => r.length === GRID.COLS));
@@ -39,7 +43,7 @@ check('every open tile is reachable from spawn', unreachable.length === 0, unrea
 check('bully pen is reachable', reachable.has(`${maze.penSpawn.x},${maze.penSpawn.y}`));
 check('checkout is reachable', reachable.has(`${maze.checkout.x},${maze.checkout.y}`));
 
-console.log('\nSimulated run');
+console.log('\nSimulated run (v1 prototype)');
 
 /** Greedy bot: always walk the shortest path to the nearest thing it still needs. */
 function botTarget(game) {
@@ -84,7 +88,7 @@ locked.player.reset(locked.maze.checkout);
 locked.update(1 / 60);
 check('checkout stays locked until the list is done', locked.state === STATE.PLAYING);
 
-console.log('\nBrowser smoke test');
+console.log('\nBrowser smoke test (v1 prototype)');
 
 let puppeteer = null;
 try {
@@ -154,6 +158,102 @@ if (puppeteer) {
 
   await browser.close();
   server.close();
+}
+
+// ── layer 3: the live game ─────────────────────────────────────────────────────────────────────────────────
+console.log('\nLive game (public/standalone.html)');
+
+if (puppeteer) {
+  const { createServer } = await import('node:http');
+  const { readFile } = await import('node:fs/promises');
+  const { extname, join, normalize } = await import('node:path');
+  const { validateLive3 } = await import('../worker/score-rules.js');
+  const root = new URL('../public/', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webp': 'image/webp',
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.glb': 'model/gltf-binary', '.wasm': 'application/wasm', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg' };
+
+  // /api/scores is a stand-in for the Worker: `answer` is what it says to the next POST (null = hang up the connection)
+  let answer = { status: 201, body: { ok: true, rank: 1 } };
+  const posts = [];
+  const server = createServer(async (req, res) => {
+    const path = decodeURI(req.url.split('?')[0]);
+    if (path === '/api/scores') {
+      if (req.method === 'POST') {
+        let raw = ''; for await (const c of req) raw += c;
+        posts.push({ origin: req.headers.origin ?? null, body: JSON.parse(raw) });
+        if (!answer) return req.socket.destroy();
+        res.writeHead(answer.status, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify(answer.body));
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ scores: [{ name: 'KCT', score: 1234 }] }));
+    }
+    try {
+      const file = join(root, path === '/' ? 'standalone.html' : normalize(path).replace(/^(\.\.[/\\])+/, ''));
+      const body = await readFile(file);
+      res.writeHead(200, { 'content-type': types[extname(file)] ?? 'application/octet-stream' });
+      res.end(body);
+    } catch {
+      res.writeHead(404).end('not found');
+    }
+  });
+  await new Promise((r) => server.listen(5198, r));
+
+  const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
+  const page = await browser.newPage();
+  await page.setViewport({ width: 360, height: 740 });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('response', (r) => r.status() === 404 && errors.push(`404 ${r.url()}`));
+  // (the browser logs a failed /api call as "Failed to load resource": that is the point of the 400/429/500 checks below)
+  page.on('console', (m) => m.type() === 'error' && !/^Failed to load resource/.test(m.text()) && errors.push(m.text()));
+  await page.goto('http://localhost:5198/', { waitUntil: 'load' });
+  await page.waitForFunction(() => window.__csd && window.__csd.S && window.__csd.S.mode === 'title', { timeout: 60000 });
+  check('live game boots to the title screen with no page errors', errors.length === 0, errors.slice(0, 2).join(' | '));
+
+  // a store run: arrive from the drive (no bonus), start, 30 s of store time, take the 7 items, pay
+  const run = await page.evaluate(async () => {
+    const c = window.__csd, S = () => c.S, H = 1 / 120;
+    c.arrive({ bonus: 0, bully: { lead: 25, caughtUp: false } });
+    document.getElementById('btnStart').click();
+    while (S().intro > 0) c.step(H, 12);
+    c.freeze(true);
+    c.step(H, 120 * 30);
+    for (let i = 0; i < c.items.length; i++) { const p = S().curPos; c.tp(p.x, p.y); let n = 0; while (S().nGot === i && n++ < 240) c.step(H, 1); }
+    c.tp(476, 408); let n = 0; while (!S().won && n++ < 240) c.step(H, 1);
+    return { won: S().won, nGot: S().nGot, score: S().score, mode: S().mode };
+  });
+  check('a store run can be played to the register', run.won && run.nGot === 7, JSON.stringify(run));
+  await new Promise((r) => setTimeout(r, 1700));   // the end screen comes up after a short beat
+
+  const note = () => page.$eval('#lbNote', (e) => e.textContent);
+  const submit = async (ans) => {
+    answer = ans; posts.length = 0;
+    await page.evaluate(() => document.getElementById('btnSubmit').click());
+    await page.waitForFunction(() => !/^SAVING/.test(document.getElementById('lbNote').textContent), { timeout: 15000 });
+    return note();
+  };
+
+  const ok = await submit({ status: 201, body: { ok: true, rank: 1 } });
+  const sent = posts[0];
+  check('the score is posted in the v3 format, three letters, with an Origin header', !!sent && sent.body.v === 3 && /^[A-Z]{3}$/.test(sent.body.name) && sent.origin === 'http://localhost:5198', JSON.stringify(sent));
+  check("the posted score passes the Worker's own rules", !!sent && validateLive3(sent.body) === null, sent && String(validateLive3(sent.body)));
+  check('accepted: the end screen shows the rank', /^YOU RANKED #1/.test(ok), ok);
+
+  const rej = await submit({ status: 400, body: { error: 'score out of range' } });
+  check('rejected (400): says the score was not accepted, not OFFLINE', rej === 'SCORE NOT ACCEPTED — NOT SAVED', rej);
+  const many = await submit({ status: 429, body: { error: 'too many requests' } });
+  const rowShown = await page.$eval('#submitRow', (e) => e.style.display !== 'none');
+  check('rate limited (429): says to try again, and the submit button is back', many === 'TOO MANY TRIES — TRY AGAIN IN A MINUTE' && rowShown, `${many} / submit row shown: ${rowShown}`);
+  const down = await submit({ status: 500, body: { error: 'server error' } });
+  check('server error (500): still OFFLINE', down === 'OFFLINE — SAVED ON THIS DEVICE ONLY', down);
+  const gone = await submit(null);
+  check('no connection: OFFLINE', gone === 'OFFLINE — SAVED ON THIS DEVICE ONLY', gone);
+
+  await browser.close();
+  server.close();
+} else {
+  console.log('  [SKIP] puppeteer not installed — run `npm install --include=dev` to enable');
 }
 
 console.log(`\n${failures === 0 ? 'All checks passed.' : `${failures} check(s) failed.`}\n`);
