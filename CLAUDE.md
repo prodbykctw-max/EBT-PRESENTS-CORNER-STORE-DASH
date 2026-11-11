@@ -65,8 +65,10 @@
   `ps -eo pid,args | grep "[s]erve.mjs"` and kill it. Don't `pkill -f` a pattern that also matches your own
   command line.
 - `npm run qa` (`tests/qa.mjs`): map integrity + a bot run + a browser smoke test of the OLD grid prototype
-  (`public/src/*`, served as `public/index.html`). It does not load `standalone/csd.js` (the live store) or the drive,
-  so a pass says nothing about either. Test the live store in a browser through `window.__csd`.
+  (`public/src/*`, served as `public/index.html`), then a browser test of the LIVE `public/standalone.html`: it boots,
+  a store run is played through `window.__csd`, the score it posts is checked against `worker/score-rules.js`, and the
+  end screen's answer to a 201 / 400 / 429 / 500 / no connection is checked. It does not start the drive. Everything
+  else in the live store: test it in a browser through `window.__csd`.
 - Drive test hook: `window.__drive` → `car` (`s`, `d`, `targetD`, `v`, `yaw`), `route`, `spot`, `state`,
   `three.{camera, carRig, scene, renderer}`, `snapshot()` (JPEG data URL of the current frame).
 - Headless browser in Claude Code cloud sessions: Chromium at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`,

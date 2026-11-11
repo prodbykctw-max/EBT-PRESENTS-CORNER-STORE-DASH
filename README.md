@@ -58,13 +58,13 @@ session instead (see [Leaderboard](#leaderboard)).
   drive ends. `drive/tools/` holds the Blender and Node scripts that build the drive's world and
   assets.
 - **v1 modular store (not live)**: `public/index.html` plus `public/src/`. This is the older
-  tile-grid version. `npm run qa` tests it, and the dev server serves it at `/`.
+  tile-grid version. `npm run qa` still checks it (and, separately, the live `public/standalone.html`), and the dev server serves it at `/`.
 
 ## Quick start
 
 ```bash
 npm run dev               # zero-dependency static server for public/ on http://localhost:5173
-npm run qa                # v1 map + gameplay checks (puppeteer smoke test only if installed)
+npm run qa                # v1 map + gameplay checks, plus the live game's boot / score / leaderboard-answer checks (browser parts need puppeteer)
 npm run test:worker       # leaderboard Worker tests (node --test)
 npm install --include=dev # only for the browser QA pass + wrangler
 ```
@@ -128,7 +128,7 @@ worker/index.js      Worker: static assets + /api/* on D1
 worker/score-rules.js  score validation used by the Worker and its tests
 schema.sql           D1 tables and indexes
 scripts/serve.mjs    the dev server
-tests/qa.mjs         v1 map integrity, simulated playthrough, browser smoke test
+tests/qa.mjs         v1 map integrity, simulated playthrough, browser smoke test; live game boot + score post + leaderboard answers
 tests/worker.test.mjs  Worker validation, origin check, rate limit, error handling
 docs/                game design doc, drive notes, deployment runbook (may lag the code)
 ```
