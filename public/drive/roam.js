@@ -239,7 +239,7 @@ export function wishVelocity(sx, sy, yaw, run, out = { x: 0, y: 0 }) {
  *  a small cone around straight up counts as straight up (between STEER.d0 and STEER.d1 the angle is blended back to the real one, so it is exactly the thumb's angle from
  *  STEER.d1 on, and a diagonal or straight left/right are not touched). A new push (from rest) or a flip of more than STEER.snap (up to down) takes the new direction at once.
  *  st = { on, a } is kept between calls; returns out = { x, y } (x screen-right, y screen-down, length at most 1) like the raw stick. */
-export const STEER = { tau: 0.09, d0: 8 * Math.PI / 180, d1: 28 * Math.PI / 180, snap: 2.0 };
+export const STEER = { tau: 0.12, d0: 10 * Math.PI / 180, d1: 34 * Math.PI / 180, snap: 2.0 };   // (Nov 11: was 0.09 s, 8 and 28 degrees: a thumb drifts as it pushes, and a right thumb drifts right)
 export function steerStick(st, sx, sy, dt, out = { x: 0, y: 0 }) {
   const m = Math.min(1, Math.hypot(sx, sy));
   if (m < 1e-3) { st.on = false; out.x = out.y = 0; return out; }

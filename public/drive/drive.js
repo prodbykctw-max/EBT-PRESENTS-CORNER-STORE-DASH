@@ -53,7 +53,7 @@ const SKIPFOOT = QA && new URLSearchParams(location.search).has('skipfoot');
 // little faster"): 1.1 m/s faster than the bully's 5.3 instead of 0.3, so a clean run pulls away about 4x as fast
 const FOOT = { run: 6.4, back: 2.2, bully: 5.3, bullyGo: 0.8, start: 14, carAhead: 30, bullyBehind: 8, stun: 0.9, reach: 0.9, pause: 1.1 };
 // the on-foot camera: this far behind you (m), this high above your feet, aiming this far ahead of you, and never closer than min (walls pull it in to that)
-const ON_FOOT_CAM = { back: 10, up: 6.0, ahead: 7, min: 4 };
+const ON_FOOT_CAM = { back: 10, up: 6.0, ahead: 7, min: 4, side: 0 };   // side: m the camera sits to the runner's left (was 0.6, which drew a straight run 20 px right of centre and read as a pull to the right; Nov 11 2026: centred)
 const RACE = { pace: 17, accel: 3.4, hop: 1.6, tail: 4.5, shake: 60, maxLead: 30 };   // 17 m/s: a good run beats him by ~6 s; an average one gets caught late
 // the realistic look's pedestrians (people-alt.js, people-b.js, people-real/): by default every person is a B body (MakeHuman CC0, six body types, real
 // shoes); people-a.js (the hand-built A person) is NOT loaded unless asked for. ?people=none|0|off draws the old box people; ?people=A or AB picks A or the
@@ -765,17 +765,20 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // (owner, Nov 2026: "instead of a run button, you should be able to run the same way you run inside the store")
   // The whole screen is the controller, like the store's (standalone/csd.js bindTouch): put a thumb down anywhere that
   // isn't a button and drag the way you want to go. A gold ring appears where you touched and the knob follows your
-  // thumb: 44 px of travel (the ring drifts along if you keep pulling), nothing under 6 px, full speed from 22 px
+  // thumb: 60 px of travel (the ring drifts along if you keep pulling), nothing under 5 px, full speed from 50 px
   // (the store's STICK_DEAD / STICK_FULL). Up the screen is away from the camera (it is behind you, and swings round
   // as you run: camYawStep): drag up to run away from it, sideways to run across the screen, down to run back at it, any direction at a speed set by how far you push. A mouse drags the
   // same way; the arrow keys / WASD give the same directions. The pedals are hidden until you're in the car.
-  const STICK = { dead: 6, full: 22, travel: 44 };
+  // (Nov 11 2026, "the sensitivity when running needs to be assessed", GTA-on-a-phone feel: it was 6 / 22 / 44 px, so the whole range from standing to flat out was a 16 px wiggle and 5 px of finger shake
+  // was a 6.5 degree swing of the run. Now: nothing under 5 px, full speed from 50 px (about an eighth of a 390 px screen), the ring follows from 60 px, a gentle start to the curve (STICK.curve: t^1.5)
+  // so small moves are small, and the ring is drawn 120 px wide to match; 5 px of shake at the full push is now 4.8 degrees.)
+  const STICK = { dead: 5, full: 50, travel: 60, curve: 1.5 };
   const stickEl = document.createElement('div'); stickEl.className = 'drive-stick'; stickEl.setAttribute('aria-hidden', 'true'); stickEl.innerHTML = '<i></i>'; root.appendChild(stickEl);
   const stickKnob = stickEl.firstElementChild;
   let stick = null;   // the drag in progress: { id, ax, ay (the ring), cx, cy (the thumb), x, y (-1..1), on, q }
-  const stickK = (m) => { const t = THREE.MathUtils.clamp((m - STICK.dead) / (STICK.full - STICK.dead), 0, 1); return t * (2 - t); };
+  const stickK = (m) => { const t = THREE.MathUtils.clamp((m - STICK.dead) / (STICK.full - STICK.dead), 0, 1); return Math.pow(t, STICK.curve); };
   const showStick = () => {
-    stickEl.style.transform = `translate(${stick.ax - 48}px, ${stick.ay - 48}px)`;
+    stickEl.style.transform = `translate(${stick.ax - 60}px, ${stick.ay - 60}px)`;
     stickKnob.style.transform = `translate(${stick.cx - stick.ax}px, ${stick.cy - stick.ay}px)`; stickEl.classList.add('on');
   };
   const endStick = () => { stick = null; stickEl.classList.remove('on'); };
@@ -858,7 +861,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
   // --- movement: fixed 1/120 s steps (like the car), drawn between the last two steps ---
   // Speed eases toward what you're asking for: quick to get going, quick to stop, no kink at either end (a vector now: a turn is as quick as a start).
-  const MOVE = { up: [0.12, 24], down: [0.08, 34], stun: [0.12, 30] };   // [time constant s, max m/s^2]
+  const MOVE = { up: [0.16, 17], down: [0.08, 34], stun: [0.12, 30] };   // [time constant s, max m/s^2]
   const TURN = 16;   // rad/s: how fast a person swings round to face where he is running
   const faceMove = (m, dt) => {
     const sp = Math.hypot(m.vx, m.vy); let turn = 0;
@@ -1350,7 +1353,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       targetPos = high.clone().lerp(street, e);
       targetLook = toV3(p.x, p.y, p.z).lerp(toV3(-3, 0, ground(-3, 0) + 4.2), e);
     } else if (state === 'onfoot') {
-      // on foot: high behind you, a little to the left, looking the way the camera faces. High enough to see over the
+      // on foot: high behind you, dead behind (ON_FOOT_CAM.side), looking the way the camera faces. High enough to see over the
       // bully on your heels and past the poles at the curb: from 3 m up and 6 m back (the first version) a signal
       // pole beside the camera hid you completely at the start, and the bully, once close, stood between you and the
       // camera (both checked in the running game). From here you, him and the street ahead are all in frame.
@@ -1361,9 +1364,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       const cfx = Math.cos(camYaw), cfy = Math.sin(camYaw), clx = -cfy, cly = cfx;
       const wall = walk.rayHit(me.gx, me.gy, -cfx, -cfy, ON_FOOT_CAM.back + 1), want = THREE.MathUtils.clamp(wall - 0.7, ON_FOOT_CAM.min, ON_FOOT_CAM.back);
       camDist = camDist === null ? want : smoothDamp(camDist, want, camV, 'dist', want < camDist ? 0.1 : 0.6, dt);   // (in at once, out slowly)
-      const cxw = me.gx - cfx * camDist + clx * 0.6, cyw = me.gy - cfy * camDist + cly * 0.6;
+      const cxw = me.gx - cfx * camDist + clx * ON_FOOT_CAM.side, cyw = me.gy - cfy * camDist + cly * ON_FOOT_CAM.side;
       targetPos = toV3(cxw, cyw, Math.max(me.zs + ON_FOOT_CAM.up + (ON_FOOT_CAM.back - camDist) * 0.85, ground(cxw, cyw) + 1.8));
-      targetLook = toV3(me.gx + cfx * ON_FOOT_CAM.ahead + clx * 0.3, me.gy + cfy * ON_FOOT_CAM.ahead + cly * 0.3, me.zs + 0.9);
+      targetLook = toV3(me.gx + cfx * ON_FOOT_CAM.ahead + clx * ON_FOOT_CAM.side / 2, me.gy + cfy * ON_FOOT_CAM.ahead + cly * ON_FOOT_CAM.side / 2, me.zs + 0.9);
       NEAR_CUT.value = 8;   // trees within 8 m of this camera are not drawn (landscape.js); you are ~12 m away
     } else {
       NEAR_CUT.value = 0;   // the driving camera keeps every tree
@@ -1528,7 +1531,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // live getters (Object.assign would have frozen their values at assignment time)
   Object.defineProperties(api, { state: { get: () => state }, time: { get: () => t }, race: { get: () => race } });
   // stick: {x, y} overrides the input (tests). x, y, heading are world-plane; walls / solidAt are the collision world the runner and the bully use.
-  api.foot = { me, him, homeS, homeD, doorS, doorD, door: DOOR, path: PATH, stick: null, get drag() { return stick; }, get camYaw() { return camYaw; }, trail, walk,
+  api.foot = { me, him, homeS, homeD, doorS, doorD, door: DOOR, path: PATH, stick: null, get drag() { return stick; }, get camYaw() { return camYaw; }, set camYaw(v) { camYaw = v; }, trail, walk,
     get walls() { return walk.segs; }, solidAt: (x, y) => walk.solid(x, y, BODY), clearLine: (x0, y0, x1, y1) => walk.clearLine(x0, y0, x1, y1, BODY), doorDist };
   window.__drive = api;
   return api;
