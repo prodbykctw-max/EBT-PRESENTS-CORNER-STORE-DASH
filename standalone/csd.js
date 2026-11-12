@@ -809,6 +809,7 @@ function useContinue(){
   hide("ovEnd"); S.mode="play"; last=0;
 }
 function goMenu(){
+  endingKill();
   hide("ovEnd"); hide("ovPause"); hide("ovHow"); hide("ovDriveHow");
   S.mode="title"; storeView(true); show("ovTitle");
 }
@@ -837,15 +838,14 @@ function winCheck(){
       addScore(CHECKOUT_PTS+timeBonus+(S.beatOut?BEAT_OUT:0)+(S.noCatch?NO_CATCH:0));
       S.timeBonus=timeBonus;
       if(S.beatOut) announce("OUT BEFORE HE GOT IN!  +"+commas(BEAT_OUT));
-      sfx.win(); haptic(HAP.win);
-      setTimeout(function(){ endScreen(true); },S.beatOut? 1600 : 500);   // long enough to read the beat-out call first
-      return;
+      sfx.fanfare(); haptic(HAP.win);
+      endScreen(true);                          // the ending (winSeq) plays from the moment you pay
     }
   }
 }
 function endScreen(won){
   var canCont = !won && S.continues>0;
-  el("endTitle").textContent = won? "YOU MADE IT OUT!" : (canCont? "CAUGHT!" : "THE BULLY GOT YOU!");
+  el("endTitle").textContent = won? "WELCOME TO THE HALL OF FAME!" : (canCont? "CAUGHT!" : "THE BULLY GOT YOU!");
   el("endTitle").style.color = won? PAL.gold : PAL.coral;
   var nb=function(t){ return t.replace(/ /g,"\u00a0"); };   // a part never breaks inside itself on a narrow phone
   if(won){
@@ -856,6 +856,13 @@ function endScreen(won){
     if(S.noCatch) line("NEVER CAUGHT +"+commas(NO_CATCH),true);
   } else el("endSub").textContent = canCont? "1 CONTINUE LEFT — ITEMS KEPT" : "ITEMS: "+S.nGot+" / "+ITEMS.length;
   el("finalScore").textContent=String(S.score).padStart(6,"0");
+  el("ovEnd").classList.toggle("won",!!won);
+  el("btnCredits").style.display=won?"":"none";
+  if(won){                                   // set up now (the Hall of Fame shows it later); the victory screen plays first
+    el("lbList").innerHTML=""; el("lbNote").textContent="";
+    el("btnContinue").style.display="none"; el("submitRow").style.display=""; el("btnAgain").style.display="";
+    winSeq(); return;
+  }
   if(MOTION){
     var fs={v:0}; el("finalScore").textContent="000000";
     GS.to(fs,{v:S.score,duration:0.9,delay:0.25,ease:"power2.out",onUpdate:function(){ el("finalScore").textContent=String(Math.round(fs.v)).padStart(6,"0"); }});
@@ -866,6 +873,249 @@ function endScreen(won){
   el("btnAgain").style.display = canCont? "none" : "";
   show("ovEnd");
   if(MOTION) GS.fromTo(el("endTitle"),{scale:1.7},{scale:1,duration:0.55,ease:"back.out(2.4)",overwrite:"auto"});
+}
+/* ---------- the opening: the title card assembles ----------
+   On the first load the title is not just there: black, then the dimmed store fades up, the card frame slams in,
+   EBT PRESENTS, CORNER STORE drops in letter by letter, DASH lands, and TAP TO START pops in and glows (about 2.3 s);
+   then the card floats a little. Motion only: the same card, words, colours and layout as the finished title.
+   A tap while it assembles skips to the finished card and does NOT start the game (TITLE.skipped swallows that
+   tap's click). Reduced motion / no GSAP: the title simply appears, as before. */
+var TITLE={done:true,tl:null,skipped:false,idle:[]};
+function titleAssemble(){
+  var o=el("ovTitle"), card=o.querySelector(".card"), eye=o.querySelector(".eyebrow"), ttl=o.querySelector(".title"),
+      main=el("ttMain"), dash=ttl.querySelector("small"), btn=el("btnTitle"), cr=o.querySelector(".credits"), ld=el("loading");
+  var word=main.textContent; main.textContent="";
+  var letters=word.split("").map(function(ch){
+    var sp=document.createElement("span"); sp.textContent=ch; sp.style.display="inline-block"; sp.style.whiteSpace="pre"; main.appendChild(sp); return sp; });
+  TITLE.done=false; TITLE.skipped=false;
+  // the dimmed store is on at once under the black loader (so it never shows undimmed); the pieces wait
+  o._leaving=false; o.classList.remove("ready"); o.classList.add("on"); GS.killTweensOf(o); GS.set(o,{opacity:1,pointerEvents:"auto"});
+  GS.set([card],{opacity:0,scale:0.15,rotation:-5}); GS.set([eye,dash,btn,cr],{opacity:0}); GS.set(letters,{opacity:0});
+  var tl=GS.timeline({onComplete:finish});
+  tl.to(ld,{opacity:0,duration:0.55,ease:"power1.inOut",onComplete:function(){ ld.style.display="none"; }},0)   // the plate comes up out of black
+    .to(card,{opacity:1,scale:1,rotation:0,duration:0.5,ease:"back.out(1.9)"},0.35)                             // the frame slams in
+    .fromTo(eye,{y:-10,letterSpacing:"0.7em"},{opacity:0.9,y:0,letterSpacing:"0.22em",duration:0.4,ease:"power2.out"},0.85)   // EBT PRESENTS
+    .fromTo(letters,{y:-46,opacity:0},{y:0,opacity:1,duration:0.45,ease:"bounce.out",stagger:0.035},1.15)        // CORNER STORE drops in
+    .fromTo(dash,{scale:2.6,opacity:0,y:-6},{scale:1,opacity:1,y:0,duration:0.32,ease:"back.out(2.2)"},1.7)      // DASH
+    .fromTo(btn,{scale:0.3,opacity:0},{scale:1,opacity:1,duration:0.4,ease:"back.out(2.4)"},2.0)                 // TAP TO START
+    .fromTo(cr,{opacity:0},{opacity:0.5,duration:0.4},2.1);
+  TITLE.tl=tl;
+  function finish(){
+    if(TITLE.done) return; TITLE.done=true;
+    GS.killTweensOf([card,eye,dash,btn,cr,ld].concat(letters));
+    main.textContent=word; GS.set([card,eye,dash,btn,cr],{clearProps:"all"}); ld.style.display="none";
+    o.classList.add("ready");
+    // idle: the card floats and sways a little, the button glows
+    TITLE.idle=[GS.to(card,{y:-4,rotation:0.35,duration:2.2,ease:"sine.inOut",yoyo:true,repeat:-1}),
+                GS.fromTo(btn,{boxShadow:"0 4px 0 #1E2340, 0 0 0 rgba(245,197,24,0)"},{boxShadow:"0 4px 0 #1E2340, 0 0 20px rgba(245,197,24,.85)",duration:0.8,ease:"sine.inOut",yoyo:true,repeat:-1})];
+  }
+  TITLE.finish=function(){ if(TITLE.tl) TITLE.tl.progress(1); finish(); };
+  o.addEventListener("pointerdown",function skip(){ if(TITLE.done){ o.removeEventListener("pointerdown",skip); return; }
+    TITLE.skipped=true; setTimeout(function(){ TITLE.skipped=false; },700); TITLE.finish(); },true);
+}
+function titleIdleOff(){ TITLE.idle.forEach(function(t){ t.kill(); }); TITLE.idle=[]; var o=el("ovTitle"); GS&&GS.set([o.querySelector(".card"),el("btnTitle")],{clearProps:"transform,boxShadow"}); }
+/* ---------- the ending (you win the store run): victory -> Hall of Fame -> credits ----------
+   1. winSeq: the screen freezes and flashes white (Pokemon's flash), the fanfare plays, YOU WIN! slams in, you pop up
+      sitting in a shopping cart (arms up, bouncing), then the score fills in part by part like an EXP bar.
+   2. hofIn: the Hall of Fame card (you in the cart, in a frame with a shine); the initials entry, SAVE SCORE and the
+      leaderboard live on this screen (ovEnd, as before).
+   3. creditsIn: the credits roll while you ride the cart across the bottom; it ends on RUN IT BACK / MAIN MENU.
+   A tap on the victory screen skips to its next beat; a tap on the credits skips to their end. With reduced motion (or no
+   GSAP) there are no flashes or rolls: the victory screen is one still page and the credits are a static list.
+   The cart art (cartp.b64 / carts.b64) comes from standalone/tools/bake_cart_ride.py: 3 portrait frames (arms in a V /
+   arms straight up / arms wide: the bounce) and 4 side-view frames (the wheels turn a quarter of their cross each). */
+var CART_PN=3, CART_SN=4, cartPImg=new Image(), cartSImg=new Image(), cartPOk=false, cartSOk=false;
+cartPImg.onload=function(){ cartPOk=true; }; cartPImg.src=CARTP_SRC;
+cartSImg.onload=function(){ cartSOk=true; }; cartSImg.src=CARTS_SRC;
+var END={stage:"",tl:null,bounce:null,ride:null,rows:[],tot:null,sparkTl:null,tOut:[]};
+function drawCartP(cv,f){
+  if(!cartPOk||!cv) return;
+  var fw=Math.round(cartPImg.width/CART_PN), fh=cartPImg.height;
+  if(cv.width!==fw||cv.height!==fh){ cv.width=fw; cv.height=fh; }
+  var g=cv.getContext("2d"); g.clearRect(0,0,fw,fh); g.drawImage(cartPImg,f*fw,0,fw,fh,0,0,fw,fh);
+}
+// the portrait's bounce: arms V -> arms up -> V -> arms wide, on every portrait canvas that is showing
+function startBounce(ms){
+  stopBounce(); var i=0, seq=[0,1,0,2];
+  var tick=function(){ drawCartP(el("winCart"),seq[i%4]); drawCartP(el("hofCart"),seq[i%4]); i++; };
+  tick(); END.bounce=setInterval(tick,ms||140);
+}
+function stopBounce(){ if(END.bounce){ clearInterval(END.bounce); END.bounce=null; } }
+function endRows(){
+  var rows=[], base=0; ITEMS.forEach(function(it){ base+=it.pts; });
+  rows.push({k:"ITEMS"+((S.comboMax||1)>1?" (COMBO x"+S.comboMax+")":""), v:S.itemPts||0, cap:Math.max(base,S.itemPts||1)});
+  if(S.driveBonus) rows.push({k:"DRIVE BONUS", v:S.driveBonus, cap:S.driveBonus});
+  rows.push({k:"CHECKOUT", v:CHECKOUT_PTS, cap:CHECKOUT_PTS});
+  rows.push({k:"SPEED BONUS", v:S.timeBonus||0, cap:SPEED_MAX});
+  if(S.beatOut) rows.push({k:"BEAT HIM OUT", v:BEAT_OUT, cap:BEAT_OUT, big:true});
+  if(S.noCatch) rows.push({k:"NEVER CAUGHT", v:NO_CATCH, cap:NO_CATCH, big:true});
+  var sum=0; rows.forEach(function(r){ sum+=r.v; });
+  if(sum!==S.score) rows.push({k:"OTHER", v:S.score-sum, cap:Math.max(1,Math.abs(S.score-sum))});   // never: the parts add up; this keeps the total honest if one is ever added
+  return rows;
+}
+function buildExp(){
+  var box=el("expBox"); box.textContent=""; END.rows=endRows();
+  END.rows.forEach(function(r){
+    var d=document.createElement("div"); d.className="expRow"+(r.big?" big":"");
+    var a=document.createElement("span"), b=document.createElement("span"), bar=document.createElement("div"), fill=document.createElement("i");
+    a.textContent=r.k; b.className="exv"; b.textContent="+0"; bar.className="exb"; bar.appendChild(fill);
+    d.appendChild(a); d.appendChild(b); d.appendChild(bar); box.appendChild(d);
+    r.el=d; r.vEl=b; r.fill=fill; r.frac=Math.max(0,Math.min(1,r.v/(r.cap||1)));
+  });
+  var t=document.createElement("div"); t.className="expRow tot";
+  var ta=document.createElement("span"), tb=document.createElement("span"); ta.textContent="TOTAL"; tb.className="exv"; tb.textContent="000000";
+  t.appendChild(ta); t.appendChild(tb); box.appendChild(t); END.tot=tb; END.totRow=t;
+}
+function setTot(v){ END.tot.textContent=String(Math.round(v)).padStart(6,"0"); }
+// every part and the total at their final values (a skip, or reduced motion)
+function fillExp(){
+  var run=0; END.rows.forEach(function(r){ r.el.style.opacity="1"; r.el.style.transform=""; r.vEl.textContent="+"+commas(r.v); r.fill.style.width=(r.frac*100)+"%"; run+=r.v; });
+  END.totRow.style.opacity="1"; setTot(S.score);
+}
+function flashNow(op){ var f=el("flash"); f.style.display=op>0?"block":"none"; f.style.opacity=String(op); }
+function winSeq(){
+  endingKill(true);
+  S.ending=true;
+  var o=el("ovWin"); buildExp(); startBounce(150);
+  el("winSkip").textContent="TAP TO SKIP";
+  var cart=el("winCart"); cart.style.height="";
+  if(announceEl){ if(GS) GS.killTweensOf(announceEl); announceEl.style.opacity="0"; }
+  if(!MOTION){                                   // reduced motion: one still page, no flashes, no counting
+    o.classList.add("on","ready"); END.stage="done";
+    END.rows.forEach(function(r){ r.el.style.opacity="1"; }); END.totRow.style.opacity="1"; fillExp();
+    cart.style.height="min(150px,20vh)"; el("winSkip").textContent="TAP TO CONTINUE"; return;
+  }
+  END.stage="victory";
+  var title=el("winTitle");
+  GS.set(title,{opacity:0}); GS.set(cart,{opacity:0}); GS.set(el("winSkip"),{opacity:0});
+  END.rows.forEach(function(r){ GS.set(r.el,{opacity:0}); }); GS.set(END.totRow,{opacity:0});
+  o.classList.add("on","ready"); GS.set(o,{opacity:0,pointerEvents:"auto"});
+  var fl=el("flash"); fl.style.display="block";
+  var tl=GS.timeline();
+  // three white flashes; the dark victory screen is switched in under the first one
+  tl.set(fl,{opacity:1},0).set(o,{opacity:1},0.05).to(fl,{opacity:0,duration:0.14,ease:"power1.out"},0.05)
+    .set(fl,{opacity:1},0.26).to(fl,{opacity:0,duration:0.14,ease:"power1.out"},0.3)
+    .set(fl,{opacity:1},0.52).to(fl,{opacity:0,duration:0.22,ease:"power1.out",onComplete:function(){ fl.style.display="none"; }},0.56);
+  tl.fromTo(title,{opacity:0,scale:2.4},{opacity:1,scale:1,duration:0.3,ease:"back.out(2)"},0.82)
+    .call(function(){ winShake(10); haptic(HAP.win); },null,0.84)
+    .fromTo(cart,{opacity:0,scale:0,y:60},{opacity:1,scale:1,y:0,duration:0.6,ease:"back.out(1.9)"},1.25)
+    .call(function(){ winBounce(); },null,1.85)
+    .to(el("winSkip"),{opacity:0.55,duration:0.3},1.4)
+    .call(function(){ expStart(); },null,2.7);        // the fanfare is done: the score fills
+  END.tl=tl;
+}
+function winShake(px){
+  var o=el("ovWin"); GS.killTweensOf(o,"x,y"); var tl=GS.timeline();
+  for(var i=0;i<6;i++) tl.to(o,{x:(i%2?-1:1)*px*(1-i/7),y:(i%3?-1:1)*px*0.5*(1-i/7),duration:0.04});
+  tl.to(o,{x:0,y:0,duration:0.05});
+}
+function winBounce(){   // the cart hops while it waits
+  GS.killTweensOf(el("winCart"),"y"); GS.to(el("winCart"),{y:-10,duration:0.28,ease:"power1.out",yoyo:true,repeat:-1});
+}
+function expStart(){
+  if(END.stage!=="victory") return; END.stage="exp"; if(END.tl) END.tl.kill();
+  var cart=el("winCart"); GS.killTweensOf(cart); GS.to(cart,{y:0,duration:0.15,overwrite:true});
+  GS.to(cart,{height:Math.min(150,innerHeight*0.2),duration:0.45,ease:"power2.inOut"});
+  var tl=GS.timeline({onComplete:function(){ END.stage="done"; GS.delayedCall(1.4,function(){ if(END.stage==="done") hofIn(); }); }});
+  var T={v:0}, t=0.55, tickAt=0;
+  END.rows.forEach(function(r){
+    var from=T.v, to=from+r.v, dur=r.big?1.3:0.8, P={k:0};
+    tl.fromTo(r.el,{opacity:0,y:10},{opacity:1,y:0,duration:0.22,ease:"power2.out"},t);
+    tl.to(P,{k:1,duration:dur,ease:"power1.inOut",onUpdate:function(){
+        r.vEl.textContent="+"+commas(Math.round(r.v*P.k)); r.fill.style.width=(r.frac*P.k*100)+"%"; setTot(from+(to-from)*P.k);
+        var step=Math.floor(P.k*12); if(step!==tickAt){ tickAt=step; sfx.tick(P.k); }
+      }},t+0.2);
+    tl.call(function(){ tickAt=0; },null,t+0.2+dur);
+    if(r.big){   // beat him out / never caught: extra flair
+      tl.call(function(){ sfx.bonus(); winShake(6); },null,t+0.2+dur)
+        .fromTo(r.el,{scale:1.35,color:"#ffffff"},{scale:1,color:"#F5C518",duration:0.5,ease:"back.out(3)",transformOrigin:"0 50%"},t+0.2+dur);
+      t+=0.2+dur+0.55;
+    } else t+=0.2+dur+0.18;
+    T.v=to;   // (set at build time too: the next row starts from here)
+  });
+  tl.fromTo(END.totRow,{opacity:0,y:10},{opacity:1,y:0,duration:0.25},t);
+  tl.to(END.totRow,{scale:1.06,duration:0.14,yoyo:true,repeat:1,transformOrigin:"50% 50%"},t+0.25);
+  tl.call(function(){ sfx.bonus(); },null,t+0.25);
+  END.tl=tl; // (the tick sound uses 12 steps per row)
+}
+// tap on the victory screen: skip to the next beat
+function winTap(){
+  if(END.stage==="victory"){ if(END.tl) END.tl.kill(); flashNow(0); var o=el("ovWin"); GS.set(o,{opacity:1,x:0,y:0}); GS.set(el("winTitle"),{opacity:1,scale:1}); GS.set(el("winCart"),{opacity:1,scale:1,y:0}); GS.set(el("winSkip"),{opacity:0.55}); END.stage="victory"; expStart(); }
+  else if(END.stage==="exp"){ if(END.tl) END.tl.kill(); fillExp(); GS.set(el("winCart"),{height:Math.min(150,innerHeight*0.2)}); END.stage="done"; hofIn(); }
+  else if(END.stage==="done") hofIn();
+}
+function hofIn(){
+  if(END.stage==="hof"||END.stage==="credits") return; END.stage="hof";
+  if(END.tl) END.tl.kill();
+  var o=el("ovWin"), fs={v:0};
+  startBounce(220);
+  if(MOTION){
+    GS.killTweensOf(el("winCart")); GS.to(o,{opacity:0,duration:0.4,ease:"power1.inOut",onComplete:function(){ o.classList.remove("on","ready"); GS.set(o,{clearProps:"opacity,pointerEvents,x,y"}); }});
+    GS.set(o,{pointerEvents:"none"});
+    show("ovEnd");
+    el("finalScore").textContent="000000";
+    GS.to(fs,{v:S.score,duration:1.0,delay:0.5,ease:"power2.out",onUpdate:function(){ el("finalScore").textContent=String(Math.round(fs.v)).padStart(6,"0"); }});
+    GS.fromTo(el("hofCard"),{scale:0.6,opacity:0},{scale:1,opacity:1,duration:0.55,delay:0.15,ease:"back.out(1.8)",clearProps:"transform,opacity"});
+    hofShine();
+  } else { o.classList.remove("on","ready"); show("ovEnd"); }
+  sfx.start();
+}
+function hofShine(){
+  var sh=el("hofShine"), fr=el("hofFrame"); if(END.sparkTl) END.sparkTl.kill();
+  var tl=GS.timeline({repeat:-1,repeatDelay:1.4});
+  tl.fromTo(sh,{left:"-45%"},{left:"125%",duration:0.9,ease:"power1.inOut"},0.6);
+  for(var i=0;i<5;i++){
+    var sp=fr.querySelector(".spk"+i); if(!sp){ sp=document.createElement("i"); sp.className="spk spk"+i; fr.appendChild(sp); }
+    sp.style.left=(10+Math.random()*78)+"%"; sp.style.top=(8+Math.random()*70)+"%";
+    tl.fromTo(sp,{opacity:0,scale:0.2,rotation:0},{opacity:1,scale:1.15,rotation:45,duration:0.22,yoyo:true,repeat:1,ease:"power1.out"},0.7+i*0.18);
+  }
+  END.sparkTl=tl;
+}
+// ROLL CREDITS: the credits text is the title screen's own credits line (one source) plus the title
+function creditsIn(){
+  if(END.stage==="credits") return; END.stage="credits"; stopBounce(); if(END.sparkTl){ END.sparkTl.kill(); END.sparkTl=null; }
+  var o=el("ovCredits"), roll=el("crRoll"), end=el("crEnd");
+  roll.textContent="";
+  var add=function(cls,html){ var d=document.createElement("div"); d.className=cls; d.innerHTML=html; roll.appendChild(d); return d; };
+  add("crE","EBT PRESENTS");
+  add("crT","CORNER STORE<small>DASH</small>");
+  var src=document.querySelector("#ovTitle .credits");
+  if(src) src.innerHTML.split(/<br\s*\/?>/i).forEach(function(line){ add("crL",line); });
+  o.classList.toggle("still",!MOTION);
+  end.classList.remove("on"); end.style.opacity="0";
+  o.classList.add("on","ready"); hide("ovEnd");
+  var cv=el("crCart"), W=innerWidth;
+  var drawS=function(f){
+    if(!cartSOk) return; var fw=Math.round(cartSImg.width/CART_SN), fh=cartSImg.height;
+    if(cv.width!==fw||cv.height!==fh){ cv.width=fw; cv.height=fh; }
+    var g=cv.getContext("2d"); g.clearRect(0,0,fw,fh); g.drawImage(cartSImg,f*fw,0,fw,fh,0,0,fw,fh);
+  };
+  drawS(0);
+  var cw=Math.round(112*(cv.width/cv.height||1));
+  if(!MOTION){ end.style.opacity="1"; end.classList.add("on"); cv.style.transform="translateX("+Math.round((W-cw)/2)+"px)"; return; }
+  GS.set(o,{opacity:0}); GS.to(o,{opacity:1,duration:0.4});
+  // the cart faces left in the art; mirrored it rolls to the right, wheels turning
+  var f=0; END.ride=setInterval(function(){ f=(f+1)%CART_SN; drawS(f); },90);
+  GS.killTweensOf(cv); GS.set(cv,{x:-cw-20,scaleX:-1,y:0});
+  GS.to(cv,{x:W+20,duration:Math.max(5,W/60),ease:"none",repeat:-1,repeatDelay:0.4});
+  GS.to(cv,{y:-2,duration:0.18,ease:"sine.inOut",yoyo:true,repeat:-1});
+  var Hv=el("crView").clientHeight, Hr=roll.offsetHeight;
+  GS.set(roll,{y:Hv});
+  END.tl=GS.to(roll,{y:-Hr-20,duration:(Hv+Hr)/52,ease:"none",delay:0.4,onComplete:creditsEnd});
+}
+function creditsEnd(){
+  var end=el("crEnd"); end.classList.add("on"); GS.to(end,{opacity:1,duration:0.5});
+}
+function creditsTap(){ if(END.stage==="credits" && END.tl && END.tl.progress()<1){ END.tl.progress(1); } }
+// everything the ending started, off (a new run, the menu); `quiet`: called as a new ending starts
+function endingKill(quiet){
+  stopBounce(); if(END.ride){ clearInterval(END.ride); END.ride=null; }
+  if(END.tl){ END.tl.kill(); END.tl=null; } if(END.sparkTl){ END.sparkTl.kill(); END.sparkTl=null; }
+  if(GS){ GS.killTweensOf([el("winCart"),el("ovWin"),el("flash"),el("crCart"),el("crRoll"),el("crEnd"),el("hofCard")]); }
+  flashNow(0);
+  ["ovWin","ovCredits"].forEach(function(id){ var o=el(id); o.classList.remove("on","ready"); o.style.opacity=""; o.style.pointerEvents=""; o.style.transform=""; });
+  el("winCart").style.height=""; el("crEnd").style.opacity="0"; el("crEnd").classList.remove("on");
+  END.stage=""; S.ending=false;
 }
 /* ---------- the drive: 70 s rear-view drive to the store, before the first run ----------
    Lives in /drive/ and loads on demand, so this single-file game gets no bigger. If it can't load
@@ -978,6 +1228,7 @@ function pickBullySpawn(){
   return {x:SPAWN_B.x,y:SPAWN_B.y};
 }
 function startRun(){
+  endingKill(); el("ovEnd").classList.remove("won");
   hide("ovEnd"); hide("ovTitle"); hide("ovHow"); hide("ovDriveHow");
   S.mode="play"; storeView(true); S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.runSecs=0; S.won=false; S.drive=null; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9; S.itemPts=0; S.combo=1; S.comboMax=1; S.lastPick=null; S.beatOut=false; S.noCatch=false;
   S.bullyOutside=false; S.bullyIn=0; S.bullyTail=false;
@@ -1430,6 +1681,17 @@ var sfx={
   death:function(){ tone(500,55,0.85,"sawtooth",0.1); },
   win:function(){ [0,4,7,12,16].forEach(function(s,i){ tone(392*Math.pow(2,s/12),0,0.12,"square",0.08,i*0.09); }); },
   start:function(){ tone(392,0,0.1,"square",0.06); tone(523,0,0.12,"square",0.06,0.12); },
+  // the ending: a bright 8-bit victory fanfare (2.4 s: three quick notes and a held one, twice a step lower, then a held C chord
+  // over a bass), the EXP-bar tick, and the bonus flourish. Levels sit at the other sfx's 0.05-0.09.
+  fanfare:function(){
+    var n=function(semi,t,d,g,type){ tone(523.25*Math.pow(2,semi/12),0,d,type||"square",g,t); };
+    [[4,0],[4,0.1],[4,0.2]].forEach(function(a){ n(a[0],a[1],0.09,0.07); }); n(7,0.3,0.3,0.075);
+    [[2,0.68],[2,0.78],[2,0.88]].forEach(function(a){ n(a[0],a[1],0.09,0.07); }); n(5,0.98,0.3,0.075);
+    n(12,1.34,1.0,0.07); n(0,1.34,1.0,0.045); n(4,1.34,1.0,0.045); n(7,1.34,1.0,0.045);
+    tone(65.4,0,0.28,"triangle",0.12,0); tone(87.3,0,0.28,"triangle",0.12,0.68); tone(65.4,0,1.0,"triangle",0.13,1.34);
+  },
+  tick:function(k){ tone(900+700*(k||0),0,0.035,"square",0.045); },
+  bonus:function(){ [0,4,7,12,16].forEach(function(st,i){ tone(659*Math.pow(2,st/12),0,0.1,"square",0.07,i*0.07); }); tone(329,0,0.4,"triangle",0.1,0); },
   spot:function(){ tone(660,990,0.08,"square",0.09); tone(990,0,0.1,"square",0.07,0.09); },          // "!" he sees you
   windup:function(){ tone(110,330,LUNGE_WIND,"sawtooth",0.09); },                                     // he tenses
   lunge:function(){ tone(260,70,0.3,"sawtooth",0.12); tone(80,40,0.25,"triangle",0.15); },           // the dash
@@ -1730,9 +1992,9 @@ function init(){
     if(!boardReady||!playerReady||!bullyReady||!itemsReady) return;
     // the title's dimmed backing is up at once under the loader (so the store never shows undimmed), the loader
     // fades off it, and only then do the card and TAP TO START rise (they used to rise through the fading LOADING)
-    S.mode="title"; show("ovTitle",MOTION?SCREEN_FADE:0);
-    if(MOTION) GS.to(el("loading"),{opacity:0,duration:SCREEN_FADE,ease:"power1.inOut",onComplete:function(){ el("loading").style.display="none"; }});
-    else el("loading").style.display="none";
+    S.mode="title";
+    if(MOTION){ titleAssemble(); return; }
+    show("ovTitle",0); el("loading").style.display="none";
   }
   img.onload=function(){
     board=document.createElement("canvas"); board.width=IW; board.height=IH;
@@ -1757,12 +2019,17 @@ function init(){
   setTimeout(fit,300); setTimeout(fit,1000);
   // TAP TO START -> the drive's how-to-play -> START DRIVE -> the drive -> at the store, the store's how-to-play
   // -> START RUN -> the run. With no drive (opened from disk, ?nodrive) it goes straight to the store's.
-  el("btnTitle").addEventListener("click",function(){ hide("ovTitle"); if(driveAvailable()){ storeView(false); show("ovDriveHow"); } else showStoreHow(null); });
+  el("btnTitle").addEventListener("click",function(){ if(TITLE.skipped){ TITLE.skipped=false; return; } if(!TITLE.done) return; titleIdleOff(); hide("ovTitle"); if(driveAvailable()){ storeView(false); show("ovDriveHow"); } else showStoreHow(null); });
   el("btnDrive").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
   el("btnStart").addEventListener("click",function(){ sfx.start(); startStoreRun(); });
   springButtons();
   prefetchDrive();
   el("btnAgain").addEventListener("click",startRun);
+  el("btnCredits").addEventListener("click",creditsIn);
+  el("cAgain").addEventListener("click",startRun);
+  el("cMenu").addEventListener("click",goMenu);
+  el("ovWin").addEventListener("pointerdown",function(){ winTap(); });
+  el("ovCredits").addEventListener("pointerdown",function(ev){ if(!(ev.target.closest&&ev.target.closest("button"))) creditsTap(); });
   el("btnContinue").addEventListener("click",useContinue);
   el("btnMenu").addEventListener("click",goMenu);
   el("btnPause").addEventListener("click",function(ev){ ev.stopPropagation(); togglePause(); });
