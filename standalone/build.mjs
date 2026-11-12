@@ -22,6 +22,7 @@ const itemsB64 = readFileSync(here('items.b64'), 'utf8').trim();
 const cartPB64 = readFileSync(here('cartp.b64'), 'utf8').trim();   // the ending: you in the shopping cart (portrait frames, side-view wheel frames)
 const cartSB64 = readFileSync(here('carts.b64'), 'utf8').trim();
 // GSAP (motion): one vendored copy, shared with the drive (public/drive/vendor/gsap.min.js)
+const titleScene = readFileSync(here('titlescene.js'), 'utf8');   // the title screen's painted street (its own script, before the game)
 const gsapSrc = readFileSync(here('../public/drive/vendor/gsap.min.js'), 'utf8');
 
 // shell2.html carries literal \u escapes for a few glyphs; unescape after substitution.
@@ -32,6 +33,7 @@ const out = shell
   .replace('%%ITEMS%%', itemsB64)
   .replace('%%CARTP%%', cartPB64)
   .replace('%%CARTS%%', cartSB64)
+  .replace('%%TITLESCENE%%', () => titleScene)
   .replace('%%GAME%%', game)
   .replaceAll('\\u2026', '…')
   .replaceAll('\\uD83D\\uDD0A', '🔊')
