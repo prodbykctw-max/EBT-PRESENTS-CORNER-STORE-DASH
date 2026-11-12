@@ -890,6 +890,8 @@ function titleAssemble(){
   TITLE.done=false; TITLE.skipped=false;
   // the dimmed store is on at once under the black loader (so it never shows undimmed); the pieces wait
   o._leaving=false; o.classList.remove("ready"); o.classList.add("on"); GS.killTweensOf(o); GS.set(o,{opacity:1,pointerEvents:"auto"});
+  TitleScene.start({intro:true,sprites:{player:playerImg,bully:bullyImg}});   // the painted street behind the card (titlescene.js)
+  ld.style.color="transparent";   // the black plate still fades off over the street, but its LOADING… word is gone at once (it showed faintly over the sky)
   GS.set([card],{opacity:0,scale:0.15,rotation:-5}); GS.set([eye,dash,btn,cr],{opacity:0}); GS.set(letters,{opacity:0});
   var tl=GS.timeline({onComplete:finish});
   tl.to(ld,{opacity:0,duration:0.55,ease:"power1.inOut",onComplete:function(){ ld.style.display="none"; }},0)   // the plate comes up out of black
@@ -909,7 +911,7 @@ function titleAssemble(){
     TITLE.idle=[GS.to(card,{y:-4,rotation:0.35,duration:2.2,ease:"sine.inOut",yoyo:true,repeat:-1}),
                 GS.fromTo(btn,{boxShadow:"0 4px 0 #1E2340, 0 0 0 rgba(245,197,24,0)"},{boxShadow:"0 4px 0 #1E2340, 0 0 20px rgba(245,197,24,.85)",duration:0.8,ease:"sine.inOut",yoyo:true,repeat:-1})];
   }
-  TITLE.finish=function(){ if(TITLE.tl) TITLE.tl.progress(1); finish(); };
+  TITLE.finish=function(){ if(TITLE.tl) TITLE.tl.progress(1); finish(); TitleScene.settle(); };
   o.addEventListener("pointerdown",function skip(){ if(TITLE.done){ o.removeEventListener("pointerdown",skip); return; }
     TITLE.skipped=true; setTimeout(function(){ TITLE.skipped=false; },700); TITLE.finish(); },true);
 }
@@ -1782,6 +1784,7 @@ function show(id,contentDelay){
   var o=el(id);
   if(o.classList.contains("on")&&!o._leaving) return;   // already up (a fade-out in progress is turned back around)
   o._leaving=false; o.classList.remove("ready"); o.classList.add("on"); overlayIn(o,contentDelay);
+  if(id==="ovTitle") TitleScene.start({intro:true,sprites:{player:playerImg,bully:bullyImg}});   // (intro only plays the first time)
 }
 function hide(id){
   var o=el(id);
