@@ -104,7 +104,7 @@ function onSlab(x, y) {
   {
     const st = { on: false, a: 0 }, o = { x: 0, y: 0 }, ang = (x, y) => Math.atan2(x, -y) * 180 / Math.PI;
     steerStick(st, Math.sin(0.12), -Math.cos(0.12), DT, o); assert(Math.abs(o.x) < 0.01 && o.y < -0.99, '7 degrees off up is straight up');
-    for (const [x, y, want] of [[0.707, -0.707, 45], [-0.707, -0.707, -45], [1, 0, 90], [-1, 0, -90], [0.707, 0.707, 135], [-0.707, 0.707, -135], [0.5, -0.866, 30]]) {
+    for (const [x, y, want] of [[0.707, -0.707, 45], [-0.707, -0.707, -45], [1, 0, 90], [-1, 0, -90], [0.707, 0.707, 135], [-0.707, 0.707, -135], [Math.sin(40 * Math.PI / 180), -Math.cos(40 * Math.PI / 180), 40] /* past STEER.d1: 34 degrees since Nov 11 */]) {
       const s2 = { on: false, a: 0 }; steerStick(s2, x, y, DT, o); const a = ang(o.x, o.y); assert(Math.abs(a - want) < 0.01, `direction ${want} is passed through untouched (${a})`); assert(Math.abs(Math.hypot(o.x, o.y) - Math.hypot(x, y)) < 1e-9, 'length untouched');
     }
     const s3 = { on: false, a: 0 }; steerStick(s3, 0, -1, DT, o); steerStick(s3, 0, 1, DT, o); assert(Math.abs(o.y - 1) < 1e-9, 'up to down is at once (no sweep through sideways)');
