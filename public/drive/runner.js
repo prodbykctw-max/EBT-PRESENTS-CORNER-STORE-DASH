@@ -286,17 +286,18 @@ const SHIRTS = [0xd94f3d, 0x3b6fb6, 0xf0c33c, 0x2e2e2e, 0xe8e8e8, 0x3d9a5b, 0x8e
 const BUS_STRIPE = [0x1d5fbf, 0xc62828];
 
 /** The EBT token: a gold credit-card (85.6 x 54 mm, 1.585:1) that reads "E.B.T" on both faces, in the title card's gold / pink / navy (shell2.html).
- *  1.5 x 0.946 m so it is about as big on screen as the old 1.1 m coin; the pickup box is in World.step and is unchanged. One shared canvas texture
+ *  CARD_LONG x 0.63 CARD_LONG (0.72 x 0.454 m; it was 1.5 x 0.946 m, as big on screen as the old 1.1 m coin); the pickup box is in World.step and is unchanged. One shared canvas texture
  *  (a 512x323 map, also the emissive map so the lettering stays readable in shade) and one rounded extruded slab for all 260 instances. The slab's uv
  *  is planar from x,y (the back face is mirrored so the lettering is not reversed); its edge samples the texture's navy border.
  *  three.js draws Math.random for the id of every Shape, geometry, texture and material, so all of that is made on a private generator. */
 let cardRnd = 0x2545f491;
 const cardRandom = () => { cardRnd ^= cardRnd << 13; cardRnd ^= cardRnd >>> 17; cardRnd ^= cardRnd << 5; return (cardRnd >>> 0) / 4294967296; };
+const CARD_LONG = 0.72;   // m, the long side of an E.B.T card pickup (was 1.5, sized to the old 1.1 m coin; Nov 11 2026: "reduce the size of EBT cards, similar to GTA": a GTA pickup is a prop you could pick up, 0.6 to 0.8 m; the pickup box in World.step is unchanged)
 const CARD_BURN = 8;   // draws the old coin's geometry + material took from the shared stream that the private build above no longer takes (measured: tools-ebtcard/)
 function ebtCard(T) {
   const real = Math.random; Math.random = cardRandom;
   try {
-    const W = 1.5, H = 0.946, R = 0.1, D = 0.06;
+    const W = CARD_LONG, H = CARD_LONG * 0.6307, R = CARD_LONG * 0.0667, D = CARD_LONG * 0.04;   // (85.6 x 54 mm: H = 0.6307 W)
     const sh = new T.Shape();
     sh.moveTo(-W / 2 + R, -H / 2); sh.lineTo(W / 2 - R, -H / 2); sh.absarc(W / 2 - R, -H / 2 + R, R, -Math.PI / 2, 0, false);
     sh.lineTo(W / 2, H / 2 - R); sh.absarc(W / 2 - R, H / 2 - R, R, 0, Math.PI / 2, false);

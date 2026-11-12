@@ -130,7 +130,7 @@ obstacles and collisions line up exactly with what's painted on the road.
   - **Cost:** only people near the car or on camera are simulated. Only those the camera can see
     are drawn, with a margin that grows with distance, so nobody ever pops in. Phones skip crowd
     shadows.
-- **Pickups:** EBT tokens in lines and weaves (+25). Each token is a gold "E.B.T" credit card (`ebtCard` in `runner.js`: one canvas texture, one rounded slab, the title card's gold / pink / navy), 1.5 m wide, turning about its vertical axis but lingering face-on to the camera; the pickup box is unchanged. The HUD's EBT label is a small matching card (`drive.css`, end). A NEAR MISS against oncoming traffic is +50.
+- **Pickups:** EBT tokens in lines and weaves (+25). Each token is a gold "E.B.T" credit card (`ebtCard` in `runner.js`: one canvas texture, one rounded slab, the title card's gold / pink / navy), 0.72 m long (`CARD_LONG` in `runner.js`; it was 1.5 m, sized to the old 1.1 m coin, and was cut to a GTA-pickup size on Nov 11 2026: about 28 px wide face-on at the chase camera's usual distance instead of 58), turning about its vertical axis but lingering face-on to the camera; the pickup box (2.6 m along the road by 1.5 m across) is unchanged, so it is a generous pickup around a small card. The HUD's EBT label is a small matching card (`drive.css`, end). A NEAR MISS against oncoming traffic is +50.
 - **Density:** an in-lane event every 75–110 m, tightening slightly as the run goes on.
 - **Traffic flow:** every car in the street (ours, oncoming and parked cars pulling out) is driven by `traffic.js`, see
   "Traffic: how the cars drive" below. Oncoming traffic is still a steady stream of singles and 2-3 car platoons that
@@ -330,7 +330,7 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   `World.ambientBoxes`, the crowd on both sides) and walls always win. The edge of the map is a wall.
   **Controls** are camera-relative: up the screen is away from the camera, sideways is across the screen, down runs at it; speed is
   the stick's push times `FOOT.run` (6.4 m/s; was 5.6, raised Nov 2026 so you can open a lead on the bully's 5.3) in any direction (`wishVelocity`, `approach`). The heading turns toward your velocity at a capped
-  rate. The stick goes through `steerStick` first (roam.js, `STEER`): its direction is eased (0.09 s) so finger shake doesn't reach the run, and a cone of about 8 degrees round straight up
+  rate. The stick goes through `steerStick` first (roam.js, `STEER`): its direction is eased (0.12 s) so finger shake doesn't reach the run, and a cone of about 10 degrees round straight up (blending back to the real angle by 34)
   counts as straight up (blended back to the real angle by 28 degrees, so diagonals and left/right/down are exact). The camera is the same 10 m back / 6 m up / 7 m ahead framing, turned by `camYaw`, which swings
   with what the thumb asks for, GTA style (`camYawStep`: 2.1 rad/s x sin A x cos A of the eased stick x speed, so 1.05 rad/s at the diagonal; zero when straight up, straight left/right or backwards), NOT with the runner's heading: a camera that chased the heading, while the run direction was read off the camera, was a loop that curved a thumb 5 degrees off up round in circles and weaved a shaky one. Walls pull the
   camera in along a 2D ray (never closer than 4 m, raising it instead, always 1.8 m above ground). The overpass cutaway, the sun and
@@ -353,7 +353,7 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   lane where it sits level (Luckie St is steep: on its cross-slope a car rolls ~10°, so the spot is picked by measuring
   the car's roll and pitch with `standOn`). **You move the way you move in the store**
   (owner, Nov 2026): put a thumb down anywhere that isn't a button and drag; a gold ring appears there and the knob
-  follows your thumb (44 px travel, nothing under 6 px, full speed from 22 px: the store's stick). Up the screen is up
+  follows your thumb (60 px travel, nothing under 5 px, full speed from 50 px, speed = (share of the way from 5 to 50 px)^1.5: `STICK` in `drive.js`, changed Nov 11 2026 from the store's 44 / 6 / 22, which put the whole range from standing to flat out in a 16 px wiggle; the ring is drawn 120 px wide to match; you reach full speed in about 0.4 s, `MOVE.up`). Up the screen is up
   the street: drag up to run (up to 5.6 m/s, as fast as the stick is pushed; anywhere within 45° of straight up is full speed, so a dodge isn't slower than the bully), down to back up (2.2 m/s), sideways to
   cross the sidewalk (up to 3.5 m/s, a small dead band so a straight-up drag doesn't drift), diagonals do both; you
   turn and run the way you go. A mouse drags the same way; arrows / WASD give the same directions. The pedals are
@@ -454,7 +454,7 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
     rate (before, facing flipped in one frame, up to 174 rad/s; now at most 14 rad/s); the legs follow the ground
     actually covered (a step aside is a few quick steps, standing is a slow weight shift), so feet don't skate; they
     lean into a step and look up at whoever is running at them.
-- **The on-foot camera** sits 10 m behind you, 6 m up and 0.6 m to the street side, looking 7 m ahead. The first
+- **The on-foot camera** sits 10 m behind you, 6 m up and dead behind you (it sat 0.6 m to the left until Nov 11 2026, which drew a straight run 20 px right of centre). **Occluders:** nothing solid may stand between you and it or in its near-clip zone (a tree trunk once did): the line from you to the camera is tested against every wall and every prop circle grown by 0.3 m (`camHit` in `roam.js`, 2D; things within `ON_FOOT_CAM.skip` = 1.5 m of you do not count, a tree's canopy is not in the index). Blocked: the camera tries 0.6 m then 1.5 m to either side (an angle that eases over 0.25 s), else it comes in short of the obstacle (down to `ON_FOOT_CAM.min` = 0.3 m, rising as it comes in) and eases back out once clear (in 0.1 s, out 0.6 s). `tools-footctl/camclear.mjs` (196 spots, 0 blocked) and `camrun.mjs` (a straight run: biggest camera step 0.078 m a frame) prove it, looking 7 m ahead. The first
   version (6 m back, 3 m up, 1.6 m to the street side) had a signal pole beside the camera that hid you completely at
   the start, and once the bully was close he stood between you and the camera; from up here you, him and the sidewalk
   ahead stay in frame (checked at s = 14 to 84 m in the running game). Up there it rides through the street trees'
