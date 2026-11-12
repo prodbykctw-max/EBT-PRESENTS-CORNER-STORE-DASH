@@ -891,6 +891,7 @@ function titleAssemble(){
   // the dimmed store is on at once under the black loader (so it never shows undimmed); the pieces wait
   o._leaving=false; o.classList.remove("ready"); o.classList.add("on"); GS.killTweensOf(o); GS.set(o,{opacity:1,pointerEvents:"auto"});
   TitleScene.start({intro:true,sprites:{player:playerImg,bully:bullyImg}});   // the painted street behind the card (titlescene.js)
+  ld.style.color="transparent";   // the black plate still fades off over the street, but its LOADING… word is gone at once (it showed faintly over the sky)
   GS.set([card],{opacity:0,scale:0.15,rotation:-5}); GS.set([eye,dash,btn,cr],{opacity:0}); GS.set(letters,{opacity:0});
   var tl=GS.timeline({onComplete:finish});
   tl.to(ld,{opacity:0,duration:0.55,ease:"power1.inOut",onComplete:function(){ ld.style.display="none"; }},0)   // the plate comes up out of black

@@ -23,6 +23,7 @@ const cartPB64 = readFileSync(here('cartp.b64'), 'utf8').trim();   // the ending
 const cartSB64 = readFileSync(here('carts.b64'), 'utf8').trim();
 // GSAP (motion): one vendored copy, shared with the drive (public/drive/vendor/gsap.min.js)
 const titleScene = readFileSync(here('titlescene.js'), 'utf8');   // the title screen's painted street (its own script, before the game)
+const titleArt = Object.fromEntries(['sky', 'skyline', 'sides', 'store', 'street'].map((k) => [k, readFileSync(here(`title_${k}.b64`), 'utf8').trim()]));   // the title's painted layers (WebP, alpha)
 const gsapSrc = readFileSync(here('../public/drive/vendor/gsap.min.js'), 'utf8');
 
 // shell2.html carries literal \u escapes for a few glyphs; unescape after substitution.
@@ -34,6 +35,8 @@ const out = shell
   .replace('%%CARTP%%', cartPB64)
   .replace('%%CARTS%%', cartSB64)
   .replace('%%TITLESCENE%%', () => titleScene)
+  .replace('%%TA_SKY%%', titleArt.sky).replace('%%TA_SKYLINE%%', titleArt.skyline).replace('%%TA_SIDES%%', titleArt.sides)
+  .replace('%%TA_STORE%%', titleArt.store).replace('%%TA_STREET%%', titleArt.street)
   .replace('%%GAME%%', game)
   .replaceAll('\\u2026', '…')
   .replaceAll('\\uD83D\\uDD0A', '🔊')

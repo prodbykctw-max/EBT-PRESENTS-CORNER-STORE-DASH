@@ -46,31 +46,29 @@ function rr(x,px,py,w,h,r){ x.beginPath(); x.moveTo(px+r,py); x.arcTo(px+w,py,px
 function vgrad(x,y0,y1,stops){ var gr=x.createLinearGradient(0,y0,0,y1); stops.forEach(function(s){ gr.addColorStop(s[0],s[1]); }); return gr; }
 
 
-/* ---- ART: each layer is either the procedural canvas below or a painted image (WebP with alpha). ONE TABLE.
-   To swap in art: add the base64 file (like player.b64), a `var TITLE_ART_SRC={sky:"data:image/webp;base64,%%TA_SKY%%",...}`
-   line in shell2.html (+ build.mjs replace), and nothing else: a layer whose key is in TITLE_ART_SRC uses the image.
-   w: "cover" = the layer's overscanned width (screen + sway margin) , "store" = G.sw * k (the store's width on screen)
-   bottom: where the image's bottom edge sits: "vh" screen bottom, "gy" the ground line, "base" just under the skyline base.
-   sky is cover-fit both ways (always fills the screen). Keys: sky, far, near, buildings (replaces left+right), store, street. */
-var ART={
-  sky:      {w:"cover", bottom:"vh"},
-  far:      {w:"cover", bottom:"base"},
-  near:     {w:"cover", bottom:"base"},
-  buildings:{w:"cover", bottom:"gy"},
-  store:    {w:"store", k:1.0, bottom:"gy"},
-  street:   {w:"cover", bottom:"vh"}
-};
-var artImg={};
-(function(){ var src=(typeof TITLE_ART_SRC!=="undefined")?TITLE_ART_SRC:null; if(!src) return;
-  Object.keys(src).forEach(function(k){ if(!ART[k]||!src[k]) return; var im=new Image(); im.onload=function(){ artImg[k]=im; if(L&&host&&host.classList.contains("on")){ bake(); render(); } }; im.src=src[k]; }); })();
-function artLayer(k,G,by){
-  var im=artImg[k], d=ART[k]; if(!im||!d) return null;
-  var w=d.w==="store"? G.sw*(d.k||1) : VW+2*MG, h=w*im.naturalHeight/im.naturalWidth;
-  if(k==="sky"&&h<VH){ h=VH; w=h*im.naturalWidth/im.naturalHeight; }
-  var bot=d.bottom==="vh"?VH:(d.bottom==="gy"?G.gy:by);
-  var s=mk(w,h); s.x.drawImage(im,0,0,w,h);
-  return {s:s, x:k==="store"?G.cx-w/2:(k==="sky"?(VW-w)/2:-MG), y:bot-h};
+/* ---- ART: the painted layers. Five WebP files (title_*.b64, inlined by build.mjs into TITLE_ART_SRC in shell2.html):
+   sky (512x768, opaque, drawn 2x) and skyline / sides / store / street (1024x1536 RGBA). The four alpha layers share ONE frame
+   (FR, frame px): stacked at the same place and scale they rebuild the reference picture, so they are drawn with a single
+   transform (scale s, offset ox,oy) and the fly-in / sway are offsets on top of it. All the numbers that tie the code to
+   the picture are in FR (measured from the pixels): where the store sits, the sign, the OPEN neon, the lamp, the walking
+   line on the sidewalk and the door height (sprites are sized from it). If any image fails to decode the procedural
+   street below is drawn instead (kept as the fallback). To change the art: replace the .b64 files, re-measure FR. */
+var FR={w:1024,h:1536,cx:530,foot:1338,doorH:200,
+  sign:{x:308,y:850,w:437,h:80}, open:{x:322,y:1040,w:104,h:56}, lamp:{x:225,y:575}};
+var ARTK=["sky","skyline","sides","store","street"], artImg={}, artState="none", artCbs=[];
+function loadArt(cb){
+  if(artState==="ok"||artState==="fail"){ cb(); return; }
+  artCbs.push(cb); if(artState==="loading") return;
+  var src=(typeof TITLE_ART_SRC!=="undefined")?TITLE_ART_SRC:null;
+  if(!src){ artState="fail"; var c0=artCbs; artCbs=[]; c0.forEach(function(f){ f(); }); return; }
+  artState="loading"; var left=ARTK.length, bad=false;
+  ARTK.forEach(function(k){ var im=new Image();
+    im.onload=function(){ artImg[k]=im; if(--left===0) done(); };
+    im.onerror=function(){ bad=true; if(--left===0) done(); };
+    im.src=src[k]||""; });
+  function done(){ artState=bad?"fail":"ok"; if(bad) artImg={}; var c=artCbs; artCbs=[]; c.forEach(function(f){ f(); }); }
 }
+function freeArt(){ artImg={}; if(artState==="ok"||artState==="loading") artState="none"; }
 
 /* ---- layout (css px): the ground line gy is where the store and its neighbours stand ---- */
 function geom(){
@@ -219,10 +217,10 @@ function measure(){
   cv.width=Math.round(VW*Q); cv.height=Math.round(VH*Q); cv.style.width=VW+"px"; cv.style.height=VH+"px";
 }
 function bake(){
+  if(artState==="ok"){ bakeArt(); return; }
   noisePat=null;
   var G=geom(), sky=bakeSky(G), clouds=bakeClouds(), far=bakeSkyline(G,false), near=bakeSkyline(G,true), lb=building(G,-1,3), rb=building(G,1,9), store=bakeStore(G), st=bakeStreet(G), lamp=bakeLamp(G), vig=bakeVignette();
   var by=G.gy-VH*0.01;
-  var by0=G.gy-VH*0.01;
   // each layer: where it is drawn, how it flies in (dx,dy from, t0..t1, easing, fades), and how it sways (ax,ay px, phase)
   L={G:G, sky:{s:sky, x:0, y:0, f:{t0:0,t1:0.55,fade:1,ease:eOut}},
     clouds:{s:clouds, x:0, y:VH*0.1, f:{t0:0.2,t1:0.9,fade:1,ease:eOut}, Wc:Math.round(VW*1.5)},
@@ -235,9 +233,85 @@ function bake(){
     lamp:{s:lamp.s, x:lamp.x, y:lamp.y, f:{t0:1.1,t1:1.65,dy:-VH*0.5,ease:eBack}, glow:lamp.glow},
     vig:{s:vig, x:0, y:0, f:{t0:0.1,t1:0.8,fade:1,ease:eOut}}
   };
-  [["sky","sky"],["far","far"],["near","near"],["store","store"],["street","st"]].forEach(function(p){ var a=artLayer(p[0],G,by0); if(a){ L[p[1]].s=a.s; L[p[1]].x=a.x; L[p[1]].y=a.y; } });
-  var bl=artLayer("buildings",G,by0); if(bl){ L.lb.s=bl.s; L.lb.x=bl.x; L.lb.y=bl.y; L.rb=null; }
-  if(artImg.store){ L.store.sign=null; }
+}
+
+
+/* ---- the painted street: one frame transform, layers as offsets on it ---- */
+function bakeArt(){
+  var tall=VW/VH<0.7, sc, ox, oy;
+  if(tall){ sc=VW/826; oy=VH-FR.h*sc; ox=Math.min(0,Math.max(VW-FR.w*sc, VW/2-FR.cx*sc)); }   // phones: the whole store fits across; the frame sits low so the sky above the store is calm (card + button there)
+  else {                                                                                       // landscape / tablet: the WHOLE frame by height (sky, skyline, store, sidewalk, street), small enough that the card + button stay above the sign; the width is filled by mirrored copies
+    sc=Math.min(VH/FR.h,(VH/2-105)/686); oy=VH-FR.h*sc; ox=VW/2-FR.cx*sc; }
+  var c=document.createElement("canvas"); c.width=c.height=1; var cx=c.getContext("2d"), sk=artImg.sky;
+  cx.drawImage(sk,0,0,sk.naturalWidth,2,0,0,1,1); var px=cx.getImageData(0,0,1,1).data;
+  var ft=function(t0,t1,o){ o.t0=t0; o.t1=t1; return o; };
+  L={art:true, wide:!tall, s:sc, ox:ox, oy:oy, top:"rgb("+px[0]+","+px[1]+","+px[2]+")", foot:Math.round(oy+FR.foot*sc), disp:Math.round(clamp(170*sc,48,230)),
+    G:{gy:oy+FR.foot*sc, walk:0},
+    f:{ sky:ft(0,0.55,{fade:1,ease:eOut}), skyline:ft(0.15,0.8,{dy:VH*0.22,fade:1,ease:eOut,ax:1.2,ph:0.4}),
+        sideL:ft(0.35,0.95,{dx:-VW*0.6,ease:eOut,ax:2,ph:1.3}), sideR:ft(0.45,1.05,{dx:VW*0.6,ease:eOut,ax:2,ph:1.3}),
+        store:ft(0.8,1.45,{dy:VH*0.55,ease:eBack,ax:2.6,ph:2.9}), street:ft(0.55,1.15,{dy:VH*0.25,ease:eOut,ax:3.4,ph:3.7}) }};
+  if(!tall){ L.bw=[0,184]; L.bandR=mkBand(FR.w-184,FR.w); }
+}
+function mkBand(x0,x1){      // an edge strip of the two building layers, darkened a little: repeated (mirrored) outside the frame on landscape screens
+  var c=document.createElement("canvas"); c.width=x1-x0; c.height=FR.h; var x=c.getContext("2d");
+  ["sides","store"].forEach(function(k){ var im=artImg[k], kk=im.naturalWidth/FR.w; x.drawImage(im,x0*kk,0,(x1-x0)*kk,im.naturalHeight,0,0,x1-x0,FR.h); });
+  x.globalCompositeOperation="source-atop"; x.fillStyle="rgba(10,6,24,0.24)"; x.fillRect(0,0,c.width,c.height); return c;
+}
+function tile(k,o){          // the whole frame layer, then mirrored copies left and right (sky, skyline, street)
+  var im=artImg[k], W=FR.w*L.s, n=Math.ceil(VW/W)+1;
+  g.globalAlpha=o.a;
+  for(var j=-n;j<=n;j++){ var xj=L.ox+o.x+j*W; if(xj>VW||xj+W<0) continue;
+    if(!(j&1)) g.drawImage(im,xj,L.oy+o.y,W+1,FR.h*L.s);
+    else { g.save(); g.translate(xj+W+1,L.oy+o.y); g.scale(-1,1); g.drawImage(im,0,0,W+1,FR.h*L.s); g.restore(); } }
+  g.globalAlpha=1;
+}
+function bands(o,right){
+  var s=L.s, bw=L.bw[1], band=L.bandR, w=bw*s;     // both sides repeat the right-hand strip (townhouses and barber poles: no lettering, no lamp post to repeat)
+  g.globalAlpha=o.a;
+  for(var t=1;t<40;t++){ var sx= right? L.ox+o.x+FR.w*s+(t-1)*w : L.ox+o.x-t*w;
+    if(right? sx>VW : sx+w<0) break;
+    if(t&1){ g.save(); g.translate(sx+w+1,L.oy+o.y); g.scale(-1,1); g.drawImage(band,0,0,w+1,FR.h*s); g.restore(); }
+    else g.drawImage(band,sx,L.oy+o.y,w+1,FR.h*s); }
+  if(!right){ var ex=L.ox+o.x, y0=L.oy+o.y+500*s, hh=830*s, gr=g.createLinearGradient(ex-14*s,0,ex+10*s,0);   // the seam on the left: a dark gap between buildings
+    gr.addColorStop(0,"rgba(10,6,24,0)"); gr.addColorStop(0.55,"rgba(10,6,24,0.75)"); gr.addColorStop(1,"rgba(10,6,24,0)"); g.fillStyle=gr; g.fillRect(ex-14*s,y0,24*s,hh); }
+  g.globalAlpha=1;
+}
+function artOff(f){          // a layer's fly-in + sway offset at time T (null until it starts)
+  var u=clamp((T-f.t0)/(f.t1-f.t0),0,1); if(u<=0) return null;
+  var e=f.ease(u), sw=reduced?0:clamp((T-SETTLED+0.3)/1.2,0,1);
+  return {x:(f.dx||0)*(1-e)+(f.ax||0)*sw*Math.sin(T*0.31+(f.ph||0)), y:(f.dy||0)*(1-e), a:f.fade?clamp(u*1.5,0,1):1};
+}
+function put(k,f,x0,x1,o){   // frame columns x0..x1 of layer k, at its offset
+  var im=artImg[k], kk=FR.w/im.naturalWidth, sc=L.s;
+  x0=Math.max(0,x0,(-L.ox-o.x-6)/sc); x1=Math.min(FR.w,x1,(VW-L.ox-o.x+6)/sc); if(x1<=x0) return;
+  g.globalAlpha=o.a; g.drawImage(im,x0/kk,0,(x1-x0)/kk,im.naturalHeight,L.ox+o.x+x0*sc,L.oy+o.y,(x1-x0)*sc,FR.h*sc); g.globalAlpha=1;
+}
+function fx(x,o){ return L.ox+(o?o.x:0)+x*L.s; }
+function fy(y,o){ return L.oy+(o?o.y:0)+y*L.s; }
+function drawArt(){
+  g.setTransform(Q,0,0,Q,0,0); g.globalCompositeOperation="source-over"; g.imageSmoothingEnabled=true; g.imageSmoothingQuality="high";
+  var F=L.f, o;
+  g.fillStyle=L.top; g.fillRect(0,0,VW,VH);                                   // above a low-anchored frame: the sky's own top colour
+  var wd=L.wide;
+  if((o=artOff(F.sky))) { if(wd) tile("sky",o); else put("sky",F.sky,0,FR.w,o); }
+  if((o=artOff(F.skyline))) { if(wd) tile("skyline",o); else put("skyline",F.skyline,0,FR.w,o); }
+  var oL=artOff(F.sideL), oR=artOff(F.sideR);
+  if(wd){ if(oL) bands(oL,false); if(oR) bands(oR,true); }
+  if(oL) put("sides",F.sideL,0,FR.w/2,oL); if(oR) put("sides",F.sideR,FR.w/2,FR.w,oR);
+  var oS=artOff(F.store); if(oS) put("store",F.store,0,FR.w,oS);
+  var oT=artOff(F.street); if(oT) { if(wd) tile("street",oT); else put("street",F.street,0,FR.w,oT); }
+  // light pulses over the painted sign, the OPEN neon and the lamp (frame coordinates, riding their layer's offset)
+  var up=oS?clamp((T-1.5)/0.3,0,1):0;
+  if(up>0){
+    var fl= reduced? 0.10 : 0.09+0.04*Math.sin(T*9.3)*Math.sin(T*2.1)+(((T*0.43)%1)<0.025?-0.09:0); if(T<1.9&&!reduced) fl*=(Math.sin(T*70)>0?1:0.3); fl=Math.max(0,fl)*up;
+    var sg=FR.sign, op=FR.open, sx0=fx(sg.x,oS), sy0=fy(sg.y,oS), sw0=sg.w*L.s, sh0=sg.h*L.s;
+    g.globalCompositeOperation="lighter"; g.fillStyle=rgba(C.gold,fl); g.fillRect(sx0,sy0,sw0,sh0); glowAt(sx0+sw0/2,sy0+sh0/2,sw0*0.62,C.gold,fl*1.1);
+    var pl=reduced?0.5:0.5+0.5*Math.sin(T*3.1); glowAt(fx(op.x+op.w/2,oS),fy(op.y+op.h/2,oS),op.w*L.s*0.8,C.pink,0.10+0.14*pl*up);
+    var lf=reduced?0.4:0.4+0.07*Math.sin(T*4.1)+0.04*Math.sin(T*13); if(oL) glowAt(fx(FR.lamp.x,oL),fy(FR.lamp.y,oL),70*L.s,C.gold,lf*0.5*up);
+    g.globalCompositeOperation="source-over";
+  }
+  g.fillStyle=vgrad(g,VH*0.84,VH,[[0,"rgba(8,6,24,0)"],[1,"rgba(8,6,24,0.55)"]]); g.fillRect(0,VH*0.84,VW,VH*0.16);   // keeps the credits line readable over the crosswalk
+  drawGag();
 }
 
 /* ---- drawing ---- */
@@ -253,6 +327,7 @@ function lay(l){            // draws one layer at time T (fly-in, then sway); re
 }
 function glowAt(cx,cy,r,col,a){ g.globalAlpha=1; var gr=g.createRadialGradient(cx,cy,0,cx,cy,r); gr.addColorStop(0,rgba(col,a)); gr.addColorStop(1,rgba(col,0)); g.fillStyle=gr; g.fillRect(cx-r,cy-r,2*r,2*r); }
 function draw(){
+  if(L.art){ drawArt(); return; }
   g.setTransform(Q,0,0,Q,0,0); g.globalCompositeOperation="source-over";
   var s=L.sky; lay(s);
   // clouds: one tile, drifting sideways and wrapping
@@ -277,11 +352,11 @@ function draw(){
 /* ---- the gag on the street ---- */
 function ok(img){ return img && img.complete && img.naturalWidth>0; }
 function startGag(){
-  var d=gag.dir=(gag.n++%2)?-1:1, G=L.G, disp=Math.round(clamp(78*U,56,110)), M=disp*1.2, vg=340*U;
-  var F1=VW*0.44, skidD=VW*0.07, F2=F1+skidD, ta=(F1+M)/vg, tb=ta+0.45, tc=tb+0.3, dr=(VW+M-F2)/(vg*1.1);
+  var d=gag.dir=(gag.n++%2)?-1:1, G=L.G, disp=L.disp||Math.round(clamp(78*U,56,110)), M=disp*1.2, vg=disp*4.4;
+  var F1=VW*0.30, skidD=VW*0.07, F2=F1+skidD, ta=(F1+M)/vg, tb=ta+0.45, tc=tb+0.3, dr=(VW+M-F2)/(vg*1.1);
   var Fs=F2-disp*1.5, b0=0.5, db=(Fs+M)/(vg*1.02), bgo=tc+0.2, bdr=dr*1.1;
   gag.seg={disp:disp,M:M,vg:vg,F1:F1,F2:F2,ta:ta,tb:tb,tc:tc,td:tc+dr,dr:dr,Fs:Fs,b0:b0,db:db,bgo:bgo,bdr:bdr,
-    cardT:ta+0.08, cardD:0.85, end:Math.max(tc+dr,bgo+bdr)+0.2, foot:Math.round(G.gy+G.walk*0.9)};
+    cardT:ta+0.08, cardD:0.85, end:Math.max(tc+dr,bgo+bdr)+0.2, foot:L.foot||Math.round(G.gy+G.walk*0.9)};
   gag.seg.fade=gag.seg.cardT+gag.seg.cardD+1.8; gag.seg.end=Math.max(gag.seg.end,gag.seg.fade+0.5);
   gag.t=0;
 }
@@ -318,10 +393,11 @@ function drawGag(){
   var X=function(f){ return d>0? f : W-f; }, foot=s.foot, bdisp=Math.round(s.disp*1.14);
   var COLS=8, cyc=88*(s.disp/84);
   var gy=guyF(s,t), by=bullyF(s,t);
+  var UU=s.disp/78;
   // dust where he skids
   if(gy.m==="skid"||(t>s.tb&&t<s.tb+0.5)){ var du=clamp((t-s.ta)/0.9,0,1);
-    for(var i=0;i<5;i++){ var px=X(s.F1+(s.F2-s.F1)*i/5-d*0)- d*(i*5*U)*0, a=(1-du)*0.5*(1-i/6), rad=(5+i*3.5)*U*(0.5+du);
-      g.fillStyle="rgba(255,243,224,"+a+")"; g.beginPath(); g.arc(X(s.F1-6*U+ (s.F2-s.F1)*(i/4))-d*(i*6*U), foot-3*U-du*8*U*(i%2?1:0.5), rad, 0, 6.2832); g.fill(); } }
+    for(var i=0;i<5;i++){ var px=X(s.F1+(s.F2-s.F1)*i/5-d*0)- d*(i*5*UU)*0, a=(1-du)*0.5*(1-i/6), rad=(5+i*3.5)*UU*(0.5+du);
+      g.fillStyle="rgba(255,243,224,"+a+")"; g.beginPath(); g.arc(X(s.F1-6*UU+ (s.F2-s.F1)*(i/4))-d*(i*6*UU), foot-3*UU-du*8*UU*(i%2?1:0.5), rad, 0, 6.2832); g.fill(); } }
   var items=[];
   if(ok(pimg)){ items.push({y:foot, fn:function(){
     var row=gy.m==="run"?2:0, fr=gy.m==="run"?Math.floor(gy.f/cyc*COLS)%COLS:0; if(fr<0) fr+=COLS;
@@ -368,7 +444,7 @@ function tick(ts){
 }
 function halt(){
   running=false; if(raf){ cancelAnimationFrame(raf); raf=0; }
-  L=null; gag.t=-1; if(cv){ cv.width=1; cv.height=1; }
+  L=null; gag.t=-1; freeArt(); if(cv){ cv.width=1; cv.height=1; }
 }
 function onVis(){ if(!document.hidden&&running&&!raf){ last=0; acc=0; raf=requestAnimationFrame(tick); } }
 function onResize(){
@@ -390,14 +466,15 @@ function start(o){
   if(raf){ cancelAnimationFrame(raf); raf=0; }
   var intro=!!(o&&o.intro)&&!reduced&&!seen;
   seen=true;
-  measure(); bake(); g=cv.getContext("2d");
-  T= intro? 0 : SETTLED+0.8; gag.t=-1; gag.next= T+(intro? GAG_FIRST : 2.2); acc=0; last=0; hold=false;
-  running=!reduced;
-  render();
-  if(running) raf=requestAnimationFrame(tick);
+  running=!reduced; L=null; T= intro? 0 : SETTLED+0.8; gag.t=-1; gag.next= T+(intro? GAG_FIRST : 2.2); acc=0; last=0; hold=false;
+  loadArt(function(){                                                    // the painted layers decode first (a few ms: they are in the page); fails -> the procedural street
+    if(!host.classList.contains("on")||L) return;
+    measure(); bake(); g=cv.getContext("2d");
+    render();
+    if(running&&!raf) raf=requestAnimationFrame(tick);
+  });
 }
 function settle(){                      // a tap during the intro: every layer in place, no gag
-  if(!L) return;
   if(T<SETTLED+0.8) T=SETTLED+0.8;
   gag.t=-1; gag.next=T+1.8; render();
 }
