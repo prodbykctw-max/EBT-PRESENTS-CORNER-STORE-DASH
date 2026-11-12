@@ -19,6 +19,8 @@ const b64 = readFileSync(here('board.b64'), 'utf8').trim();
 const playerB64 = readFileSync(here('player.b64'), 'utf8').trim();
 const bullyB64 = readFileSync(here('bully.b64'), 'utf8').trim();
 const itemsB64 = readFileSync(here('items.b64'), 'utf8').trim();
+const cartPB64 = readFileSync(here('cartp.b64'), 'utf8').trim();   // the ending: you in the shopping cart (portrait frames, side-view wheel frames)
+const cartSB64 = readFileSync(here('carts.b64'), 'utf8').trim();
 // GSAP (motion): one vendored copy, shared with the drive (public/drive/vendor/gsap.min.js)
 const gsapSrc = readFileSync(here('../public/drive/vendor/gsap.min.js'), 'utf8');
 
@@ -28,6 +30,8 @@ const out = shell
   .replace('%%PLAYER%%', playerB64)
   .replace('%%BULLY%%', bullyB64)
   .replace('%%ITEMS%%', itemsB64)
+  .replace('%%CARTP%%', cartPB64)
+  .replace('%%CARTS%%', cartSB64)
   .replace('%%GAME%%', game)
   .replaceAll('\\u2026', '…')
   .replaceAll('\\uD83D\\uDD0A', '🔊')

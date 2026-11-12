@@ -89,6 +89,24 @@ it does not, edit `MAP` in `config.js` rather than stretching the image, then re
 Power-ups, a second antagonist, multiple store floors, and audio. The single-bully chase is
 the whole hook — everything above is a v2 conversation, not a scope creep.
 
+## The ending and the opening
+
+**Opening.** On the first load the title card assembles instead of just being there (about 2.3 s): the dimmed store comes up
+out of black, the pink card slams in, EBT PRESENTS, CORNER STORE drops in letter by letter, DASH lands, TAP TO START pops in and
+glows; then the card floats a little. A tap during that skips to the finished card without starting the game; a tap after it
+starts as before. Same card, words and colours; motion only. Reduced motion: no assembly.
+
+**Ending (winning the store run only; CAUGHT / THE BULLY GOT YOU! is unchanged).** Three beats, a tap skips to the next:
+1. *Victory:* play freezes, the screen flashes white three times, a 2.4 s synthesised fanfare plays, YOU WIN! slams in with a
+   shake, you pop up sitting in a shopping cart with your arms up, then the score fills part by part like an EXP bar
+   (items, drive bonus, checkout, speed bonus, beat him out, never caught: only the parts that applied, the same numbers as
+   before) into the total, with a tick sound; the two bonuses get extra flair.
+2. *Hall of Fame:* a framed card with you in the cart and a shine sweep, WELCOME TO THE HALL OF FAME!, the final score, then the
+   initials, SAVE SCORE and the leaderboard (the same controls and ids as the old end screen), plus ROLL CREDITS and RUN IT BACK / MAIN MENU.
+3. *Credits:* the title and the title screen's credit lines (plus the shopping cart model's) scroll up while you ride the cart
+   along the bottom, wheels turning; it ends on RUN IT BACK / MAIN MENU. No names or roles beyond those credit lines.
+Reduced motion: no flashes or counting; the victory screen is one still page and the credits a static list.
+
 ## Store motion: why it was choppy and what fixed it
 
 This section is about the live store game (`standalone/csd.js`), not the grid prototype the rest of this document
