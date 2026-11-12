@@ -73,8 +73,15 @@ const nextFrame = QA ? (f) => setTimeout(f, 16) : requestAnimationFrame;
 // screen-to-screen fades (the loader lifting, the fade to black at the end): the store page's SCREEN_FADE, one pace
 const SCREEN_FADE = 0.3;
 const cancelFrame = QA ? clearTimeout : cancelAnimationFrame;
+// A drive that ends in RESTART (pause menu) or BUSTED is answered by the host starting the drive again in the same page; that start is a retry, which goes
+// straight to the chase (the city flyover is the opening of a new game only). Set by finish(), read and cleared by the next startDrive.
+let retryNext = false;
+// the opening flyover (see "the opening flyover" below): ?qa and ?bot start on foot at once as always; ?qa&fly asks for it, ?nofly never plays it
+const FLY_QS = new URLSearchParams(location.search);
 
-export async function startDrive({ mount = document.body, muted = false, onDone = () => {}, onProgress = () => {}, look: lookOption } = {}) {
+export async function startDrive({ mount = document.body, muted = false, onDone = () => {}, onProgress = () => {}, look: lookOption, intro: introOption } = {}) {
+  const RETRY = retryNext; retryNext = false;
+  WIND.value = 0;   // the tree canopies' sway clock starts from the same place on every start (a restart is exactly a fresh start)
   // which look: the realistic look (the default) or the comic ink look (?look=comic, or startDrive({ look: 'comic' })); mode.js
   const REAL = resolveLook(lookOption);
   // ---------- load (the game has no loader of its own, so the drive shows one) ----------
@@ -360,6 +367,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     last = performance.now();                                                     // resume without a time jump
   };
   const kd = (e) => {
+    if (fly && !paused) { e.preventDefault(); audio.unlock(); endFly(); return; }   // any key ends the opening flyover (the key is only that: not also a pause, a step or a horn)
     if (e.code === 'KeyP' || e.code === 'Escape') { e.preventDefault(); setPaused(!paused); return; }
     audio.unlock();
     const k = KEYMAP[e.code]; if (!k) return; e.preventDefault();
@@ -492,7 +500,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   }
   // phones rotate before they report the new size (iOS especially): also re-check on orientation / visual-viewport
   // changes, and every frame (cheap string compare), so the picture is never left squashed or stretched
-  addEventListener('orientationchange', () => { setTimeout(resize, 60); setTimeout(resize, 400); });
+  const onTurn = () => { setTimeout(resize, 60); setTimeout(resize, 400); };
+  addEventListener('orientationchange', onTurn);
   window.visualViewport?.addEventListener('resize', resize);
 
   const api = { camOverride: null }; // test hooks (filled in below)
@@ -793,7 +802,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     } else { stick.on = false; stick.x = stick.y = 0; }
     showStick();
   };
-  const stickOK = (t) => state === 'onfoot' && !paused && !t?.closest?.('button, [data-skip], [data-pause], .drive-paused, .drive-busted, .dp');
+  const stickOK = (t) => state === 'onfoot' && !fly && !paused && !t?.closest?.('button, [data-skip], [data-pause], .drive-paused, .drive-busted, .dp');
   root.addEventListener('touchstart', (e) => {
     if (stick) return; const t = e.changedTouches[0]; if (!t || !stickOK(e.target)) return;
     stick = { id: t.identifier, ax: t.clientX, ay: t.clientY, cx: t.clientX, cy: t.clientY, x: 0, y: 0, on: false };
@@ -1161,6 +1170,71 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     setText(rGap, race && race.tail ? 'ON YOUR TAIL!' : state === 'onfoot' ? 'RUN!' : `+${gapS.toFixed(1)}s`);
   }
 
+  // ---------- the opening flyover ----------
+  // The first start of a game opens with a swoop over the city before the chase: the camera begins high over the east end of Auburn Ave, dives past the EBT Corner Store, runs the street back
+  // west past your parked car, then swings round you (you with the bully behind you, both standing still) and settles behind the bully, which is exactly where the on-foot camera sits, so the
+  // chase starts with no jump. Nothing but the camera is new: the street, the people and the traffic carry on as usual, you and the bully do not move (updateFoot does not run, so the chase clock,
+  // his chase and every hint wait), the HUD and the stick are held off (drive.css .flying) and a tap or any key goes straight to the on-foot start. Not played on a restart or after BUSTED
+  // (the host starts the drive again: retryNext), with ?qa / ?bot (they start on foot at once; ?qa&fly asks for it), ?nofly, ?skipfoot, or with reduced motion set.
+  const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const FLY_ON = (introOption ?? !RETRY) && !SKIPFOOT && !BOT && !REDUCED && !FLY_QS.has('nofly') && (!QA || FLY_QS.has('fly'));
+  const FLY = { dur: 4.8, clear: 5, ease: 0.35 };   // seconds; metres of air kept over the highest thing under the camera; the pace at the very start (0 = from rest; the end is always at rest)
+  const flyFocus = new THREE.Vector3();   // where the sun's shadow box sits during it: under what the camera is looking at
+  let fly = FLY_ON ? { t: 0, pos: null, look: null, floor: null, end: null } : null;
+  if (fly) { root.classList.add('flying'); root.insertAdjacentHTML('beforeend', '<div class="drive-flyskip">TAP TO SKIP</div>'); }
+  function endFly(skipped = true) {
+    if (!fly) return;
+    fly = null; root.classList.add('flyin'); root.classList.remove('flying'); root.querySelector('.drive-flyskip')?.remove(); setTimeout(() => root.classList.remove('flyin'), 600);
+    if (skipped) { camPos.set(0, 0, 0); camLook.set(0, 0, 0); }   // skipped: the next frame puts the camera on its on-foot spot, as on a start with no flyover (a flyover that ran to the end is already there)
+    last = performance.now();
+  }
+  // a tap or a key anywhere ends it (the touch that skips it is not also the start of a run)
+  const flyTap = (e) => { if (!fly) return; e.preventDefault(); e.stopPropagation(); audio.unlock(); endFly(); };
+  for (const ev of ['pointerdown', 'touchstart']) root.addEventListener(ev, flyTap, { capture: true, passive: false });
+  /** the camera's path, built on the first flyover frame once the on-foot camera spot is known (tp, tl: where it will sit; the path ends exactly there) */
+  function buildFlight(tp, tl) {
+    const f = fly, at = (s, d, h) => { const q = route.at(s, d); return new THREE.Vector3(q.x, q.z + h, -q.y); };
+    const C = { x: me.gx, y: me.gy }, fx = Math.cos(camYaw), fy = Math.sin(camYaw), lx = -fy, ly = fx;
+    // the swing round you: from out in front of you (the way you run) round one side of you to behind you, coming down as it comes in. It takes the side with the lower roofs
+    // under it (a tower beside the street would send the camera over its top and back down)
+    const swingOn = (sd) => [[0, 32, 28], [60, 21, 22], [110, 15, 16], [150, 11, 10]].map(([a, r, h]) => {
+      const c = Math.cos(a * Math.PI / 180), sn = Math.sin(a * Math.PI / 180) * sd;
+      return new THREE.Vector3(C.x + (fx * c + lx * sn) * r, me.zs + h, -(C.y + (fy * c + ly * sn) * r));
+    });
+    const roofs = (pts) => pts.reduce((m, q) => Math.max(m, roofAt(q.x, -q.z)), 0);
+    const swing = [swingOn(1), swingOn(-1)].sort((a, b) => roofs(a) - roofs(b))[0];
+    const face = new THREE.Vector3(C.x, me.zs + 1.4, -C.y);   // you
+    const P = [at(1190, -20, 105), at(1152, -8, 52), at(1108, 3, 28), at(1000, 0, 34), at(820, 0, 40), at(640, 0, 42), at(460, 0, 42), at(290, 0, 38), at(150, 0, 34), ...swing, tp.clone()];
+    const L = [at(1122, -6, 2), at(1112, -6, 4), at(1040, 0, 6), at(930, 0, 6), at(750, 0, 6), at(570, 0, 6), at(390, 0, 6), at(230, 0, 6), at(100, 0, 4), face.clone(), face.clone(), face.clone(), face.clone(), tl.clone()];
+    f.end = { pos: tp.clone(), look: tl.clone() };
+    f.pos = new THREE.CatmullRomCurve3(P, false, 'centripetal'); f.look = new THREE.CatmullRomCurve3(L, false, 'centripetal');
+    // never inside a building or under the road: along the path, the camera keeps FLY.clear metres over the highest roof, deck or ground under it
+    // (and a little before and after, so it climbs over a roof edge before it gets there), city.isFree marking a footprint it must be above in any case
+    const N = 240, fl = new Float32Array(N + 1), p = new THREE.Vector3();
+    for (let i = 0; i <= N; i++) {
+      f.pos.getPoint(i / N, p); const x = p.x, y = -p.z;
+      const up = Math.max(roofAt(x, y), ground(x, y) + LEVEL.TERRAIN, surfAt(x, y, ground(x, y) + 1.2) ?? -Infinity);
+      fl[i] = up + FLY.clear + (city.isFree(x, y) ? 0 : 3);
+    }
+    const sm = new Float32Array(N + 1);
+    for (let i = 0; i <= N; i++) { let m = -Infinity; for (let k = -7; k <= 7; k++) m = Math.max(m, fl[Math.min(N, Math.max(0, i + k))]); sm[i] = m; }
+    for (let i = 0; i <= N; i++) { let a = 0, n = 0; for (let k = -6; k <= 6; k++) { a += sm[Math.min(N, Math.max(0, i + k))]; n++; } fl[i] = a / n; }
+    f.floor = fl;
+  }
+  /** the camera at flyover time t: (position, look) written into camPos / camLook */
+  function flyCamera(dt, tp, tl) {
+    const f = fly; if (!f.pos) buildFlight(tp, tl);
+    // the pace: it starts from rest (the picture it opens on is held while the loader lifts) and comes to rest exactly where the on-foot camera is (a Hermite curve with slope FLY.ease at the start and 0 at the end)
+    f.t += dt; const k = Math.min(1, f.t / FLY.dur), u = FLY.ease * (k * k * k - 2 * k * k + k) + (-2 * k * k * k + 3 * k * k);
+    f.pos.getPoint(u, camPos); f.look.getPoint(u, camLook);
+    const fl = f.floor, x = u * (fl.length - 1), i = Math.min(fl.length - 2, Math.floor(x)), floor = fl[i] + (fl[i + 1] - fl[i]) * (x - i);
+    camPos.y = Math.max(camPos.y, floor);
+    const w = THREE.MathUtils.smoothstep(u, 0.8, 1);   // the last stretch settles onto where the on-foot camera is NOW (it is the same place it was when the path was made, unless you were moved)
+    if (w > 0) { camPos.addScaledVector(tmp.copy(tp).sub(f.end.pos), w); camLook.addScaledVector(tmp.copy(tl).sub(f.end.look), w); }
+    flyFocus.set(camLook.x, ground(camLook.x, -camLook.z), camLook.z);
+    if (k >= 1) endFly(false);
+  }
+
   // ---------- loop ----------
   let last = performance.now(), raf = 0, acc = 0;
   let holding = false;   // the first picture is up under the loader; nothing moves until the loader has faded off it
@@ -1194,14 +1268,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (state === 'onfoot' || (race && him.o.visible)) {
       // on foot: the same fixed 1/120 s steps as the car, drawn between the last two (a phone's frame times wobble
       // between 8 and 33 ms; moving people by whatever each frame happened to be made every step a different size)
-      footAcc += dt;
+      footAcc = fly ? 0 : footAcc + dt;   // (during the flyover nobody moves)
       while (footAcc >= FIXED) {
         footAcc -= FIXED;
         for (const p of [me, him]) { p.px = p.x; p.py = p.y; }
         if (state === 'onfoot') updateFoot(FIXED); else updateHimLeft(FIXED);   // (getIn() may put you in the car mid-way)
       }
       const al = footAcc / FIXED;
-      if (state === 'onfoot') { posePerson(me, dt, al); focus.x = me.gx; focus.y = me.gy; focus.z = me.zs; world.focus = crowd.focus = focus; hazardMat.opacity = Math.floor(now / 380) % 2 ? 1 : 0.12; markerSprite.position.y = 2.9 + Math.sin(now / 180) * 0.15; }
+      if (state === 'onfoot') { posePerson(me, dt, al); focus.x = fly ? flyFocus.x : me.gx; focus.y = fly ? -flyFocus.z : me.gy; focus.z = fly ? flyFocus.y : me.zs; world.focus = crowd.focus = focus; hazardMat.opacity = Math.floor(now / 380) % 2 ? 1 : 0.12; markerSprite.position.y = 2.9 + Math.sin(now / 180) * 0.15; }
       if (him.o.visible) posePerson(him, dt, al);
     }
     if (race && state === 'driving') updateRace(dt);
@@ -1326,7 +1400,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const camGap = Math.hypot(camera.position.x - cutAt.x, camera.position.z - cutAt.z);
     CUT.uCutPos.value.copy(cutAt);
     CUT.uCutPos.value.y -= 0.75;
-    CUT.uCutR.value = state === 'onfoot' ? Math.min(25, Math.max(11, camGap + 3)) : 0.001;
+    CUT.uCutR.value = state === 'onfoot' && !fly ? Math.min(25, Math.max(11, camGap + 3)) : 0.001;
 
     // camera: rear third-person chase view, low and close behind the car, anchored on the car's own position so it
     // follows every lane change.
@@ -1403,7 +1477,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       }
     }
     if (!camPos.lengthSq()) { camPos.copy(targetPos); camLook.copy(targetLook); }
-    if (state === 'parked' || state === 'late') { camPos.copy(targetPos); camLook.copy(targetLook); }
+    if (fly) flyCamera(dt, targetPos, targetLook);
+    else if (state === 'parked' || state === 'late') { camPos.copy(targetPos); camLook.copy(targetLook); }
     else if (state === 'onfoot') {
       // on foot: a critically damped follow (no overshoot, the same at any frame rate) in place of the lerp below,
       // whose pull was a fixed share of the gap per frame: on a phone's uneven frames the camera surged and lagged
@@ -1441,9 +1516,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
     if (RL) {   // the realistic look's shadow box rides a little ahead of the car and moves in whole shadow texels (no shimmer)
       const yawF = state === 'onfoot' ? camYaw : camA, fwd = tmp.set(Math.cos(yawF), 0, -Math.sin(yawF));   // (on foot the shadow box follows the runner and the way the camera faces)
-      RL.placeSun(sun, state === 'onfoot' ? me.o.position : carRig.position, fwd, sun.userData.dir);
+      RL.placeSun(sun, state === 'onfoot' ? (fly ? flyFocus : me.o.position) : carRig.position, fwd, sun.userData.dir);
     } else {
-      const sunAt = state === 'onfoot' ? me.o.position : carRig.position;
+      const sunAt = state === 'onfoot' ? (fly ? flyFocus : me.o.position) : carRig.position;
       sun.position.copy(sunAt).add(tmp.copy(sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35)).multiplyScalar(220));
       sun.target.position.copy(sunAt);
     }
@@ -1488,8 +1563,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   let finished = false;
   function finish() {
     if (finished) return; finished = true;   // SKIP tapped twice, or SKIP and the bot's timer: one exit
-    cancelFrame(raf); audio.stop(); document.removeEventListener('visibilitychange', onHide);
+    if (result.busted || result.restart) retryNext = true;   // the host starts the drive again: that start skips the flyover
+    cancelFrame(raf); audio.stop(); document.removeEventListener('visibilitychange', onHide); clearTimeout(flash.t);
     removeEventListener('keydown', kd); removeEventListener('keyup', ku); removeEventListener('resize', resize);
+    removeEventListener('orientationchange', onTurn); window.visualViewport?.removeEventListener('resize', resize);   // (a restart builds the whole drive again: nothing of the last one stays hooked to the page)
     const veil = document.createElement('div'); veil.className = 'drive-veil'; root.appendChild(veil);
     const done = () => {
       renderer.dispose(); renderer.forceContextLoss();   // hand the GPU memory back now, not whenever the page gets round to it
@@ -1506,7 +1583,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   root.querySelector('[data-pause]').addEventListener('click', () => { haptic(HAP.tap); setPaused(true); });
   root.querySelector('[data-resume]').addEventListener('click', () => { haptic(HAP.tap); setPaused(false); });
   root.querySelector('[data-quit]').addEventListener('click', skip);
-  for (const el of root.querySelectorAll('[data-skip], [data-pause], [data-resume], [data-quit]')) tapHaptic(el);
+  // RESTART (pause menu): this drive ends here and the host starts a fresh one, from the very beginning: on foot, the bully behind you, the clock, score, EBT, hits and the race all new
+  // (the drive is built again from its loaded files, so a restart is exactly a fresh boot; the page's own start-again path after BUSTED does the same)
+  root.querySelector('[data-restart]').addEventListener('click', () => { haptic(HAP.tap); paused = false; Object.assign(result, { restart: true }); finish(); });
+  for (const el of root.querySelectorAll('[data-skip], [data-pause], [data-resume], [data-restart], [data-quit]')) tapHaptic(el);
   // leaving the app mid-drive pauses it (a call, a text, the home screen): nothing happens while you're away
   const onHide = () => { if (document.hidden && (state === 'driving' || state === 'countdown' || state === 'onfoot')) setPaused(true); };
   document.addEventListener('visibilitychange', onHide);
@@ -1542,7 +1622,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     tick: (dt) => { tickDt = dt; try { frame(); } finally { tickDt = null; } },
     snapshot: (q = 0.85) => { city.cull(camera, scene.fog); comic.render(); return renderer.domElement.toDataURL('image/jpeg', q); } });
   // live getters (Object.assign would have frozen their values at assignment time)
-  Object.defineProperties(api, { state: { get: () => state }, time: { get: () => t }, race: { get: () => race } });
+  Object.defineProperties(api, { state: { get: () => state }, time: { get: () => t }, race: { get: () => race }, fly: { get: () => (fly ? { t: fly.t, dur: FLY.dur } : null) } });   // (fly: the opening flyover, null once it is over or if there is none)
+api.endFly = endFly;
   // stick: {x, y} overrides the input (tests). x, y, heading are world-plane; walls / solidAt are the collision world the runner and the bully use.
   api.foot = { cam: ON_FOOT_CAM, me, him, homeS, homeD, doorS, doorD, door: DOOR, path: PATH, stick: null, get drag() { return stick; }, get camYaw() { return camYaw; }, set camYaw(v) { camYaw = v; }, trail, walk,
     get walls() { return walk.segs; }, solidAt: (x, y) => walk.solid(x, y, BODY), clearLine: (x0, y0, x1, y1) => walk.clearLine(x0, y0, x1, y1, BODY), doorDist };
@@ -1581,7 +1662,7 @@ const HUD_HTML_REAL = `
 <div class="drive-hint"></div>
 <button class="drive-skip" data-skip aria-label="Skip the drive">SKIP ▸▸</button>
 <button class="drive-pausebtn" data-pause aria-label="Pause"><i></i><i></i></button>
-<div class="drive-paused" hidden><b>PAUSED</b><button type="button" data-resume>RESUME ▶</button><button type="button" class="alt" data-quit>SKIP DRIVE ▸▸</button></div>
+<div class="drive-paused" hidden><b>PAUSED</b><button type="button" data-resume>RESUME ▶</button><button type="button" class="alt" data-restart>RESTART ↻</button><button type="button" class="alt" data-quit>SKIP DRIVE ▸▸</button></div>
 <div class="drive-pad drive-steerpad">
   <button class="dp left" data-k="left" aria-label="Steer left"><svg viewBox="0 0 24 24"><path d="M15 4 7 12l8 8"/></svg></button>
   <button class="dp right" data-k="right" aria-label="Steer right"><svg viewBox="0 0 24 24"><path d="M9 4l8 8-8 8"/></svg></button>
@@ -1607,7 +1688,7 @@ const HUD_HTML = `
 <div class="drive-hint"></div>
 <button class="drive-skip" data-skip aria-label="Skip the drive">SKIP ▸▸</button>
 <button class="drive-pausebtn" data-pause aria-label="Pause"><i></i><i></i></button>
-<div class="drive-paused" hidden><b>PAUSED</b><button type="button" data-resume>RESUME ▶</button><button type="button" class="alt" data-quit>SKIP DRIVE ▸▸</button></div>
+<div class="drive-paused" hidden><b>PAUSED</b><button type="button" data-resume>RESUME ▶</button><button type="button" class="alt" data-restart>RESTART ↻</button><button type="button" class="alt" data-quit>SKIP DRIVE ▸▸</button></div>
 <div class="drive-pad drive-steerpad">
   <button class="dp left" data-k="left" aria-label="Steer left"><svg viewBox="0 0 24 24"><path d="M15 4 7 12l8 8"/></svg></button>
   <button class="dp right" data-k="right" aria-label="Steer right"><svg viewBox="0 0 24 24"><path d="M9 4l8 8-8 8"/></svg></button>

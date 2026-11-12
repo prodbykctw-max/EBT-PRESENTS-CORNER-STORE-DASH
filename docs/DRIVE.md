@@ -495,6 +495,24 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   `lane`, ...), `__drive.race`. `__drive.manual = true` stops the live loop and `__drive.tick(dt)` runs one frame at
   exactly that dt without drawing, so a test can replay a phone's uneven frame times and measure every frame.
 
+## Restart and the opening flyover
+
+**RESTART (pause menu, between RESUME and SKIP DRIVE).** It ends this drive with `result.restart = true` (`finish()`, the same fade to black as every exit) and the host starts a fresh one:
+`standalone/csd.js` (`startWithDrive()`, the same path as "Drive again" after BUSTED) and `public/drive/index.html` (`run()`). So a restart is exactly a fresh boot: the whole drive is built again from the files the page has already loaded
+(no full reload; the files come from the browser's cache), on foot, the bully behind you, the clock, score, EBT, hits and race all new. Nothing is reset in place, because the traffic, crowd, planner, birds and signals all hold state that
+was seeded at build time and a partial reset could never match a fresh start. What makes the second build identical to the first: `WIND.value` is zeroed at the start of `startDrive`, and `landscape.js buildStreetscape` re-seeds its park-tree
+scatter (`seed = 7`; it used to carry on where the last build stopped, so a second drive in the same page planted different trees). The other module-level generators (`isoState` in animals / cars / people-alt / contact, `armRng`, `cardRnd`) only make three.js ids under `withoutRandom`, so they
+change no layout. `finish()` also removes the `orientationchange` and `visualViewport` resize listeners it used to leave behind, and clears the message timer, so restarts do not pile up page listeners. `tools-restart/restart.mjs`
+measures it (a seeded `Math.random` re-seeded at each drive's start: same call count, camera, runner, bully, traffic and the first 40 crowd positions as the first boot; listeners, WebGL contexts, audio contexts and frame timers do not grow across three restarts).
+
+**The opening flyover (first start of a game only).** `drive.js`, "the opening flyover" (`FLY`, `buildFlight`, `flyCamera`, `endFly`): before the chase the camera starts high over the east end of Auburn Ave, dives past the EBT Corner Store, runs the street
+back west past your parked car, then swings round you (and the bully behind you, both standing still) and settles behind the bully, which is exactly where the on-foot camera sits. About 4.8 s, a little slower at the start and the end.
+Only the camera is new: it follows a Catmull-Rom path (keyframes along the real route, `route.at`) kept `FLY.clear` (5 m) over the highest roof, freeway deck or ground under it (`roofAt`, `surfAt`, `city.isFree`, looked at a few metres before and after each point so it climbs over a roof edge in time),
+and the last 20% of the path is blended onto wherever the on-foot camera is now, so the hand-over has no jump (measured: the first on-foot frame after it is the same camera, to the last digit, as a start with no flyover).
+While it plays `updateFoot` does not run (you and the bully stand; the chase clock, his chase and every hint wait), the street, crowd and traffic carry on, the HUD, hint and buttons are held off (`.drive-root.flying` in drive.css) and fade in after,
+the stick is off, the overpass cutaway hole is off, and the sun's shadow box follows what the camera looks at. A tap, click or any key ends it at once on the on-foot start (`api.endFly()`). It does not play on a restart or after BUSTED (`retryNext`, set by `finish()`),
+with reduced motion, with `?bot`, `?skipfoot` or `?nofly`, or under `?qa` unless `?fly` is added (so existing tests start on foot at once). Test hook: `__drive.fly` (`{ t, dur }`, null when over or absent).
+
 ## Controls (mobile-first: the game is played on phones)
 
 You drive it: lane buttons bottom left, pedals bottom right, all held buttons. **Stiff lane steering:** each press
@@ -537,6 +555,7 @@ HUD markup is unchanged.
 | **BRAKE** | ↓ / S | Progressive brake; keep holding for half a second at a standstill to **reverse** (to 11 mph) |
 | **HORN** | Space / H | Anyone on foot in your path up ahead hops clear, dogs bolt, the crowd flinches |
 | SKIP | | Skip the drive |
+| PAUSE (top right) | P / Esc | RESUME, **RESTART** or SKIP DRIVE (see "Restart and the opening flyover") |
 
 ## Sound
 

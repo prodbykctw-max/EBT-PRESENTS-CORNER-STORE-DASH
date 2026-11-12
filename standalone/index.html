@@ -1929,7 +1929,7 @@ function startWithDrive(){
   import(DRIVE_URL).then(function(m){
     return m.startDrive({ mount: mount, muted: !!S.muted, onDone: function(r){
       unmount();
-      if(r && r.busted){ S.mode=""; startWithDrive(); return; }   // hit a cop: jail, then back to the start of the drive
+      if(r && (r.busted||r.restart)){ S.mode=""; startWithDrive(); return; }   // hit a cop (jail) or RESTART on the pause menu: back to the start of the drive
       showStoreHow(r);                                  // you're at the store: its how-to-play first, then the run
     }});
   }).catch(function(e){

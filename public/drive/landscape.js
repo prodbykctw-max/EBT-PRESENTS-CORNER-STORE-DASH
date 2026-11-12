@@ -277,6 +277,7 @@ function treeMaterials(tex) {
 // ------------------------------------------------------------------ streetscape
 const TREE_GREENS = [0x5f8a3e, 0x4f7a34, 0x6e9446, 0x587f3a, 0x7a9a4c, 0x4a6e30];
 export function buildStreetscape(W, ground, route, streets, props, isFree, trees, tex = {}) {
+  seed = 7;   // the park trees' scatter starts from the same place on every build (a restart builds the city again in the same page)
   const put = { tree_round: [], tree_upright: [], lamp: [], signal: [], bench: [], bin: [], hydrant: [], shelter: [] };
   const onRoad = (x, y) => !!streets.index.covering(x, y, null, 0.6);
   // nothing gets planted under an elevated freeway deck
