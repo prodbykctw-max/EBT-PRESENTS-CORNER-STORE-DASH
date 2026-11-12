@@ -916,15 +916,16 @@ function titleAssemble(){
 function titleIdleOff(){ TITLE.idle.forEach(function(t){ t.kill(); }); TITLE.idle=[]; var o=el("ovTitle"); GS&&GS.set([o.querySelector(".card"),el("btnTitle")],{clearProps:"transform,boxShadow"}); }
 /* ---------- the ending (you win the store run): victory -> Hall of Fame -> credits ----------
    1. winSeq: the screen freezes and flashes white (Pokemon's flash), the fanfare plays, YOU WIN! slams in, you pop up
-      sitting in a shopping cart (arms up, bouncing), then the score fills in part by part like an EXP bar.
-   2. hofIn: the Hall of Fame card (you in the cart, in a frame with a shine); the initials entry, SAVE SCORE and the
+      standing behind a shopping cart, hands on the handle (hopping), then the score fills in part by part like an EXP bar.
+   2. hofIn: the Hall of Fame card (you pushing the cart, in a frame with a shine); the initials entry, SAVE SCORE and the
       leaderboard live on this screen (ovEnd, as before).
-   3. creditsIn: the credits roll while you ride the cart across the bottom; it ends on RUN IT BACK / MAIN MENU.
+   3. creditsIn: the credits roll while you push the cart across the bottom; it ends on RUN IT BACK / MAIN MENU.
    A tap on the victory screen skips to its next beat; a tap on the credits skips to their end. With reduced motion (or no
    GSAP) there are no flashes or rolls: the victory screen is one still page and the credits are a static list.
-   The cart art (cartp.b64 / carts.b64) comes from standalone/tools/bake_cart_ride.py: 3 portrait frames (arms in a V /
-   arms straight up / arms wide: the bounce) and 4 side-view frames (the wheels turn a quarter of their cross each). */
-var CART_PN=3, CART_SN=4, cartPImg=new Image(), cartSImg=new Image(), cartPOk=false, cartSOk=false;
+   The cart art (cartp.b64 / carts.b64) comes from standalone/tools/bake_cart_ride.py: 3 portrait frames (3/4 front view: lean,
+   hop, settle: the bounce) and 8 side-view frames (a calm walk, hands on the handle; the wheels turn 3/8 of a turn per frame
+   so the 4-spoke cross closes the loop). He stands BEHIND the cart and pushes it. */
+var CART_PN=3, CART_SN=8, cartPImg=new Image(), cartSImg=new Image(), cartPOk=false, cartSOk=false;
 cartPImg.onload=function(){ cartPOk=true; }; cartPImg.src=CARTP_SRC;
 cartSImg.onload=function(){ cartSOk=true; }; cartSImg.src=CARTS_SRC;
 var END={stage:"",tl:null,bounce:null,ride:null,rows:[],tot:null,sparkTl:null,tOut:[]};
@@ -1095,7 +1096,7 @@ function creditsIn(){
   if(!MOTION){ end.style.opacity="1"; end.classList.add("on"); cv.style.transform="translateX("+Math.round((W-cw)/2)+"px)"; return; }
   GS.set(o,{opacity:0}); GS.to(o,{opacity:1,duration:0.4});
   // the cart faces left in the art; mirrored it rolls to the right, wheels turning
-  var f=0; END.ride=setInterval(function(){ f=(f+1)%CART_SN; drawS(f); },90);
+  var f=0; END.ride=setInterval(function(){ f=(f+1)%CART_SN; drawS(f); },100);
   GS.killTweensOf(cv); GS.set(cv,{x:-cw-20,scaleX:-1,y:0});
   GS.to(cv,{x:W+20,duration:Math.max(5,W/60),ease:"none",repeat:-1,repeatDelay:0.4});
   GS.to(cv,{y:-2,duration:0.18,ease:"sine.inOut",yoyo:true,repeat:-1});
