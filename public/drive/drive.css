@@ -177,3 +177,9 @@
 
 /* the EBT count's label is a small gold E.B.T card (the pink stripe, navy lettering) to match the token cards on the road */
 .drive-box.tok span, .drive-root.real .rb-cell.tok span { display: inline-block; font: 900 9px/1 "Arial Black", "Helvetica Neue", Arial, sans-serif; letter-spacing: .06em; color: #1E2340; background: linear-gradient(#E85D9E 0 22%, #F5C518 22%); border: 1px solid #1E2340; border-radius: 3px; padding: 5px 4px 2px; margin-bottom: 1px; }
+
+/* The opening flyover (drive.js "the opening flyover"): the HUD, the hint and the buttons are held off until it ends, then fade in; TAP TO SKIP sits at the bottom. */
+.drive-root.flyin .drive-rhud, .drive-root.flyin .drive-hud, .drive-root.flyin .drive-race, .drive-root.flyin .drive-light, .drive-root.flyin .drive-skip, .drive-root.flyin .drive-pausebtn { transition: opacity .4s ease; }   /* (only while it fades in; the hint is GSAP's) */
+.drive-root.flying .drive-rhud, .drive-root.flying .drive-hud, .drive-root.flying .drive-race, .drive-root.flying .drive-light, .drive-root.flying .drive-hint,
+.drive-root.flying .drive-msg, .drive-root.flying .drive-pop, .drive-root.flying .drive-skip, .drive-root.flying .drive-pausebtn { opacity: 0 !important; pointer-events: none; }
+.drive-flyskip { position: absolute; left: 0; right: 0; bottom: max(26px, calc(env(safe-area-inset-bottom) + 18px)); z-index: 2; text-align: center; pointer-events: none; font: 800 13px system-ui, sans-serif; letter-spacing: .16em; color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.7); opacity: .85; }
