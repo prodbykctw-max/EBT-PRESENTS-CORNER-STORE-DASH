@@ -103,6 +103,49 @@
   #lbList li{ display:flex; justify-content:space-between; padding:4px 8px; border-bottom:1px solid rgba(255,243,224,.15); }
   #lbList li.me{ color:var(--gold); background:rgba(245,197,24,.1); }
   #lbNote{ font-size:12px; letter-spacing:.02em; opacity:.7; }
+  /* ---- the ending (csd.js: winSeq / hofIn / creditsIn). Victory screen, Hall of Fame card, credits roll ---- */
+  #flash{ position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:70; display:none; }
+  #ovWin{ background:radial-gradient(circle at 50% 36%, #3b3180 0%, #181a42 48%, #0a0b1c 100%); gap:6px; }
+  #winTitle{ font-size:46px; line-height:1; font-weight:900; letter-spacing:.06em; color:var(--gold); text-shadow:4px 4px 0 var(--navy), 0 0 18px rgba(245,197,24,.55); }
+  #winCart{ display:block; height:min(300px,36vh); width:auto; max-width:92vw; }
+  #expBox{ width:min(320px,88vw); display:flex; flex-direction:column; gap:7px; text-align:left; }
+  .expRow{ display:grid; grid-template-columns:1fr auto; column-gap:8px; align-items:baseline; font-size:12px; font-weight:800; letter-spacing:.06em; }
+  .expRow .exv{ color:var(--gold); font-variant-numeric:tabular-nums; }
+  .expRow .exb{ grid-column:1 / 3; height:6px; background:rgba(255,243,224,.14); border:1px solid rgba(255,243,224,.3); overflow:hidden; }
+  .expRow .exb i{ display:block; height:100%; width:0; background:linear-gradient(90deg,var(--coral),var(--gold)); }
+  .expRow.big{ font-size:15px; color:var(--gold); }
+  .expRow.big .exb{ height:8px; border-color:var(--gold); }
+  .expRow.tot{ font-size:17px; margin-top:4px; border-top:2px solid rgba(255,243,224,.3); padding-top:6px; }
+  .expRow.tot .exv{ font-size:22px; letter-spacing:.08em; }
+  #winSkip{ font-size:11px; letter-spacing:.2em; opacity:.55; }
+  .hofCard{ display:none; width:min(250px,76vw); padding:10px 12px 10px; background:linear-gradient(160deg,var(--pink),var(--magenta));
+    border:4px solid var(--navy); box-shadow:0 6px 0 var(--navy), 0 0 0 3px var(--gold); }
+  #ovEnd.won .hofCard{ display:block; }
+  #ovEnd.won #endSub{ display:none; }
+  .hofHead{ font-size:17px; font-weight:900; letter-spacing:.2em; color:var(--gold); text-shadow:2px 2px 0 var(--navy); margin-bottom:7px; }
+  .hofFrame{ position:relative; overflow:hidden; height:min(190px,24vh); display:flex; justify-content:center; background:radial-gradient(circle at 50% 40%, #3b3180, #151838 80%); border:3px solid var(--gold); box-shadow:inset 0 0 0 2px var(--navy); }
+  .hofFrame canvas{ height:100%; width:auto; display:block; }
+  .hofFrame .shine{ position:absolute; top:-10%; left:-45%; width:28%; height:125%; background:linear-gradient(100deg,transparent,rgba(255,255,255,.6),transparent); transform:skewX(-18deg); pointer-events:none; }
+  .hofFrame .spk{ position:absolute; width:12px; height:12px; background:#fff; opacity:0; pointer-events:none; clip-path:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%); }
+  #ovEnd.won #endTitle{ font-size:19px; line-height:1.25; }
+  #ovCredits{ background:linear-gradient(180deg,#0b0d26,#1a1d4a); padding:0; gap:0; overflow:hidden; justify-content:flex-start; }
+  #ovCredits > *{ margin:0 !important; }
+  #crView{ position:absolute; left:0; right:0; top:0; bottom:calc(132px + env(safe-area-inset-bottom)); overflow:hidden; }
+  #crRoll{ position:absolute; left:0; right:0; top:0; padding:0 22px; text-align:center; will-change:transform; }
+  #crRoll .crT{ font-size:34px; line-height:.95; font-weight:900; color:var(--gold); text-shadow:3px 3px 0 var(--navy); }
+  #crRoll .crT small{ display:block; font-size:20px; color:#fff; text-shadow:2px 2px 0 var(--navy); margin-top:4px; }
+  #crRoll .crT{ margin-bottom:28px; }
+  #crRoll .crE{ font-size:12px; letter-spacing:.22em; color:var(--cream); opacity:.9; margin:30px 0 14px; }
+  #crRoll .crL{ font-size:11px; line-height:1.6; opacity:.85; margin:0 0 20px; }
+  #crEnd{ position:absolute; left:0; right:0; top:0; bottom:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; opacity:0; pointer-events:none; }
+  #crEnd.on{ pointer-events:auto; }
+  /* reduced motion: the credits are a plain scrolling list with the buttons under it */
+  #ovCredits.still #crView{ overflow-y:auto; }
+  #ovCredits.still #crRoll{ position:relative; padding-top:24px; }
+  #ovCredits.still #crEnd{ position:relative; inset:auto; opacity:1 !important; pointer-events:auto; padding:8px 0 24px; }
+  #crLane{ position:absolute; left:0; right:0; bottom:calc(8px + env(safe-area-inset-bottom)); height:124px; overflow:hidden; }
+  #crGround{ position:absolute; left:0; right:0; bottom:6px; height:6px; background:repeating-linear-gradient(90deg,var(--gold) 0 18px,transparent 18px 36px); opacity:.55; }
+  #crCart{ position:absolute; left:0; bottom:10px; height:112px; width:auto; transform-origin:50% 100%; }
 </style>
 <!-- ai-seo:v2  search, sharing and AI assistants. Everything here names the main link (the Cloudflare Worker,
      where the global leaderboard lives); the GitHub Pages copy is built from this same file, so it points search
@@ -143,10 +186,10 @@
   <div class="ov" id="ovTitle">
     <div class="card">
       <div class="eyebrow">EBT PRESENTS</div>
-      <div class="title">CORNER STORE<small>DASH</small></div>
+      <div class="title"><span id="ttMain">CORNER STORE</span><small>DASH</small></div>
     </div>
     <button class="btn pulse" id="btnTitle">TAP TO START</button>
-    <div class="credits">Engine sound: DerMeehdrescher / Meehdrescher Studios (CC BY-SA 4.0)<br>Sound effects: BigSoundBank &amp; OpenGameArt (CC0)<br>Car model: Car Concept, Eric Chadwick / Darmstadt Graphics Group (CC BY 4.0), modified<br>Dog: &ldquo;PitBull&rdquo; by Joseph AYYAD (CC BY 4.0), pigeon: &ldquo;Pigeon&rdquo; by kenchoo after NMC BC (CC BY), both modified<br>Map data © OpenStreetMap contributors</div>
+    <div class="credits">Engine sound: DerMeehdrescher / Meehdrescher Studios (CC BY-SA 4.0)<br>Sound effects: BigSoundBank &amp; OpenGameArt (CC0)<br>Car model: Car Concept, Eric Chadwick / Darmstadt Graphics Group (CC BY 4.0), modified<br>Dog: &ldquo;PitBull&rdquo; by Joseph AYYAD (CC BY 4.0), pigeon: &ldquo;Pigeon&rdquo; by kenchoo after NMC BC (CC BY), both modified<br>Map data © OpenStreetMap contributors<br>Shopping cart: &ldquo;Shopping Cart&rdquo; by AdrianXY (CC BY 4.0), modified</div>
   </div>
 
   <div class="ov" id="ovDriveHow" data-solid>
@@ -171,6 +214,7 @@
   </div>
 
   <div class="ov" id="ovEnd">
+    <div class="hofCard" id="hofCard"><div class="hofHead">HALL OF FAME</div><div class="hofFrame" id="hofFrame"><canvas id="hofCart" width="360" height="360"></canvas><i class="shine" id="hofShine"></i></div></div>
     <div id="endTitle">YOU MADE IT OUT!</div>
     <div id="endSub"></div>
     <div class="scoreBig">SCORE <span id="finalScore">000000</span></div>
@@ -185,8 +229,22 @@
     </div>
     <ol id="lbList"></ol>
     <div id="lbNote"></div>
+    <button class="btn" id="btnCredits">ROLL CREDITS \u25B6</button>
     <button class="btn" id="btnAgain">RUN IT BACK</button>
     <button class="btn alt" id="btnMenu">MAIN MENU</button>
+  </div>
+
+  <div id="flash"></div>
+  <div class="ov" id="ovWin">
+    <div id="winTitle">YOU WIN!</div>
+    <canvas id="winCart" width="360" height="360"></canvas>
+    <div id="expBox"></div>
+    <div id="winSkip">TAP TO SKIP</div>
+  </div>
+
+  <div class="ov" id="ovCredits">
+    <div id="crView"><div id="crRoll"></div><div id="crEnd"><div class="crT" style="font-size:30px;font-weight:900;color:var(--gold);text-shadow:3px 3px 0 var(--navy)">CORNER STORE<small style="display:block;font-size:18px;color:#fff;margin-top:4px">DASH</small></div><button class="btn" id="cAgain">RUN IT BACK</button><button class="btn alt" id="cMenu">MAIN MENU</button></div></div>
+    <div id="crLane"><div id="crGround"></div><canvas id="crCart" width="10" height="10"></canvas></div>
   </div>
 
   <div class="ov" id="ovPause">
@@ -201,6 +259,8 @@ var BOARD_SRC="data:image/webp;base64,%%B64%%";
 var PLAYER_SRC="data:image/webp;base64,%%PLAYER%%";
 var BULLY_SRC="data:image/webp;base64,%%BULLY%%";
 var ITEMS_SRC="data:image/webp;base64,%%ITEMS%%";
+var CARTP_SRC="data:image/webp;base64,%%CARTP%%";
+var CARTS_SRC="data:image/webp;base64,%%CARTS%%";
 %%GAME%%
 </script>
 </body>
