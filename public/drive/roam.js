@@ -110,6 +110,7 @@ export function buildWalkWorld({ walls = [], hero = [], extra = [], circles = []
     for (let gx = Math.floor(x0 / PCELL); gx <= Math.floor(x1 / PCELL); gx++) for (let gy = Math.floor(y0 / PCELL); gy <= Math.floor(y1 / PCELL); gy++) put(pgrid, cellKey(gx, gy), i);
   });
   const none = [], tmp = { x: 0, y: 0 }, stamp = new Int32Array(nSeg); let stampN = 0;
+  const cstamp = new Int32Array(nCir); let cstampN = 0;
 
   const world = {
     nSeg, nCir, nRing: rings.length, segs: S, circles: C, bounds,
@@ -193,6 +194,24 @@ export function buildWalkWorld({ walls = [], hero = [], extra = [], circles = []
           if (Math.abs(den) < 1e-9) continue;
           const tt = ((ax - x) * ey - (ay - y) * ex) / den, u = ((ax - x) * dy - (ay - y) * dx) / den;
           if (tt >= 0 && tt <= maxT && u >= 0 && u <= 1 && tt < best) best = tt;
+        }
+      }
+      return best;
+    },
+    /** How far along the ray (x, y) + t (dx, dy) (unit) something solid first stands in the way of a camera: a wall, or a post, trunk or other prop circle grown by `pad` (what is above
+     *  head height, a tree's canopy, is not in this index, so it does not count). Anything whose far side is nearer than `skip` (the runner's own neighbours) is ignored. A circle the
+     *  camera itself would sit in counts from where the ray enters it. Infinity if clear for maxT. Pure 2D, no three.js objects. */
+    camHit(x, y, dx, dy, maxT, pad = 0.3, skip = 1.5) {
+      let best = this.rayHit(x, y, dx, dy, maxT) - pad; cstampN++;   // (a wall grown by the same pad as the circles)
+      for (let k = 0; k <= Math.ceil(maxT); k++) {
+        const t = Math.min(maxT, k);
+        for (const i of this.cellCircles(x + dx * t, y + dy * t)) {
+          if (cstamp[i] === cstampN) continue; cstamp[i] = cstampN;
+          const R = C[i * 3 + 2] + pad, ox = C[i * 3] - x, oy = C[i * 3 + 1] - y, sp = ox * dx + oy * dy, e2 = ox * ox + oy * oy - sp * sp;
+          if (e2 >= R * R) continue;
+          const h = Math.sqrt(R * R - e2), t0 = sp - h, t1 = sp + h;
+          if (t1 < skip || t0 > maxT || t0 + pad < skip) continue;   // behind the camera, past it, or the runner is standing in its reach: not an occluder
+          if (t0 < best) best = t0;
         }
       }
       return best;
