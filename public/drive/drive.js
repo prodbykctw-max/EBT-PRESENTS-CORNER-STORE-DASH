@@ -1194,18 +1194,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   /** the camera's path, built on the first flyover frame once the on-foot camera spot is known (tp, tl: where it will sit; the path ends exactly there) */
   function buildFlight(tp, tl) {
     const f = fly, at = (s, d, h) => { const q = route.at(s, d); return new THREE.Vector3(q.x, q.z + h, -q.y); };
-    const C = { x: me.gx, y: me.gy }, fx = Math.cos(camYaw), fy = Math.sin(camYaw), lx = -fy, ly = fx;
-    // the swing round you: from out in front of you (the way you run) round one side of you to behind you, coming down as it comes in. It takes the side with the lower roofs
-    // under it (a tower beside the street would send the camera over its top and back down)
-    const swingOn = (sd) => [[0, 32, 28], [60, 21, 22], [110, 15, 16], [150, 11, 10]].map(([a, r, h]) => {
-      const c = Math.cos(a * Math.PI / 180), sn = Math.sin(a * Math.PI / 180) * sd;
-      return new THREE.Vector3(C.x + (fx * c + lx * sn) * r, me.zs + h, -(C.y + (fy * c + ly * sn) * r));
-    });
-    const roofs = (pts) => pts.reduce((m, q) => Math.max(m, roofAt(q.x, -q.z)), 0);
-    const swing = [swingOn(1), swingOn(-1)].sort((a, b) => roofs(a) - roofs(b))[0];
-    const face = new THREE.Vector3(C.x, me.zs + 1.4, -C.y);   // you
-    const P = [at(1190, -20, 105), at(1152, -8, 52), at(1108, 3, 28), at(1000, 0, 34), at(820, 0, 40), at(640, 0, 42), at(460, 0, 42), at(290, 0, 38), at(150, 0, 34), ...swing, tp.clone()];
-    const L = [at(1122, -6, 2), at(1112, -6, 4), at(1040, 0, 6), at(930, 0, 6), at(750, 0, 6), at(570, 0, 6), at(390, 0, 6), at(230, 0, 6), at(100, 0, 4), face.clone(), face.clone(), face.clone(), face.clone(), tl.clone()];
+    // The last stretch stays over the street (a camera swinging round you at 20 m radius ends up over the roofs beside it, looking down at a wall of one colour): it runs the street axis past
+    // you, a little to one side and high, goes on 24 m, turns back and comes down behind the bully (the last 0.7 s). Its aim stays level on the horizon while the view turns round (the camera is high over the
+    // roofs for the turn, so never down at a roof or across at a wall), then comes down to the on-foot aim. (tools-restart/cover.mjs: no one surface over ~35% of the frame.) Heights are over the road under each point. s0 = where you stand along the route; the street runs the way you run (the route's s grows that way).
+    const fx = Math.cos(camYaw), fy = Math.sin(camYaw), rel = (a, l, h) => { const x = me.gx + fx * a - fy * l, y = me.gy + fy * a + fx * l; return new THREE.Vector3(x, ground(x, y) + h, -y); };   // (a metres ahead of you, l to your left, h over the ground there)
+    const P = [at(1190, -20, 105), at(1152, -8, 52), at(1108, 3, 28), at(1000, 0, 34), at(820, 0, 36), at(640, 0, 36), at(460, 0, 36), at(290, 0, 34), at(150, 0, 32),
+      rel(70, 0, 32), rel(34, 0, 34), rel(8, 3.5, 36), rel(-24, 4, 34), rel(-16, 0, 18), tp.clone()];
+    const L = [at(1122, -6, 2), at(1112, -6, 4), at(1040, 0, 6), at(910, 0, 4), at(730, 0, 4), at(550, 0, 4), at(370, 0, 4), at(200, 0, 4), at(60, 0, 4),
+      rel(-60, 0, 20), rel(-70, 0, 28), rel(-110, 60, 34), rel(-20, 170, 34), rel(90, 0, 26), tl.clone()];
     f.end = { pos: tp.clone(), look: tl.clone() };
     f.pos = new THREE.CatmullRomCurve3(P, false, 'centripetal'); f.look = new THREE.CatmullRomCurve3(L, false, 'centripetal');
     // never inside a building or under the road: along the path, the camera keeps FLY.clear metres over the highest roof, deck or ground under it
