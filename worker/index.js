@@ -80,6 +80,29 @@ async function addScore(env, payload, request) {
   return { ok: true, rank: Number(rank ?? 1), name };
 }
 
+// The drive's big binary files (.glb .bin .cars .wav) are not on Cloudflare's list of content types it compresses at the edge,
+// so they used to go out raw. scripts/compress-drive.mjs writes a brotli copy of each next to it (`props.glb.br`); a browser that
+// accepts br gets that copy, with the original's content type and `content-encoding: br` (it decodes it before the game sees a byte).
+// Anything else (no br, no .br copy, an error) is served exactly as before. wrangler.toml run_worker_first names these paths.
+const BINARY_TYPES = { '.glb': 'model/gltf-binary', '.bin': 'application/octet-stream', '.cars': 'application/octet-stream', '.wav': 'audio/wav' };
+async function driveBinary(request, env, url) {
+  const ext = url.pathname.slice(url.pathname.lastIndexOf('.'));
+  const type = BINARY_TYPES[ext];
+  // (on Cloudflare the Accept-Encoding header the Worker sees is already normalised to gzip / br; the browser's own is request.cf.clientAcceptEncoding)
+  const accepts = request.cf?.clientAcceptEncoding ?? request.headers.get('accept-encoding') ?? '';
+  if (type && (request.method === 'GET' || request.method === 'HEAD') && /\bbr\b/.test(accepts)) {
+    const br = new URL(url); br.pathname += '.br';
+    const res = await env.ASSETS.fetch(new Request(br, request));
+    if (res.status === 200 || res.status === 304) {
+      const headers = new Headers(res.headers);
+      headers.set('content-type', type); headers.set('content-encoding', 'br'); headers.append('vary', 'accept-encoding');
+      // encodeBody 'manual': the body is already brotli, so the runtime must not encode it again
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers, encodeBody: 'manual' });
+    }
+  }
+  return env.ASSETS.fetch(request);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -90,7 +113,7 @@ export default {
       return env.ASSETS.fetch(new Request(new URL('/standalone', url), request));
     }
     if (!url.pathname.startsWith('/api/')) {
-      return env.ASSETS.fetch(request);
+      return driveBinary(request, env, url);
     }
     if (request.headers.get('origin') === PAGES_ORIGIN) {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });

@@ -9,6 +9,7 @@
  */
 
 import { readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
@@ -73,3 +74,6 @@ writeFileSync(here('../index.html'), pagesCopy);
 // the files AI assistants read: edit them in public/ (the main link serves them); the GitHub Pages copy gets the same
 for (const f of ['llms.txt', 'llms-full.txt']) copyFileSync(here(`../public/${f}`), here(`../${f}`));
 console.log(`standalone/index.html assembled (${out.length} chars) -> also copied to public/standalone.html and ./index.html (+ llms.txt, llms-full.txt)`);
+// the drive's big binary files get a brotli copy next to them (`props.glb.br`), which the Worker serves to browsers that accept it (docs/DRIVE.md "Loading");
+// a copy that still decodes to its source is kept, so this takes a moment only when a binary has changed
+execFileSync(process.execPath, [here('../scripts/compress-drive.mjs')], { stdio: 'inherit' });
