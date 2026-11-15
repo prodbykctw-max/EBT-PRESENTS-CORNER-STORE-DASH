@@ -1,0 +1,11 @@
+import { chromium } from 'playwright-core';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required', '--host-resolver-rules=MAP api.open-meteo.com 127.0.0.1:9'] });
+const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
+const p = await ctx.newPage(); const errs = []; p.on('pageerror', (e) => errs.push(e.message));
+await p.goto(process.argv[2]);
+await p.waitForFunction(() => document.getElementById('btnTitle'), null, { timeout: 180000 });
+await p.waitForFunction(() => performance.getEntriesByName('drive:prepared').length, null, { timeout: 1500000, polling: 300 });
+await p.evaluate(() => document.getElementById('btnTitle').click()); await p.waitForTimeout(600);
+const r = await p.evaluate(() => new Promise((ok) => { const t0 = performance.now(); document.getElementById('btnDrive').click();
+  const chk = () => { const root = document.querySelector('.drive-root'); const vis = root && getComputedStyle(root.parentElement).visibility !== 'hidden'; if (vis && !document.querySelector('.drive-loading')) ok({ ms: Math.round(performance.now() - t0), mode: window.__csd?.S.mode, state: window.__drive.state, cars: window.__drive.world.carSetName }); else if (performance.now() - t0 > 60000) ok({ timeout: true }); else requestAnimationFrame(chk); }; chk(); }));
+console.log('tap START DRIVE -> drive visible (loader gone):', JSON.stringify(r), 'errors', JSON.stringify(errs)); await b.close();

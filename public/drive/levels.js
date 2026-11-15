@@ -18,7 +18,8 @@ export function standOn(ground, x, y, a, hl, hw) {
   // on a twisted surface a rigid body can't touch all four: settle it so no wheel is ever below the road
   // (like suspension, the others hang a few centimetres)
   const lift = Math.max(0, fl - (z + dp - dr), fr - (z + dp + dr), bl - (z - dp - dr), br - (z - dp + dr));
-  return { z: z + lift, pitch: Math.atan2(2 * dp, 2 * hl), roll: Math.atan2(2 * dr, 2 * hw) };
+  // (fl, fr, bl, br: the road height under each wheel itself, for World.render's final check that none of the wheels of a smoothed car is under it)
+  return { z: z + lift, pitch: Math.atan2(2 * dp, 2 * hl), roll: Math.atan2(2 * dr, 2 * hw), fl, fr, bl, br };
 }
 
 /** Top of a freeway deck (before the road lift) at world (x, y) for deck height h above terrain.

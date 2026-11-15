@@ -1011,7 +1011,7 @@ export class World {
         z = e._seat.z; pitch = e._seat.pitch; roll = e._seat.roll;
         // a vehicle on the move is seated from four samples of the road surface under its wheels, every frame, with nothing between one frame and the next: a curb edge or a
         // junction patch under a wheel, or the fallback height where there is no surface at all, made its height, pitch and roll jump. Smoothed (critically damped, 0.12 s)
-        if (dt > 0 && !e.parked && e.drv && !e.flying) [z, pitch, roll] = settle(e, z, pitch, roll, dt, this._rf);
+        if (dt > 0 && !e.parked && e.drv && !e.flying) { [z, pitch, roll] = settle(e, z, pitch, roll, dt, this._rf); z = clearRoad(e._seat, z, pitch, roll, hl, hw); }
       }
       if (e.hd !== undefined) yaw = p.a + e.hd;                 // people and dogs face where they're going
       else if (e.type === 'panhandler') yaw = p.a + Math.PI;
@@ -1038,7 +1038,7 @@ export class World {
       const expect = (px, py) => (a.deck ? deckTop(g, px, py, a.z) : g(px, py)) + LEVEL.ROAD;
       const on = (px, py) => this.surfAt(px, py, expect(px, py) + (a.deck ? 2.1 : 1.2)) ?? expect(px, py); // decks: merged surface up to 2 m
       const st = standOn(on, x, y, ah, hl, hw);
-      if (dt > 0) { const [z, pitch, roll] = settle(a, st.z, st.pitch, st.roll, dt, this._rf); put(a.type, x, y, z, ah, a.color, roll, pitch, one, a.cid); }
+      if (dt > 0) { const [z, pitch, roll] = settle(a, st.z, st.pitch, st.roll, dt, this._rf); put(a.type, x, y, clearRoad(st, z, pitch, roll, hl, hw), ah, a.color, roll, pitch, one, a.cid); }
       else put(a.type, x, y, st.z, ah, a.color, st.roll, st.pitch, one, a.cid);
     }
     for (const k in this.meshes) {
@@ -1077,13 +1077,35 @@ function damp(o, k, target, T, dt, snap) {
   o[kv] = (o[kv] - w * tmp) * ex;
   return (o[kx] = target + (ch + tmp) * ex);
 }
-/** the pose a moving vehicle is seated with (height, pitch, roll), smoothed over 0.12 s: see render */
+/** the pose a moving vehicle is seated with (height, pitch, roll), smoothed over 0.12 s: see render.
+ *  The smoothing is of what the road does that its own slope did not predict. A car's height follows a ramp or a crest exactly (a plain critically damped
+ *  follower trails a climb by 0.12 s of climb: a car at 20 m/s on a 6 degree street rode 0.25 m under the road, nose and tail too, and floated that much
+ *  over it on the way down; the concept car's body is 0.1 m off the road and only 1.1 m tall, so it read as buried). What the road does BEYOND its slope
+ *  (a curb edge, a junction patch, the fallback height: more than `th` off the change the last frame predicted) is a step: the car does not jump,
+ *  the step is eased out over 0.12 s as before. `clearRoad` then makes sure no wheel is ever under the road. */
 const SEAT_T = 0.12;
+function trail(o, k, target, dt, snap, th) {
+  const kt = '_t' + k, kr = '_r' + k, kx = '_f' + k, prev = o[kt], rate = o[kr];
+  o[kt] = target;
+  if (prev === undefined) { damp(o, k, 0, SEAT_T, dt, snap); return target; }              // (placed just now: no offset yet, no slope yet)
+  const dT = target - prev;
+  if (rate === undefined) { o[kr] = dT / dt; return target + damp(o, k, 0, SEAT_T, dt, snap); }   // (second frame: whatever it did is its slope)
+  const ex = dT - rate * dt, take = Math.max(-th, Math.min(th, ex));                         // (the slope may change by `th` a frame: a crest, the foot of a ramp; the rest is a step)
+  o[kr] = rate + take / dt;
+  if (ex !== take && o[kx] !== undefined) o[kx] -= ex - take;                                // (the road stepped, the car did not: it is that far off its target now)
+  return target + damp(o, k, 0, SEAT_T, dt, snap);
+}
 /** `frame` counts the frames drawn: a vehicle that was not settled on the frame before (culled, or just placed) starts from where it is now, not from where it was last seen */
 const settle = (o, z, pitch, roll, dt, frame) => {
-  if (o._sf !== frame - 1) o._fz = o._fp = o._fr = undefined;
+  if (o._sf !== frame - 1) o._fz = o._fp = o._fr = o._tz = o._tp = o._tr = o._rz = o._rp = o._rr = undefined;
   o._sf = frame;
-  return [damp(o, 'z', z, SEAT_T, dt, 1.2), damp(o, 'p', pitch, SEAT_T, dt, 0.5), damp(o, 'r', roll, SEAT_T, dt, 0.5)];
+  return [trail(o, 'z', z, dt, 1.2, 0.03), trail(o, 'p', pitch, dt, 0.5, 0.02), trail(o, 'r', roll, dt, 0.5, 0.02)];
+};
+/** Lift a seated car (st: standOn's result, with the road height under each wheel) so none of its four wheels is under the road, whatever the smoothing left:
+ *  the wheel heights are the ones the drawn pose gives (z, pitch, roll as World.render composes them). */
+const clearRoad = (st, z, pitch, roll, hl, hw) => {
+  const sp = hl * Math.sin(pitch), sr = hw * Math.sin(roll) * Math.cos(pitch);
+  return z + Math.max(0, st.fl - (z + sp - sr), st.fr - (z + sp + sr), st.bl - (z - sp - sr), st.br - (z - sp + sr));
 };
 
 /** The shadow pass draws only an instanced mesh's first `userData.shadowCount` instances (the ones that can cast a
