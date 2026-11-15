@@ -27,7 +27,7 @@ export function driveBinaries(dir = DRIVE_DIR) {
   for (const n of readdirSync(dir)) {
     const f = join(dir, n);
     if (statSync(f).isDirectory()) out.push(...driveBinaries(f));
-    else if (EXTS.has(extname(n)) && !SKIP.has(f.slice(dir === DRIVE_DIR ? DRIVE_DIR.length : 0))) out.push(f);
+    else if (EXTS.has(extname(n)) && !SKIP.has(f.slice(DRIVE_DIR.length + 1))) out.push(f);
   }
   return out.sort();
 }

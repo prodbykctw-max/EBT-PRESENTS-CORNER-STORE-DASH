@@ -14,7 +14,9 @@
 // No imports on purpose: this file must stay a few hundred bytes of plain code.
 const BASE = new URL('./', import.meta.url);
 
-const CORE = ['drive.css', 'world.json', 'hero.glb', 'car.glb', 'props.glb', 'trees.glb', 'character.glb',
+// Two groups. The first is what building the city needs; the second (LATER) is only needed once it is built, so it is asked for once the first group has landed and
+// downloads while the city builds (drive.js awaits the car and the character just before the world is made).
+const CORE = ['drive.css', 'world.json', 'hero.glb', 'props.glb', 'trees.glb',
   'tex/asphalt_diff.webp', 'tex/asphalt_nor.webp', 'tex/grass_diff.webp', 'tex/grass_nor.webp', 'tex/bark.webp', 'tex/bark_nor.webp', 'tex/leaves.webp', 'tex/grass_tuft.webp'];
 const SFX = ['engine_on.wav', 'engine_off.wav', 'squeal_loop.wav', 'screech.mp3', 'horn.mp3', 'horn_far.mp3', 'coin.mp3', 'crash_metal_1.mp3', 'crash_metal_2.mp3', 'crash_metal_3.mp3', 'crash_glass.mp3'].map((f) => 'sfx/' + f);
 // the realistic look (the default; ?look=comic never loads any of it)
@@ -24,19 +26,20 @@ const REAL_MODULES = ['real.js', 'real-post.js', 'cars.js', 'animals.js', 'peopl
 const q = (k) => new URLSearchParams(location.search).get(k);
 const off = (v) => /^(none|0|off|false|no)$/i.test(v || '');
 
-/** the data files (not code) the drive will load, as URLs. real: the realistic look (default). */
-export function dataFiles({ real = q('look') !== 'comic', mobile = matchMedia('(pointer: coarse)').matches } = {}) {
-  const f = [...CORE, ...SFX];
+/** the data files (not code) the drive will load, as URLs: { now: needed to build the city, later: needed once it is built }. real: the realistic look (default). */
+export function dataFiles({ real = q('look') !== 'comic' } = {}) {
+  const now = [...CORE], later = ['car.glb', 'character.glb', ...SFX];
   if (real) {
-    f.push(...REAL_TEX);
+    now.push(...REAL_TEX);
     const cars = q('cars');
-    if (cars === null || cars === '') f.push('cars/bc.cars');
-    else for (const n of new Set(cars.toUpperCase().split(/[,|]/).filter((s) => /^(A|B|C|BC)$/.test(s)))) f.push(`cars/${n.toLowerCase()}.cars`);
-    if (!off(q('animals'))) f.push('animals/animals.json', 'animals/animals.bin', 'animals/dog.webp', 'animals/dog_n.webp', 'animals/pigeon.webp');
+    if (cars === null || cars === '') later.push('cars/bc.cars');
+    else for (const n of new Set(cars.toUpperCase().split(/[,|]/).filter((s) => /^(A|B|C|BC)$/.test(s)))) later.push(`cars/${n.toLowerCase()}.cars`);
+    if (!off(q('animals'))) later.push('animals/animals.json', 'animals/animals.bin', 'animals/dog.webp', 'animals/dog_n.webp', 'animals/pigeon.webp');
     const pq = (q('people') || 'b').toLowerCase(), kinds = off(pq) ? '' : /^[ab]+$/.test(pq) ? pq : 'b';   // (drive.js peopleKindsFromURL)
-    if (kinds.includes('b')) f.push('people-real/people2.json', 'people-real/people2.bin');
+    if (kinds.includes('b')) later.push('people-real/people2.json', 'people-real/people2.bin');
   }
-  return f.map((p) => new URL(p, BASE).href);
+  const abs = (l) => l.map((p) => new URL(p, BASE).href);
+  return { now: abs(now), later: abs(later) };
 }
 
 let started = null;
@@ -47,6 +50,8 @@ export function warm(opts) {
   if (real) for (const m of matchMedia('(pointer: coarse)').matches ? [...REAL_MODULES, 'contact.js'] : REAL_MODULES) {   // the realistic look's code: fetched and compiled, not run (modulepreload does not evaluate)
     const l = document.createElement('link'); l.rel = 'modulepreload'; l.href = new URL(m, BASE).href; document.head.appendChild(l);
   }
-  started = Promise.all(dataFiles({ real }).map((u) => fetch(u).then((r) => r.arrayBuffer()).catch(() => {}))).then(() => {});
+  // the files the city needs first, the rest as soon as those have landed (so the first group gets the whole link, and the rest download while the city is built)
+  const { now, later } = dataFiles({ real }), get = (u) => fetch(u).then((r) => r.arrayBuffer()).catch(() => {});
+  started = Promise.all(now.map(get)).then(() => Promise.all(later.map(get))).then(() => {});
   return started;
 }

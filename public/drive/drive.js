@@ -149,18 +149,21 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const s = document.createElement('script'); s.src = new URL('vendor/gsap.min.js', BASE).href;
     s.onload = () => ok(window.gsap || null); s.onerror = () => ok(null); document.head.appendChild(s);
   });
-  const [W, hero, carGltf, props, trees, weather, gsapLib, charGltf, realPack] = await Promise.all([
+  const [W, hero, props, trees, weather, gsapLib, realPack] = await Promise.all([
     fetch(new URL('world.json', BASE)).then((r) => r.json()),
     loader.loadAsync(new URL('hero.glb', BASE).href),
-    loader.loadAsync(new URL('car.glb', BASE).href),
     loader.loadAsync(new URL('props.glb', BASE).href),
     loader.loadAsync(new URL('trees.glb', BASE).href),
     (() => { const p = preWeather || fetchWeather(); preWeather = null; return p; })(),   // (the one asked for on the title screen, if there is one)
     gsapReady,
-    loader.loadAsync(new URL('character.glb', BASE).href),   // you and the bully on foot (people.js)
     realReady,
   ]);
   mk('downloaded');
+  // the car and the character are not needed to BUILD the city, so the city starts building without waiting for them: warm.js downloads them after the files the city needs
+  // (the `later` group) and this load joins that download, so they arrive while the city is built. They are awaited just before the world is made (below), so every Math.random
+  // draw they make (the ids of what GLTFLoader makes) still lands before the traffic, crowd and planner take theirs: the stream is exactly the one it was.
+  const carP = loader.loadAsync(new URL('car.glb', BASE).href), charP = loader.loadAsync(new URL('character.glb', BASE).href);   // (the character: you and the bully on foot, people.js)
+  carP.catch(() => {}); charP.catch(() => {});   // (a failure is reported where they are awaited)
   const { R: RL, T: realTex } = realPack || {};
   if (REAL && !RL) fallbackToComic();   // real.js or its textures failed to load: exactly the comic look from here on (everything below keys off RL)
   // ?wx=rain|overcast|fog|storm (tests only): force the weather the lighting and the roads follow
@@ -253,6 +256,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const spotS = route.project(SPOT.x, SPOT.y).s;
   const spot = { s: spotS, d: route.parkD(spotS, -1) ?? route.lane(spotS, 0) - 0.35 };
   // car sets (cars.js): only with the realistic look (RL); the comic look, ?cars=none and a failed load draw the props.glb cars
+  const [carGltf, charGltf] = await Promise.all([carP, charP]);
   const carSets = {};
   let altPeople = null, ContactBlobs = null, animals = null;
   if (RL && (carsReady || peopleReady || contactReady || animalsReady)) {
