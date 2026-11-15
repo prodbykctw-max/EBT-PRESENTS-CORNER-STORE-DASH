@@ -2,6 +2,7 @@
 // and the elevated freeway structure (decks with fascia, jersey barriers, underside and pier bents).
 // Heights follow levels.js; world.json frame (x east, y north) → three (x, z, -y).
 import * as THREE from './vendor/three.module.min.js';
+import { drain, slicer } from './steps.js';
 import { LEVEL, deckTop } from './levels.js';
 import { TopSurface } from './surface.js';
 
@@ -146,7 +147,9 @@ function roadMaterial(tex, offset, fade) {
  *  the road, rows every ≤4 m along it), so the surface follows cross-slope and the car, traffic and props —
  *  which also stand on ground(x, y) + level — always sit exactly on it. Elevated freeway pieces are flat
  *  decks at centre height; wherever a deck would dip into rising terrain the terrain wins (max()). */
-function ribbonMesh(list, tex, { offset = -2, fade = false, name, ground }) {
+function ribbonMesh(list, tex, o) { return drain(ribbonMeshSteps(list, tex, o)); }
+function* ribbonMeshSteps(list, tex, { offset = -2, fade = false, name, ground }) {   // (yields every few ms inside the long loops: steps.js)
+  const due = slicer();
   const pos = [], uv = [], info = [], mark = [], park = [], idx = [];
   for (const r of list) {
     const p = r.p, n = normals(p);
@@ -155,6 +158,7 @@ function ribbonMesh(list, tex, { offset = -2, fade = false, name, ground }) {
     const maxW = r.widths ? Math.max(...r.widths) : r.width, K = Math.max(3, Math.ceil(maxW / 1.5) + 1); // ≤1.5 m columns
     const base = pos.length / 3;
     for (let i = 0; i < p.length; i++) {
+      if (due()) yield 'ribbon';
       if (i) along += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
       const w = r.widths ? r.widths[i] : r.width, hw = w / 2;
       const mk = r.marks ? r.marks[i] : 1, pk = r.parks ? r.parks[i] : 0;
@@ -177,6 +181,7 @@ function ribbonMesh(list, tex, { offset = -2, fade = false, name, ground }) {
   for (let pass = 0; pass < 2; pass++) {
     const raise = new Float32Array(pos.length / 3);
     for (let t = 0; t < idx.length; t += 3) {
+      if ((t & 1023) === 0 && due()) yield 'ribbon';
       const A = idx[t] * 3, B = idx[t + 1] * 3, C = idx[t + 2] * 3;
       for (const [wa, wb, wc] of [[1 / 3, 1 / 3, 1 / 3], [0.5, 0.5, 0], [0, 0.5, 0.5], [0.5, 0, 0.5]]) {
         const x = pos[A] * wa + pos[B] * wb + pos[C] * wc, zz = pos[A + 2] * wa + pos[B + 2] * wb + pos[C + 2] * wc;
@@ -199,7 +204,10 @@ function ribbonMesh(list, tex, { offset = -2, fade = false, name, ground }) {
 }
 
 // ------------------------------------------------------------------ build everything
-export function buildStreets(W, ground, route, tex) {
+export function buildStreets(W, ground, route, tex) { return drain(buildStreetsSteps(W, ground, route, tex)); }
+/** buildStreets as a generator that yields between its parts and every few milliseconds inside the long loops (see steps.js); same code, same order */
+export function* buildStreetsSteps(W, ground, route, tex) {
+  const due = slicer();
   const index = new SegIndex();
   const runs = [];         // at-grade road pieces that get drawn (after route suppression)
   const corners = [];      // sharp bends where a piece was split: filled with a pad
@@ -207,11 +215,12 @@ export function buildStreets(W, ground, route, tex) {
   const concrete = { pos: [], nor: [], uv: [], idx: [] };
 
   // 1) OSM roads → draped samples; drop the stretches the route road already covers
-  W.roads.forEach((rd, id) => {
-    if (!DRIVABLE.test(rd.cls) || rd.pts.length < 2) return;
+  for (const [id, rd] of W.roads.entries()) {
+    if (due()) yield 'roads';
+    if (!DRIVABLE.test(rd.cls) || rd.pts.length < 2) continue;
     const p = drape(rd, ground), maxH = Math.max(...p.map((q) => q[3]));
     const base = { id, cls: rd.cls, width: rd.width, oneway: rd.oneway, lift: LEVEL.ROAD + rankOf(rd.cls) * 0.004 };
-    if (maxH > 0.3) { elevated.push({ ...base, p, lift: base.lift - (/_link/.test(rd.cls) ? 0.015 : 0) }); return; }
+    if (maxH > 0.3) { elevated.push({ ...base, p, lift: base.lift - (/_link/.test(rd.cls) ? 0.015 : 0) }); continue; }
     let run = [];
     const flush = () => { if (run.length > 1) runs.push({ ...base, p: run }); run = []; };
     for (let i = 0; i < p.length; i++) {
@@ -229,13 +238,15 @@ export function buildStreets(W, ground, route, tex) {
       }
     }
     flush();
-  });
+  }
+  yield 'roads';
   for (const r of runs) for (let i = 0; i + 1 < r.p.length; i++) index.add(r.p[i][0], r.p[i][1], r.p[i + 1][0], r.p[i + 1][1], r.width / 2, r.id);
 
   // 2) the route's own road, with the centre line broken across intersections and crosswalks
   const R = { id: 'route', cls: 'primary', oneway: false, lift: LEVEL.ROUTE, p: [], widths: [], marks: [], parks: [] };
   const crossings = (W.points || []).filter((q) => q[0] === 'crossing');
   for (let s = 0; s <= route.length; s += 1) {
+    if (due()) yield 'route';
     const q = route.at(s), hw = route.hw(s);
     const cross = index.covering(q.x, q.y, null, 1.0);                      // another street meets us here
     const zebra = crossings.some((c) => Math.abs(c[1] - q.x) < 5 && Math.abs(c[2] - q.y) < 5 && Math.hypot(c[1] - q.x, c[2] - q.y) < 3);
@@ -246,14 +257,16 @@ export function buildStreets(W, ground, route, tex) {
   const m0 = [...R.marks]; for (let i = 0; i < m0.length; i++) if (!m0[i]) for (let k = -4; k <= 4; k++) if (R.marks[i + k] !== undefined) R.marks[i + k] = 0;
   for (let i = 0; i + 1 < R.p.length; i++) index.add(R.p[i][0], R.p[i][1], R.p[i + 1][0], R.p[i + 1][1], R.widths[i] / 2, 'route');
 
-  const roadsMesh = ribbonMesh(runs, tex, { name: 'roads', ground });
-  const junctions = junctionPads(W, runs, R, ground, tex, corners);
-  const routeMesh = ribbonMesh([R], tex, { offset: -4, name: 'route_road', ground });
+  yield 'index';
+  const roadsMesh = yield* ribbonMeshSteps(runs, tex, { name: 'roads', ground }); yield 'ribbon';
+  const junctions = junctionPads(W, runs, R, ground, tex, corners); yield 'junctions';
+  const routeMesh = yield* ribbonMeshSteps([R], tex, { offset: -4, name: 'route_road', ground }); yield 'route-road';
 
   // 3) curbs along every city street and the route; they stop wherever another street joins
   const curb = { pos: [], col: [], idx: [] };
   const curbRuns = [...runs.filter((r) => CURBED.test(r.cls)), { ...R, cls: 'primary' }];
   for (const r of curbRuns) {
+    yield 'curbs';
     const n = normals(r.p);
     for (const side of [1, -1]) {
       let strip = [];
@@ -275,6 +288,7 @@ export function buildStreets(W, ground, route, tex) {
         strip = [];
       };
       for (let i = 0; i < r.p.length; i++) {
+        if (due()) yield 'curbs';
         const hw = (r.widths ? r.widths[i] : r.width) / 2, [x, y, g] = r.p[i];
         const ix = x + n[i][0] * hw * side, iy = y + n[i][1] * hw * side, ox = ix + n[i][0] * 0.3 * side, oy = iy + n[i][1] * 0.3 * side;
         if (index.covering(ox, oy, r.id, 0.3)) { emit(); continue; }        // an intersection / driveway: no curb
@@ -314,9 +328,10 @@ export function buildStreets(W, ground, route, tex) {
   crosswalks.receiveShadow = true; crosswalks.name = 'crosswalks';
 
   // 5) elevated freeway: first lift every deck to a real bridge's headroom over the streets under it, then build deck + structure
+  yield 'crosswalks';
   const elev = new ElevIndex(elevated);
-  raiseDecks(elev, [...runs, R], ground);
-  const fw = buildFreeway(elevated, ground, tex, index, elev);
+  yield* raiseDecksSteps(elev, [...runs, R], ground); yield 'raiseDecks';
+  const fw = yield* buildFreewaySteps(elevated, ground, tex, index, elev);
 
   const group = new THREE.Group(); group.add(junctions, roadsMesh, routeMesh, curbs, crosswalks);
   return { group, roadsMesh, routeMesh, junctions, freeway: fw, index, runs, routeMarks: R.marks, surfaces: [roadsMesh, routeMesh, fw.deck],
@@ -394,7 +409,8 @@ class ElevIndex { // spatial grid of the elevated road segments (every piece of 
 }
 
 /** Raise the deck-height field so every slab clears every street under it by DECK_CLEAR (see the note above). Sets ground.deckLift. */
-function raiseDecks(elev, streets, ground) {
+function* raiseDecksSteps(elev, streets, ground) {
+  const due = slicer();
   ground.deckLift = null;                       // measure against the unlifted deck
   const need = new Map();                       // 2 m cell → [x, y, lift wanted]
   for (const s of streets) {
@@ -402,6 +418,7 @@ function raiseDecks(elev, streets, ground) {
     for (let i = 0; i + 1 < s.p.length; i++) {
       const [ax, ay] = s.p[i], [bx, by] = s.p[i + 1], L = Math.hypot(bx - ax, by - ay), w = (s.widths ? (s.widths[i] + s.widths[i + 1]) / 2 : s.width) / 2;
       for (let t = 0; t < L; t += 2) {
+        if (due()) yield 'raiseDecks';
         const f = t / L;
         for (const o of [-w, 0, w]) {           // both edges and the middle: the hump can be anywhere across the street
           const x = ax + (bx - ax) * f + n[i][0] * o, y = ay + (by - ay) * f + n[i][1] * o;
@@ -485,7 +502,9 @@ function planBents(r, n, ground, index, elev, stats) {
 }
 
 // ------------------------------------------------------------------ freeway structure
-function buildFreeway(list, ground, tex, index, elev) {
+function buildFreeway(list, ground, tex, index, elev) { return drain(buildFreewaySteps(list, ground, tex, index, elev)); }
+function* buildFreewaySteps(list, ground, tex, index, elev) {   // (yields every few ms inside the long loops: steps.js)
+  const due = slicer();
   const c = { pos: [], uv: [], idx: [] };
   const quad = (a, b, cc, d, ua = 0, ub = 1, va = 0, vb = 1) => { // a,b,c,d: [x,y,z] world (z up), CCW seen from outside
     const k = c.pos.length / 3;
@@ -498,7 +517,9 @@ function buildFreeway(list, ground, tex, index, elev) {
     const p = r.p, n = normals(p), hw = r.width / 2;
     let run = 0;
     const bents = new Map(planBents(r, n, ground, index, elev, stats).map((b) => [b.i, b.o]));
+    yield 'freeway';
     for (let i = 0; i < p.length; i++) {
+      if (due()) yield 'freeway';
       if (i) run += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
       if (i + 1 < p.length && p[i][3] > 2.5) decks.push([p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], hw + 3]);
       if (i + 1 >= p.length) continue;
@@ -547,13 +568,16 @@ function buildFreeway(list, ground, tex, index, elev) {
   piers.forEach(([x, y, z, h], i) => columns.setMatrixAt(i, m4.compose(new THREE.Vector3(x, z, -y), q.identity(), new THREE.Vector3(1, Math.max(0.1, h), 1))));
   caps.forEach(([x, y, z, a, w], i) => capMesh.setMatrixAt(i, m4.compose(new THREE.Vector3(x, z + 0.5, -y), q.setFromEuler(e.set(0, a, 0)), new THREE.Vector3(1.4, 1.0, w))));
   columns.castShadow = capMesh.castShadow = true; columns.receiveShadow = capMesh.receiveShadow = true;
-  const deck = ribbonMesh(list, tex, { name: 'freeway_deck', ground }); withCutaway(deck.material);
+  yield 'freeway';
+  const deck = yield* ribbonMeshSteps(list, tex, { name: 'freeway_deck', ground }); withCutaway(deck.material);
   // merges: where a ramp's deck overlaps another deck less than 2 m above it (a ramp joining the Connector),
   // real roads become ONE surface — lift the lower deck onto the upper so they never cut into each other
   {
     const P = deck.geometry.attributes.position, S = new TopSurface([deck]);
     const lifted = [];
+    yield 'freeway';
     for (let v = 0; v < P.count; v++) {
+      if (due()) yield 'freeway';
       const x = P.getX(v), y = P.getY(v), z = P.getZ(v), up = S.top(x, z, y + 2.0);
       if (up && up.y > y + 0.02) lifted.push([v, up.y - 0.012]);
     }

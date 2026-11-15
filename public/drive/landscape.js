@@ -4,6 +4,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { LEVEL } from './levels.js';
 import { bakedGeometry, propMaterial } from './runner.js';
+import { drain, slicer } from './steps.js';
 
 const hash = (n) => { n = (n ^ 61) ^ (n >>> 16); n = Math.imul(n, 9); n ^= n >>> 4; n = Math.imul(n, 0x27d4eb2d); return ((n ^ (n >>> 15)) >>> 0) / 4294967296; };
 let seed = 7; const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647; // deterministic scatter
@@ -85,43 +86,55 @@ function lawnVariation(m) {
   };
 }
 
-/** triangulate a polygon, split big triangles, and drape every vertex on the terrain */
-function drapedPolygon(pts, ground, z, into, onRoad) {
+/** triangulate a polygon, split big triangles, and drape every vertex on the terrain. A generator: it yields every few milliseconds (steps.js) so a park of a few thousand
+ *  triangles does not hold the page up in one piece. The split is a depth-first walk with its own stack (quarters taken in the order a, b, c, middle, as the recursion it replaces did), so the
+ *  triangles come out in the same order. */
+function* drapedPolygon(pts, ground, z, into, onRoad, due) {
   const tris = THREE.ShapeUtils.triangulateShape(pts.map(([x, y]) => new THREE.Vector2(x, y)), []);
-  const push = (a, b, c, depth) => {
-    const L = Math.max(Math.hypot(a[0] - b[0], a[1] - b[1]), Math.hypot(b[0] - c[0], b[1] - c[1]), Math.hypot(c[0] - a[0], c[1] - a[1]));
-    // the terrain is piecewise-flat on an 8 m grid: a triangle spanning a crease sags under it. Measure the sag at
-    // its centre and edge midpoints; split coarse (>4 m) or sagging triangles, so the cover follows the ground
-    // exactly where it bends and stays light where it's flat
-    const za = ground(a[0], a[1]), zb = ground(b[0], b[1]), zc = ground(c[0], c[1]);
-    let sag = 0;
-    for (const [wa, wb, wc] of [[1 / 3, 1 / 3, 1 / 3], [0.5, 0.5, 0], [0, 0.5, 0.5], [0.5, 0, 0.5]]) {
-      const x = a[0] * wa + b[0] * wb + c[0] * wc, y = a[1] * wa + b[1] * wb + c[1] * wc;
-      sag = Math.max(sag, ground(x, y) - (za * wa + zb * wb + zc * wc));
+  for (const t of tris) {
+    const stack = [[pts[t[0]], pts[t[1]], pts[t[2]], 0]];
+    while (stack.length) {
+      const [a, b, c, depth] = stack.pop();
+      const L = Math.max(Math.hypot(a[0] - b[0], a[1] - b[1]), Math.hypot(b[0] - c[0], b[1] - c[1]), Math.hypot(c[0] - a[0], c[1] - a[1]));
+      // the terrain is piecewise-flat on an 8 m grid: a triangle spanning a crease sags under it. Measure the sag at
+      // its centre and edge midpoints; split coarse (>4 m) or sagging triangles, so the cover follows the ground
+      // exactly where it bends and stays light where it's flat
+      const za = ground(a[0], a[1]), zb = ground(b[0], b[1]), zc = ground(c[0], c[1]);
+      let sag = 0;
+      for (const [wa, wb, wc] of [[1 / 3, 1 / 3, 1 / 3], [0.5, 0.5, 0], [0, 0.5, 0.5], [0.5, 0, 0.5]]) {
+        const x = a[0] * wa + b[0] * wb + c[0] * wc, y = a[1] * wa + b[1] * wb + c[1] * wc;
+        sag = Math.max(sag, ground(x, y) - (za * wa + zb * wb + zc * wc));
+      }
+      if ((L > 4 || (sag > 0.012 && L > 1.2)) && depth < 10) {
+        const ab = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], bc = [(b[0] + c[0]) / 2, (b[1] + c[1]) / 2], ca = [(c[0] + a[0]) / 2, (c[1] + a[1]) / 2];
+        stack.push([ab, bc, ca, depth + 1], [ca, bc, c, depth + 1], [ab, b, bc, depth + 1], [a, ab, ca, depth + 1]);
+        continue;
+      }
+      const lift = Math.max(0, sag + 0.005);                                  // whatever's left is a few mm
+      const up = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) > 0;
+      for (const q of up ? [a, b, c] : [a, c, b]) { into.pos.push(q[0], ground(q[0], q[1]) + z + lift, -q[1]); into.uv.push(q[0] / 4, q[1] / 4); }
+      if (due()) yield 'cover';
     }
-    if ((L > 4 || (sag > 0.012 && L > 1.2)) && depth < 10) {
-      const ab = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], bc = [(b[0] + c[0]) / 2, (b[1] + c[1]) / 2], ca = [(c[0] + a[0]) / 2, (c[1] + a[1]) / 2];
-      push(a, ab, ca, depth + 1); push(ab, b, bc, depth + 1); push(ca, bc, c, depth + 1); push(ab, bc, ca, depth + 1); return;
-    }
-    const lift = Math.max(0, sag + 0.005);                                  // whatever's left is a few mm
-    const up = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) > 0;
-    for (const q of up ? [a, b, c] : [a, c, b]) { into.pos.push(q[0], ground(q[0], q[1]) + z + lift, -q[1]); into.uv.push(q[0] / 4, q[1] / 4); }
-  };
-  for (const t of tris) push(pts[t[0]], pts[t[1]], pts[t[2]], 0);
+  }
 }
-export function buildCover(W, ground, tex, streets) {
+export function buildCover(W, ground, tex, streets) { return drain(buildCoverSteps(W, ground, tex, streets)); }
+/** buildCover as a generator: yields every few milliseconds of the polygon loop (steps.js) */
+export function* buildCoverSteps(W, ground, tex, streets) {
+  const due = slicer();
   const onRoad = (x, y) => !!streets.index.covering(x, y, null, 0.3);
   // one mesh per cover kind per 200 m tile, so the camera and the shadow pass skip every tile they can't see
   const byKind = {};
   for (const a of W.areas || []) {
+    if (due()) yield 'cover';
     const cx = a.pts.reduce((t, p) => t + p[0], 0) / a.pts.length, cy = a.pts.reduce((t, p) => t + p[1], 0) / a.pts.length;
     const key = a.kind + '|' + Math.floor(cx / 200) + ',' + Math.floor(cy / 200);
     const d = byKind[key] || (byKind[key] = { kind: a.kind, pos: [], uv: [] });
     // stack cover kinds a hair apart so overlapping lots never z-fight
-    drapedPolygon(a.pts, ground, LEVEL.AREA + (a.kind === 'parking' ? 0.012 : a.kind === 'pitch' || a.kind === 'playground' ? 0.02 : 0.006), d, onRoad);
+    yield* drapedPolygon(a.pts, ground, LEVEL.AREA + (a.kind === 'parking' ? 0.012 : a.kind === 'pitch' || a.kind === 'playground' ? 0.02 : 0.006), d, onRoad, due);
   }
   const grass = tex.grass || grassTexture(), group = new THREE.Group(), mats = {}; group.name = 'cover';
   for (const d of Object.values(byKind)) {
+    if (due()) yield 'cover';
     const kind = d.kind;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(d.pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(d.uv, 2));
@@ -276,7 +289,9 @@ function treeMaterials(tex) {
 
 // ------------------------------------------------------------------ streetscape
 const TREE_GREENS = [0x5f8a3e, 0x4f7a34, 0x6e9446, 0x587f3a, 0x7a9a4c, 0x4a6e30];
-export function buildStreetscape(W, ground, route, streets, props, isFree, trees, tex = {}) {
+export function buildStreetscape(...a) { return drain(buildStreetscapeSteps(...a)); }
+export function* buildStreetscapeSteps(W, ground, route, streets, props, isFree, trees, tex = {}) {   // (yields every few ms inside the long loops: steps.js)
+  const due = slicer();
   seed = 7;   // the park trees' scatter starts from the same place on every build (a restart builds the city again in the same page)
   const put = { tree_round: [], tree_upright: [], lamp: [], signal: [], bench: [], bin: [], hydrant: [], shelter: [] };
   const onRoad = (x, y) => !!streets.index.covering(x, y, null, 0.6);
@@ -295,6 +310,7 @@ export function buildStreetscape(W, ground, route, streets, props, isFree, trees
   // along the drive: street trees every ~13 m and cobra-head lamps every ~34 m on both sidewalks
   for (const side of [1, -1]) {
     for (let s = 6; s < route.length; s += 13) {
+      if (due()) yield 'streetscape';
       const hw = route.hw(s), p = route.at(s, side * (hw + 1.7));
       if (onRoad(p.x, p.y) || nearCrossing(p.x, p.y, 6) || hash(s * 7 + side) < 0.22) continue;
       add(hash(s + side * 3) < 0.7 ? 'tree_round' : 'tree_upright', p.x, p.y, hash(s) * 6.28, TREE_GREENS[(hash(s * 3 + side) * 6) | 0], 0.85 + hash(s * 5) * 0.35);
@@ -307,6 +323,7 @@ export function buildStreetscape(W, ground, route, streets, props, isFree, trees
   }
   // OSM trees / lamps / furniture everywhere in the play area
   for (const [kind, x, y] of W.points || []) {
+    if (due()) yield 'streetscape';
     if (kind === 'tree') add(hash(x * 13 + y) < 0.75 ? 'tree_round' : 'tree_upright', x, y, hash(x) * 6.28, TREE_GREENS[(hash(y) * 6) | 0], 0.9 + hash(x + y) * 0.4);
     if (kind === 'bench') add('bench', x, y, hash(x) * 6.28);
     if (kind === 'bin') add('bin', x, y, 0);
@@ -322,6 +339,7 @@ export function buildStreetscape(W, ground, route, streets, props, isFree, trees
   }
   // parks get proper tree cover
   for (const a of W.areas || []) {
+    if (due()) yield 'streetscape';
     if (!/park|wood/.test(a.kind)) continue;
     const A = polyArea(a.pts), n = Math.min(60, Math.floor(A / (a.kind === 'wood' ? 60 : 170)));
     let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;

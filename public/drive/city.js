@@ -4,8 +4,9 @@
 // Frames: world.json is metres, +x east, +y north, z up. three.js is X = x, Y = z, Z = -y.
 import * as THREE from './vendor/three.module.min.js';
 import { LEVEL } from './levels.js';
-import { buildStreets } from './roads.js';
-import { buildTerrain, buildCover, buildContactShadows, buildStreetscape, buildGrass, pointInPoly } from './landscape.js';
+import { buildStreetsSteps } from './roads.js';
+import { buildTerrain, buildCoverSteps, buildContactShadows, buildStreetscapeSteps, buildGrass, pointInPoly } from './landscape.js';
+import { drain, slicer } from './steps.js';
 export { pointInPoly };
 
 export const toV3 = (x, y, z = 0) => new THREE.Vector3(x, z, -y);
@@ -233,20 +234,29 @@ function footprintIndex(W) {
   return (x, y) => !(g.get(Math.floor(x / cell) + ',' + Math.floor(y / cell)) || []).some((p) => pointInPoly(x, y, p));
 }
 
+/** The city, built in one go. (Same code as buildCitySteps, run to the end without stopping.) */
 export function buildCity(W, tex, ground, route, props, trees) {
-  const b = buildBuildings(W, tex, ground);
-  const streets = buildStreets(W, ground, route, tex);
+  const it = buildCitySteps(W, tex, ground, route, props, trees);
+  let r = it.next(); while (!r.done) r = it.next();
+  return r.value;
+}
+/** The same build as a generator that yields between its parts (name of the part just finished), so a caller that wants to keep the page responsive (the drive's
+ *  background prepare, drive.js) can give the browser a turn between them. The order of every call, and so of every Math.random draw and every object id, is the one buildCity always had. */
+export function* buildCitySteps(W, tex, ground, route, props, trees) {
+  const b = buildBuildings(W, tex, ground); yield 'buildings';
+  const streets = yield* buildStreetsSteps(W, ground, route, tex); yield 'streets';
   const outside = footprintIndex(W);
   const isFree = (x, y) => outside(x, y) && !inHero(x, y);
-  const streetscape = buildStreetscape(W, ground, route, streets, props, isFree, trees, tex);
+  const streetscape = yield* buildStreetscapeSteps(W, ground, route, streets, props, isFree, trees, tex); yield 'streetscape';
   const group = new THREE.Group();
   // (built in this order, as before: material and object ids, which three.js sorts draws by, stay the same)
-  const terrain = buildTerrain(W, tex, ground), cover = buildCover(W, ground, tex, streets);
-  const contact = buildContactShadows(W, ground, (bd) => { let cx = 0, cy = 0; for (const [x, y] of bd.pts) { cx += x; cy += y; } return inHero(cx / bd.pts.length, cy / bd.pts.length); });
-  const grass = buildGrass(W, ground, route, streets, isFree, tex);
+  const terrain = buildTerrain(W, tex, ground); yield 'terrain';
+  const cover = yield* buildCoverSteps(W, ground, tex, streets); yield 'cover';
+  const contact = buildContactShadows(W, ground, (bd) => { let cx = 0, cy = 0; for (const [x, y] of bd.pts) { cx += x; cy += y; } return inHero(cx / bd.pts.length, cy / bd.pts.length); }); yield 'contact';
+  const grass = buildGrass(W, ground, route, streets, isFree, tex); yield 'grass';
   group.add(terrain, cover, contact, streets.group, streets.freeway.group, b.group, streetscape, grass);
 
-  tileForCulling(group);
+  yield* tileForCullingSteps(group); yield 'tiles';
   // what lies flat on the terrain (lawns, lots, streets, curbs, crosswalks, contact shadows): past the end of the fog
   // it is drawn in nothing but the fog colour, exactly the colour of the terrain under it there, so it can be skipped
   const flatOnly = [], corner = new THREE.Vector3();
@@ -279,7 +289,8 @@ const FLAT = /^(cover_.*|roads|roads_tile|route_road|route_road_tile|curbs|curbs
  *  original order), so the picture is the same triangles with the same materials and no vertex data is copied.
  *  The original stays in the scene, hidden: raycasts (the birds' roof heights) and the QA scanner still find it by
  *  name, and three.js never draws or uploads a hidden mesh. */
-export function tileForCulling(root, { cell = 300, minTris = 30000 } = {}) {
+export function tileForCulling(root, opts) { return drain(tileForCullingSteps(root, opts)); }
+export function* tileForCullingSteps(root, { cell = 300, minTris = 30000 } = {}) {
   const big = [];
   root.traverse((o) => {
     if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || !o.visible || !o.frustumCulled || o.children.length) return;
@@ -287,7 +298,7 @@ export function tileForCulling(root, { cell = 300, minTris = 30000 } = {}) {
     if (tris >= minTris && !g.morphAttributes.position && !g.groups.length) big.push(o);
   });
   for (const o of big) {
-    const tiles = splitMesh(o, cell);
+    const tiles = yield* splitMeshSteps(o, cell);
     if (tiles.length < 2) continue;
     for (const tile of tiles) {
       tile.name = o.name + '_tile';
@@ -304,11 +315,14 @@ export function tileForCulling(root, { cell = 300, minTris = 30000 } = {}) {
 /** a mesh's triangles grouped into square tiles (world x/z, `cell` metres) as meshes of their own that share its
  *  vertex buffers and material: each tile is just the list of its triangles, in the original order, with bounds of
  *  its own (three.js would measure the whole shared vertex buffer). Not added to anything. */
-export function splitMesh(o, cell) {
+export function splitMesh(o, cell) { return drain(splitMeshSteps(o, cell)); }
+export function* splitMeshSteps(o, cell) {
+  const due = slicer();
   const g = o.geometry, P = g.attributes.position, I = g.index ? g.index.array : null, n = I ? I.length : P.count;
   o.updateMatrixWorld(true);
   const m = o.matrixWorld.elements, cells = new Map();
   for (let k = 0; k < n; k += 3) {
+    if ((k & 2047) === 0 && due()) yield 'split';
     // the triangle's centre in world x/z picks its tile
     let cx = 0, cz = 0;
     for (let q = 0; q < 3; q++) {
@@ -321,6 +335,7 @@ export function splitMesh(o, cell) {
   }
   const big32 = P.count > 65535, out = [];
   for (const list of cells.values()) {
+    if (due()) yield 'split';
     const t = new THREE.BufferGeometry();
     for (const [name, attr] of Object.entries(g.attributes)) t.setAttribute(name, attr);   // shared, not copied
     t.setIndex(new THREE.BufferAttribute(big32 ? Uint32Array.from(list) : Uint16Array.from(list), 1));

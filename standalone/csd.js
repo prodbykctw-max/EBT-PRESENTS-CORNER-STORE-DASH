@@ -1159,6 +1159,11 @@ function startWithDrive(){
   if(!driveAvailable()){ showStoreHow(null); return; }
   if(S.mode==="drive") return;                         // a second tap while it loads
   S.mode="drive"; storeView(false);
+  // the first start of a page is the prepared drive (below); every later one (RESTART, BUSTED, a second run after the store) builds as it always did
+  if(!prepUsed && !noPrep()){ prepUsed=true; startPrepared(); return; }
+  startFreshDrive();
+}
+function startFreshDrive(){
   // the drive mounts in here: an empty, unpositioned box (the drive's own screen is position:fixed, so it lays out and
   // stacks exactly as if it were in <body>), hidden until the cover is fully up
   var mount=document.createElement("div"); mount.style.visibility="hidden"; document.body.appendChild(mount);
@@ -1175,6 +1180,56 @@ function startWithDrive(){
     unmount();   // never leave a half-built drive over the store
     lift(); showStoreHow(null);
   });
+}
+/* The drive built in the background (docs/DRIVE.md "Prepared start"). A few seconds after the title has settled, `prepareDrive()` (drive.js) builds the whole drive behind the screens, hidden and
+   frozen: the city, cars, people, crowd, shaders, the first frame on the GPU, no sound, nothing moving. START DRIVE then only reveals it and sets it going (instant), or, if it is tapped
+   before the build is done, shows the usual loader over the SAME build (never a second one). Only the first start of a page is prepared; a restart, BUSTED or a second run build fresh, as they did.
+   If the prepare fails (error, GL context lost) the tap builds the drive the old way. */
+var PREP=null, prepUsed=false, titleAt=0;
+function noPrep(){ return /[?&]noprepare\b/.test(location.search) || !!(navigator.connection && navigator.connection.saveData); }   // ?noprepare: the drive builds on the START tap, as before (QA)
+function beginPrepare(m, mount){
+  if(PREP) return PREP;
+  if(!mount){ mount=document.createElement("div"); mount.style.visibility="hidden"; document.body.appendChild(mount); }   // an empty box; the drive's own screen is position:fixed (hidden until START)
+  var P=PREP=m.prepareDrive({ mount: mount }); P.mount=mount;
+  P.done.catch(function(e){ console.warn("prepared drive failed:", e); });
+  return P;
+}
+function schedulePrepare(m){
+  if(noPrep()) return;
+  (function tick(){
+    if(PREP || prepUsed || S.mode==="drive") return;
+    // after the title has settled (its assembly and the painted layers' fly-in, ~3 s); not while the tab is hidden
+    if(document.hidden || !titleAt || !TITLE.done || performance.now()-titleAt<3000){ setTimeout(tick,300); return; }
+    beginPrepare(m);
+  })();
+}
+function startPrepared(){
+  var P=PREP, tried=false;
+  if(P && P.failed){ try{ if(P.dispose) P.dispose(); }catch(e){} if(P.mount.parentNode) P.mount.parentNode.removeChild(P.mount); PREP=P=null; }
+  var mount=P?P.mount:null, lift=null;
+  function unmount(){ if(mount&&mount.parentNode) mount.parentNode.removeChild(mount); PREP=null; }
+  function fallback(e){   // the prepared drive failed: one go at the old build, then the store
+    console.warn("prepared drive unavailable:", e);
+    try{ if(P&&P.dispose) P.dispose(); }catch(x){}
+    unmount(); if(lift) lift();
+    if(!tried){ tried=true; startFreshDrive(); } else showStoreHow(null);
+  }
+  var hand={ muted: !!S.muted, onDone: function(r){
+    unmount();
+    if(r && (r.busted||r.restart)){ S.mode=""; startWithDrive(); return; }   // hit a cop (jail) or RESTART on the pause menu: back to the start of the drive (a fresh build)
+    showStoreHow(r);
+  }};
+  function run(){
+    var r=P.start(hand);
+    if(r.instant){ ["ovTitle","ovDriveHow","ovHow"].forEach(hideNow); mount.style.visibility=""; }   // built and drawn already: the drive is simply shown
+    else lift=driveCover(mount);                                                                     // still building: the loader over the same build
+    P.done.catch(fallback);
+  }
+  if(P){ run(); return; }
+  // tapped before the prepare began (title tapped through at once): begin it now, under the usual cover
+  mount=document.createElement("div"); mount.style.visibility="hidden"; document.body.appendChild(mount);
+  lift=driveCover(mount);
+  import(DRIVE_URL).then(function(m){ P=beginPrepare(m, mount); P.start(hand); P.done.catch(fallback); }).catch(fallback);
 }
 // Once you get to the store (the drive is over, or there is no drive): the store's how-to-play, on its own plain
 // screen. START RUN starts the run, then banks the drive's bonus on top of the fresh score.
@@ -1221,7 +1276,7 @@ function bullyEnters(){
 // Only network: nothing is parsed or built, so the drive starts exactly as before. (Docs: docs/DRIVE.md "Loading".)
 function prefetchDrive(){ if(driveAvailable()) setTimeout(function(){
   // the code first (its ~30 small files would queue behind 8 MB of data otherwise), then the data
-  import(DRIVE_URL).then(function(m){ if(m.warmDrive) m.warmDrive(); }).catch(function(){});
+  import(DRIVE_URL).then(function(m){ if(m.warmDrive) m.warmDrive(); if(m.prepareDrive) schedulePrepare(m); }).catch(function(){});
 }, 1200); }
 
 /** a different corner of the store every run: any open floor at least ~560px from the entrance (so he never starts
@@ -2002,7 +2057,7 @@ function init(){
     if(!boardReady||!playerReady||!bullyReady||!itemsReady) return;
     // the title's dimmed backing is up at once under the loader (so the store never shows undimmed), the loader
     // fades off it, and only then do the card and TAP TO START rise (they used to rise through the fading LOADING)
-    S.mode="title";
+    S.mode="title"; titleAt=performance.now();
     if(MOTION){ titleAssemble(); return; }
     show("ovTitle",0); el("loading").style.display="none";
   }
