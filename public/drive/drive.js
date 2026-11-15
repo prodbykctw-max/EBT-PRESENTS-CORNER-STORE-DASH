@@ -6,7 +6,8 @@
 import * as THREE from './vendor/three.module.min.js';
 import { GLTFLoader } from './vendor/GLTFLoader.js';
 import { MeshoptDecoder } from './vendor/meshopt_decoder.module.js';
-import { buildCity, makeGround, toV3, rayTargets } from './city.js';
+import { buildCitySteps, makeGround, toV3, rayTargets } from './city.js';
+import { pace } from './steps.js';
 import { LEVEL, standOn } from './levels.js';
 import { CUT } from './roads.js';
 import { TopSurface } from './surface.js';
@@ -86,12 +87,35 @@ let retryNext = false;
 // the opening flyover (see "the opening flyover" below): ?qa and ?bot start on foot at once as always; ?qa&fly asks for it, ?nofly never plays it
 const FLY_QS = new URLSearchParams(location.search);
 
-export async function startDrive({ mount = document.body, muted = false, onDone = () => {}, onProgress = () => {}, look: lookOption, intro: introOption } = {}) {
+// ---------- the drive built in the background ----------
+// prepareDrive() runs the whole start-up of the drive (docs/DRIVE.md "Loading", "Prepared start") while the player is still on the title or the how-to-play, with the drive's screen hidden and
+// nothing moving: no clock, no traffic, no flyover, no loop, no sound. It stops after the first frame has been drawn (everything on the GPU) and waits. `start()` is the START DRIVE tap: it hands the
+// host's callbacks over, makes the sound, and lets the drive go on from the very first moment (the first picture is already there). A tap before it is ready simply goes on with the same build
+// (the loader, with its real progress), so there is never a second build. startDrive() below is the same function; `prepared` is null on every other start (restart, BUSTED, the drive-alone page).
+//   const P = prepareDrive({ mount }); P.ready -> Promise<boolean>; P.start({ muted, onDone, onProgress }) -> { instant }; P.done -> startDrive's promise (rejects if the build failed); P.failed; P.dispose()
+export function prepareDrive(opts = {}) {
+  let open; const P = { state: 'building', started: false, failed: false, instant: false, begin: null, dispose: null, gate: new Promise((ok) => { open = ok; }), onReady: null };
+  P.ready = new Promise((ok) => { P.onReady = ok; });
+  P.done = startDrive({ ...opts, prepared: P });
+  P.done.catch(() => { P.failed = true; try { P.dispose?.(); } catch {} P.onReady(false); });
+  P.start = (o = {}) => { P.instant = P.state === 'ready' && !P.failed; P.begin?.(o); open(); return { instant: P.instant }; };
+  return P;
+}
+// one macrotask: the browser gets a turn (input, a frame of the title's animation) before the build goes on
+const macrotask = () => new Promise((ok) => { const c = new MessageChannel(); c.port1.onmessage = () => { c.port1.close(); ok(); }; c.port2.postMessage(0); });
+
+export async function startDrive({ mount = document.body, muted = false, onDone = () => {}, onProgress = () => {}, look: lookOption, intro: introOption, prepared: PREP = null } = {}) {
   const RETRY = retryNext; retryNext = false;
+  // a prepared drive is frozen until START DRIVE is tapped (PREP.started); while it builds it gives the page a turn between its parts (`if (frozen()) await macrotask()`), and `slice()` does the same inside a long loop every ~8 ms
+  const frozen = () => !!PREP && !PREP.started;
+  pace.slow = !!PREP;   // (steps.js: only a prepared drive that has not been started gives the page turns; START DRIVE, or any normal start, builds back to back)
+  let sliceAt = performance.now();
+  const slice = () => { if (!frozen() || performance.now() - sliceAt < 8) return null; return macrotask().then(() => { sliceAt = performance.now(); }); };
+  const host = { onDone, onProgress };   // (a prepared drive gets the real ones at START)
   WIND.value = 0;   // the tree canopies' sway clock starts from the same place on every start (a restart is exactly a fresh start)
   // which look: the realistic look (the default) or the comic ink look (?look=comic, or startDrive({ look: 'comic' })); mode.js
   const REAL = resolveLook(lookOption);
-  mk('start');
+  mk('start'); if (PREP) mk('prepare-start');
   warm({ real: REAL });   // every download at once, now (a second call, after the title screen's, does nothing)
   // ---------- load (the game has no loader of its own, so the drive shows one) ----------
   if (!document.querySelector('link[data-drive-css]')) {
@@ -108,10 +132,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   root.innerHTML = '<div class="drive-loading"><b>AUBURN AVE</b><span>Get to the corner store</span><i></i></div>';
   mount.appendChild(root);
   const bar = root.querySelector('.drive-loading i');
-  const progress = (p, label) => { bar.style.width = p * 100 + '%'; onProgress(p, label); };
+  const progress = (p, label) => { bar.style.width = p * 100 + '%'; host.onProgress(p, label); };
   progress(0.05, 'Loading Auburn Ave');
   const audio = new DriveAudio({ muted });
-  audio.unlock(); // still inside the START tap's user activation on most browsers
+  if (!PREP) audio.unlock(); // still inside the START tap's user activation on most browsers
+  // A prepared drive makes no sound and takes no input until START DRIVE: this is that tap (called from the host's click handler, so the AudioContext starts inside the gesture, as it always did)
+  if (PREP) PREP.begin = (o) => { if (o.onDone) host.onDone = o.onDone; if (o.onProgress) host.onProgress = o.onProgress; audio.setMuted(!!o.muted); PREP.started = true; pace.slow = false; audio.unlock(); };
   const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
   const MOBILE = matchMedia('(pointer: coarse)').matches;
   const realReady = REAL ? import('./real.js').then(async (R) => ({ R, T: await R.loadTextures(BASE, { mobile: MOBILE }) })).catch((e) => { console.warn('realistic look unavailable, drawing the comic look:', e?.message || e); return null; }) : null;   // the realistic look's code and its 1K scans load alongside the rest
@@ -164,6 +190,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     realReady,
   ]);
   mk('downloaded'); coreOpen();
+  if (frozen()) await macrotask();
   // the car and the character are not needed to BUILD the city, so the city starts building without waiting for them: warm.js downloads them after the files the city needs
   // (the `later` group) and this load joins that download, so they arrive while the city is built. They are awaited just before the world is made (below), so every Math.random
   // draw they make (the ids of what GLTFLoader makes) still lands before the traffic, crowd and planner take theirs: the stream is exactly the one it was.
@@ -201,6 +228,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     }`);
   renderer.toneMapping = RL ? THREE.NeutralToneMapping : THREE.CustomToneMapping; renderer.toneMappingExposure = 1.0;   // (the realistic look tone-maps with three's Neutral map in its own final pass: real-post.js)
   root.prepend(renderer.domElement);
+  if (PREP) {   // a prepared drive that loses its GL context (or fails) before START is dropped, and the host builds a fresh one on the tap as it always did
+    renderer.domElement.addEventListener('webglcontextlost', (e) => { if (frozen()) { e.preventDefault(); PREP.failed = true; PREP.onReady(false); } });
+    PREP.dispose = () => { try { renderer.dispose(); renderer.forceContextLoss(); } catch {} root.remove(); };
+  }
   const scene = new THREE.Scene();
   // near 2 m: as close as the chase camera ever gets to the ground (measured along the whole route: the road at the
   // bottom of the screen stays >= 2.62 m away with the camera's 2.5 m ground clearance below). The overhead camera
@@ -211,6 +242,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const camera = new THREE.PerspectiveCamera(42, 1, 2, 3000);
   // the look pass: GTA Chinatown Wars ink + comic shading, or the realistic look's post chain (the same API: target, resize, render)
   const comic = RL ? new RL.RealLook(renderer, scene, camera, { mobile: MOBILE }) : new Look(renderer, scene, camera, { mobile: MOBILE });
+  if (frozen()) await macrotask();
 
   // shared tiling textures come from the hero glTF materials, so they download once
   const tex = {};
@@ -225,6 +257,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const tl = new THREE.TextureLoader();
   const [asphalt, asphaltNor, grass, grassNor, bark, barkNor, leaves, tuft] = await Promise.all(['tex/asphalt_diff.webp', 'tex/asphalt_nor.webp',
     'tex/grass_diff.webp', 'tex/grass_nor.webp', 'tex/bark.webp', 'tex/bark_nor.webp', 'tex/leaves.webp', 'tex/grass_tuft.webp'].map((f) => tl.loadAsync(new URL(f, BASE).href)));
+  if (frozen()) await macrotask();
   for (const t of [grass, bark, leaves, tuft]) t.colorSpace = THREE.SRGBColorSpace;   // CC0 Poly Haven: leafy_grass, island_tree_02, grass_bermuda_01
   Object.assign(tex, { grass, grassNor, bark, barkNor, leaves, tuft });
   asphalt.colorSpace = THREE.SRGBColorSpace;
@@ -233,15 +266,22 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const ground = makeGround(W);
   const route = new RouteFrame(W, ground, 200); // road continues 200 m past the store: traffic drives on out of view
   mk('assets-ready');
-  const city = buildCity(W, tex, ground, route, props.scene, trees.scene);
+  // (the same build as buildCity(), a part at a time: a prepared drive gives the page a turn between the parts)
+  const cityBuild = buildCitySteps(W, tex, ground, route, props.scene, trees.scene);
+  let cityStep = cityBuild.next();
+  while (!cityStep.done) { if (frozen()) await macrotask(); cityStep = cityBuild.next(); }
+  const city = cityStep.value;
   mk('buildCity');
+  if (frozen()) await macrotask();
   if (RL) RL.upgradeCity({ city, T: realTex, scene });   // PBR facades, worn roads, concrete, lit trees (real.js)
   mk('upgradeCity');
+  if (frozen()) await macrotask();
   scene.add(city.group, hero.scene);
   // the city and the storefront row never move: their matrices are worked out once here, instead of three.js
   // recomposing every one of their hundreds of objects every frame (and again for the shadow pass)
   scene.matrixAutoUpdate = false;
   for (const g of [city.group, hero.scene]) { g.updateMatrixWorld(true); g.traverse((o) => { o.matrixAutoUpdate = false; }); }
+  if (frozen()) await macrotask();
 
   // lights: the sun follows the car so its shadow map stays sharp where you are
   const hemi = new THREE.HemisphereLight(0xcfe3ff, 0x7a6a55, 1.2);   // warm bounce: flat, sunny comic light
@@ -255,6 +295,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   if (RL) RL.tuneWeather(weather, { scene, renderer, sun, hemi, look: comic });   // physical light: warm sun, weak hemisphere fill, the sky's environment, haze
   // wheels read the height of the actual road triangles under them (never a formula that could disagree)
   const roadSurface = new TopSurface(city.streets.drivable);
+  if (frozen()) await macrotask();
   const surfAt = (x, y, below) => { const h = roadSurface.top(x, -y, below); return h ? h.y : null; };
   // ---------- the run, the car ----------
   // parking space: in front of the store, in the curbside parking lane (or at the right curb if there isn't one)
@@ -276,6 +317,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (anim) { try { animals = new anim.m.Animals(anim.data, scene, { mobile: MOBILE }); } catch (e) { console.warn('realistic animals unavailable, drawing the usual ones:', e?.message || e); } }   // (made under a private random generator: the shared stream is untouched)
   }
   mk('cars-people-ready');
+  if (frozen()) await macrotask();
   const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks, carSets, animals });
   for (const cs of Object.values(world.carSets)) cs.shadowOnly(renderer);   // the cars' shadow proxies are drawn in the sun's shadow pass only
   // the sun's shadow box, so the props that can't cast a shadow into it skip the shadow pass (World.render)
@@ -284,6 +326,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const signals = world.signals = new Signals({ route, nodes: city.signals, marks: city.streets.routeMarks, scene });
   const trams = world.trams = new Streetcars({ W, route, ground, surfAt, scene, props: props.scene, world, audio });
   const onRouteRoad = (x, y) => roadSurface.top(x, -y, ground(x, y) + 1.2)?.name === 'route_road';
+  if (frozen()) await macrotask();
   // what people's feet stand on (the crowd, dogs, water sellers): the road surface, and the curbs along the route. (The curbs
   // are not in `roadSurface`: wheels and the player's feet never read them. Only the triangles within ~25 m of the route are kept.)
   const nearRoute = new Set();
@@ -305,13 +348,16 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   };
   city.group.traverse((o) => { if (o.userData.wbox && /^(curbs|crosswalks|cover_)/.test(o.name) && meshNear(o.userData.wbox)) flat.push(o); });
   hero.scene.traverse((o) => { if (o.isMesh && /^SIDEWALK_hero/.test(o.name)) flat.push(o); });
+  if (frozen()) await macrotask();
   const feetSurface = flat.length ? new TopSurface(flat, 8, nearTri) : null;
   const footAt = (x, y, below) => {
     const a = roadSurface.top(x, -y, below), b = feetSurface ? feetSurface.top(x, -y, below) : null;
     return a && b ? Math.max(a.y, b.y) : a ? a.y : b ? b.y : null;
   };
   world.footAt = footAt; world.feet = { surface: feetSurface, rebuild: () => (flat.length ? new TopSurface(flat, 8, nearTri) : null) };   // (rebuild: for measuring the load-time cost)
+  if (frozen()) await macrotask();
   const heroWalls = heroSegments(hero.scene, ground(SPOT.x, SPOT.y));   // (the hand-built row's wall slices: the crowd's corral and the runner's collision world both use them)
+  if (frozen()) await macrotask();
   const crowd = world.crowd = new Crowd({
     route, ground, surfAt, heightAt: footAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree, alt: altPeople, blob: ContactBlobs,
     walls: city.walls, heroWalls, roads: city.streets.index,
@@ -322,16 +368,19 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   crowd.shadowBox = world.shadowBox;
   crowd.vehicles = () => world.ambient;   // (walking groups wait at a side street's mouth while a vehicle drives through it)
   mk('crowd');
+  if (frozen()) await macrotask();
   world.relocateDogs();   // (the dogs were placed before the crowd existed: out of any stretch with no room between curb and wall)
   world.planCorners(signals);   // water sellers and panhandlers working the red lights
   // flocks fly over the roofs: height of whatever is under a point (roofs, freeway decks, landmarks), by a ray from above
   // (rayTargets: the same roofs, freeway and storefronts cut into small tiles, so a ray tests only what's under it)
+  if (frozen()) await macrotask();
   const roofRay = new THREE.Raycaster(), roofHits = rayTargets([city.group.getObjectByName('roofs'), city.freeway.group, hero.scene].filter(Boolean)), down = new THREE.Vector3(0, -1, 0);
   const roofAt = (x, y) => { roofRay.set(toV3(x, y, 400), down); const h = roofRay.intersectObjects(roofHits, true)[0]; return h ? h.point.y : ground(x, y); };
   const groundAt = (x, y) => Math.max(surfAt(x, y, ground(x, y) + 1.2) ?? -Infinity, ground(x, y) + LEVEL.TERRAIN);
   const birds = world.birds = new Birds({ scene, props: props.scene, route, roofAt, groundAt, isFree: city.isFree, sEnd: spot.s,
     trees: [...(city.furniture.tree_round || []), ...(city.furniture.tree_upright || [])],
     occupied: (s, d) => world.ents.some((e) => e.alive && Math.abs(e.s - s) < 7 && Math.abs(e.d - d) < 2.5), visible: (x, y, z, r) => world.visible(x, y, z, r), mobile: MOBILE, animals, camera });
+  if (frozen()) await macrotask();
   const carModel = carGltf.scene;
   if (RL) RL.upgradeCar(carModel, realTex);   // clearcoat paint, real glass and rubber (before the brake lamps are looked for just below)
   carModel.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
@@ -366,6 +415,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   scene.add(spotGroup);
   // red path lines + amber chevrons on the road ahead: the realistic look only (guide.js)
   const guide = RL ? new Guide({ scene, route, ground, surfAt, spot }) : null;
+  if (frozen()) await macrotask();
 
   // ---------- input: you drive it (GTA Chinatown Wars layout) ----------
   // Phone: ◀ ▶ change lanes (bottom left), GAS, BRAKE (hold at a stop to reverse) and HORN (bottom right), all held
@@ -391,6 +441,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     last = performance.now();                                                     // resume without a time jump
   };
   const kd = (e) => {
+    if (frozen()) return;   // a prepared drive waiting behind the how-to-play: not a key for it
     if (fly && !paused) { e.preventDefault(); audio.unlock(); endFly(); return; }   // any key ends the opening flyover (the key is only that: not also a pause, a step or a horn)
     if (e.code === 'KeyP' || e.code === 'Escape') { e.preventDefault(); setPaused(!paused); return; }
     audio.unlock();
@@ -477,7 +528,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (coarse) camera.setViewOffset(w, h, 0, h * 0.1, w, h); else camera.clearViewOffset(); // car clears the buttons
     camera.updateProjectionMatrix();
   };
-  addEventListener('resize', resize); resize();
+  addEventListener('resize', resize);
+  if (frozen()) await macrotask();   // (the render targets are made here: a task of their own)
+  resize();
+  if (frozen()) await macrotask();
   // ---------- adaptive resolution (phones that can't keep up) ----------
   // The picture is drawn at the sharpest pixel ratio set above. If frames keep coming slower than 60 a second (on
   // average over ~10 frames, longer than 21.7 ms) for 1.5 s, a phone's GPU is falling behind (or throttling as it warms
@@ -685,13 +739,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // Playing the clip at (your speed / that) keeps the planted foot still on the pavement. The first version measured
   // one front-to-back sweep and assumed the clip was one stride, but it holds two: the legs ran at twice the speed you
   // covered ground (12.7 steps a second at full speed, the feet skating backwards).
-  const gait = (clip, h) => {
+  const gait = async (clip, h) => {   // (async only so a prepared drive can give the page a turn inside the loop: frozen() / slice())
     const o = SkeletonUtils.clone(charGltf.scene), mx = new THREE.AnimationMixer(o); mx.clipAction(clip).play();
     o.scale.setScalar(h / MODEL_H);
     const bones = ['L_Foot', 'R_Foot'].map((n) => o.getObjectByName(n)), toes = ['L_ToeBase', 'R_ToeBase'].map((n) => o.getObjectByName(n));
     const N = 240, dt = clip.duration / N, tr = bones.map(() => []), w = new THREE.Vector3();
     let low = Infinity;
     for (let i = 0; i <= N; i++) {
+      if (frozen()) await slice();
       mx.setTime(i * dt); o.updateMatrixWorld(true);
       bones.forEach((b, k) => { b.getWorldPosition(w); tr[k].push([w.z, w.y]); low = Math.min(low, w.y); });
       for (const t of toes) low = Math.min(low, t.getWorldPosition(w).y);
@@ -703,7 +758,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     }
     return { plant: cnt ? Math.max(0.3, sum / cnt) : 1, low };
   };
-  function makePerson(bully) {
+  async function makePerson(bully) {
     const o = SkeletonUtils.clone(charGltf.scene), h = bully ? BULLY_H : PLAYER_H;
     o.scale.setScalar(h / MODEL_H);
     o.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; if (bully) m.material = makeBullyMaterial(m.material); } });
@@ -715,11 +770,15 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // which (measured by picking the pixels next to him) is the wall 6-10 m further down the hill, below his feet.
     const blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: glowTex, color: 0x000000, transparent: true, opacity: 0.6, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, toneMapped: false }));
     blob.rotation.order = 'YXZ'; blob.renderOrder = 1; blob.scale.set(h * 0.42, h * 0.55, 1); scene.add(blob);
-    const run = gait(clips.run, h), walk = gait(clips.walk, h), stand = gait(clips.stand, h);
+    const run = await gait(clips.run, h), walk = await gait(clips.walk, h), stand = await gait(clips.stand, h);
     return { o, blob, mixer, act, run: act.run, plantRun: run.plant, plantWalk: walk.plant, sink: stand.low - run.low,
       s: 0, d: 0, v: 0, dv: 0, acc: 0, nudge: 0, z: 0, stun: 0, pause: 0, phase: 0, yaw: null, lean: 0, roll: 0, hit: null, ps: 0, pd: 0 };
   }
-  const me = makePerson(false), him = makePerson(true);
+  if (frozen()) await macrotask();
+  const me = await makePerson(false);
+  if (frozen()) await macrotask();
+  const him = await makePerson(true);
+  if (frozen()) await macrotask();
 
   // ---------- the line you run along ----------
   // Built once from the street itself (every 0.5 m): the curb side of the sidewalk, the building line (the actual
@@ -859,7 +918,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // are what is solid. roam.js holds the walls (every building's edges and footprint, the hand-built row's wall slices, the freeway's barriers and piers), every tree, pole, bench,
   // bin, hydrant and shelter, and the edge of the map; here are the moving things (cars, people, the bully) and how the person is driven. s and d (along and across the route)
   // are worked out from the position every step, because the traffic and the crowd read them.
+  if (frozen()) await macrotask();
   const walk = walkWorldFor({ city, heroWalls, shelters: trams.shelters, W });
+  if (frozen()) await macrotask();
   const doorP = route.at(doorS, doorD), DOOR = { x: doorP.x, y: doorP.y };   // the driver's door, in the world plane
   const DOOR_REACH = 1.2;   // m from the door at which you are in
   const startP = route.at(FOOT.start, footLineD(FOOT.start)), startH = route.at(FOOT.start - FOOT.bullyBehind, footLineD(FOOT.start - FOOT.bullyBehind));
@@ -1257,6 +1318,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
   // ---------- loop ----------
   let last = performance.now(), raf = 0, acc = 0;
+  let once = false;   // one frame drawn with no loop behind it: the prepared drive's first picture
   let holding = false;   // the first picture is up under the loader; nothing moves until the loader has faded off it
   const FIXED = 1 / 120;
   // The physics runs in fixed 1/120 s steps, but frames don't land on step boundaries (a phone's frame times wobble,
@@ -1269,7 +1331,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   let tickDt = null;
   function frame(ts) {
     const manual = tickDt !== null;
-    if (!manual) { raf = nextFrame(frame); if (api.manual) return; }
+    if (!manual) { if (!once) raf = nextFrame(frame); if (api.manual) return; }
     if (root.clientWidth + 'x' + root.clientHeight !== sized) resize();
     // the time of THIS frame on screen (requestAnimationFrame's timestamp: the same for everything drawn in it), not
     // whenever this callback happened to start: the start wanders by a few ms frame to frame on a busy phone, and
@@ -1590,7 +1652,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     const veil = document.createElement('div'); veil.className = 'drive-veil'; root.appendChild(veil);
     const done = () => {
       renderer.dispose(); renderer.forceContextLoss();   // hand the GPU memory back now, not whenever the page gets round to it
-      root.remove(); onDone({ ...result });
+      root.remove(); host.onDone({ ...result });
     };
     if (G) G.to(veil, { opacity: 1, duration: SCREEN_FADE, ease: 'power1.inOut', onComplete: done });
     else { veil.getBoundingClientRect(); veil.classList.add('on'); setTimeout(done, SCREEN_FADE * 1000); }   // drive.css fades it
@@ -1608,19 +1670,32 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   root.querySelector('[data-restart]').addEventListener('click', () => { haptic(HAP.tap); paused = false; Object.assign(result, { restart: true }); finish(); });
   for (const el of root.querySelectorAll('[data-skip], [data-pause], [data-resume], [data-restart], [data-quit]')) tapHaptic(el);
   // leaving the app mid-drive pauses it (a call, a text, the home screen): nothing happens while you're away
-  const onHide = () => { if (document.hidden && (state === 'driving' || state === 'countdown' || state === 'onfoot')) setPaused(true); };
+  const onHide = () => { if (!frozen() && document.hidden && (state === 'driving' || state === 'countdown' || state === 'onfoot')) setPaused(true); };
   document.addEventListener('visibilitychange', onHide);
   // build every shader the run can need now, while the level is appearing, instead of the first time each thing comes
   // into view (the first EBT token, the first hazard ring, the first crash's sparks and debris): building a shader
   // mid-drive freezes the frame it happens in. compile() covers every material in the scene, shown or not; with
   // KHR_parallel_shader_compile the browser builds them in the background.
-  try { renderer.setRenderTarget(comic.target); renderer.compileAsync(scene, camera).catch(() => {}); } catch {} finally { renderer.setRenderTarget(null); }
+  let compiled = null;
+  if (frozen()) {
+    // a prepared drive hands the materials to compileAsync one object at a time (each new material once, the lights and fog still the scene's own: its third argument), giving the page a turn
+    // between them: the one call over the whole scene writes every shader's source in one go, which holds the page up for a second on a phone. The programs are the same ones.
+    const seenMat = new Set(), objs = [], jobs = [];
+    scene.traverse((o) => { if (!(o.isMesh || o.isPoints || o.isLine || o.isSprite)) return; const ms = [].concat(o.material || []); if (ms.some((m) => !seenMat.has(m))) { for (const m of ms) seenMat.add(m); objs.push(o); } });
+    try { renderer.setRenderTarget(comic.target); for (const o of objs) { jobs.push(renderer.compileAsync(o, camera, scene).catch(() => {})); await slice(); } } catch {} finally { renderer.setRenderTarget(null); }
+    compiled = Promise.all(jobs);
+  } else {
+  try { renderer.setRenderTarget(comic.target); compiled = renderer.compileAsync(scene, camera).catch(() => {}); } catch {} finally { renderer.setRenderTarget(null); }
+  }
   // same for textures: each one is sent to the GPU the first time something using it is on screen (the lawn photos
   // only when the first park comes into view), which stalls that frame; send them all now
+  // (a prepared drive sends them a few at a time, giving the page a turn after ~8 ms of uploads: they are the one part of the build that can't be broken up inside)
   const sent = new Set();
-  scene.traverse((o) => { for (const m of [].concat(o.material || [])) for (const v of Object.values(m)) if (v?.isTexture && !sent.has(v)) { sent.add(v); try { renderer.initTexture(v); } catch {} } });
+  const sendTex = (v) => { if (!v || sent.has(v)) return; sent.add(v); try { renderer.initTexture(v); } catch {} };
+  const texList = []; scene.traverse((o) => { for (const m of [].concat(o.material || [])) for (const v of Object.values(m)) if (v?.isTexture) texList.push(v); });
+  for (const v of texList) { sendTex(v); if (frozen()) await slice(); }
   // (the new people's baked-animation textures are shader uniforms, not material properties, so the loop above cannot see them)
-  for (const l of world.crowd?.alt?.lods || []) for (const v of Object.values(l.uniforms || {})) if (v?.value?.isTexture && !sent.has(v.value)) { sent.add(v.value); try { renderer.initTexture(v.value); } catch {} }
+  for (const l of world.crowd?.alt?.lods || []) for (const v of Object.values(l.uniforms || {})) if (v?.value?.isTexture) { sendTex(v.value); if (frozen()) await slice(); }
   // The loader stays up until the first picture is actually on screen. That first frame is the slow one (the GPU
   // builds every shader and uploads every texture it needs), so it runs under the loader: placing you, the bully and
   // the camera, then drawing. Then two display frames for it to reach the screen, and only then the loader fades
@@ -1628,16 +1703,32 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // caught up). Nothing moves while it fades (holding): the chase starts on the picture you can see. The loader sits
   // above the HUD (drive.css), so no button shows before the screen is ready; the HUD drops in as it lifts.
   mk('pre-first-frame');
-  last = performance.now(); frame(); holding = true;
-  mk('first-frame');
+  if (PREP) {
+    // A prepared drive draws that first frame once, with no loop behind it (a frozen drive costs nothing), and then waits for START DRIVE: the clock, the traffic, the bully, the flyover and the sound all begin there.
+    // (the shaders were building in the background since compileAsync above: let them finish before the one blocking draw)
+    if (frozen() && compiled) { await compiled; if (frozen()) await macrotask(); }
+    last = performance.now(); once = true; try { frame(); } finally { once = false; } holding = true;
+    mk('first-frame'); mk('prepared'); PREP.state = 'ready'; PREP.onReady(!PREP.failed);
+    await PREP.gate;
+  } else { last = performance.now(); frame(); holding = true; mk('first-frame'); }
+  if (PREP?.instant) {
+    // START DRIVE came after all of that was done: the first picture is already drawn, so there is nothing to wait for and nothing to fade. The loader goes, the HUD drops in, and the loop starts (the flyover begins from the held picture).
+    keys.clear(); loadingScreen.remove(); holding = false; last = performance.now(); raf = nextFrame(frame); nextFrame(() => mk('shown'));
+    if (G) {
+      G.from(root.querySelectorAll(RL ? '.drive-rbar > *, .drive-row2 > *' : '.drive-hud > *'), { y: -24, opacity: 0, duration: 0.45, stagger: 0.07, delay: 0.15, ease: 'back.out(1.7)', clearProps: 'transform,opacity' });
+      G.from(root.querySelectorAll('.drive-pad'), { y: 40, opacity: 0, duration: 0.5, stagger: 0.08, delay: 0.2, ease: 'back.out(1.5)', clearProps: 'transform,opacity' });
+    }
+  } else {
+  if (PREP) { keys.clear(); last = performance.now(); raf = nextFrame(frame); }   // (tapped before it was ready: from here on it is a normal start, the loop holds the first picture under the loader)
   await new Promise((ok) => nextFrame(() => nextFrame(ok)));
   mk('flyover-or-chase-start');
-  const go = () => { holding = false; last = performance.now(); };
+  const go = () => { holding = false; last = performance.now(); mk('shown'); };
   if (G) {   // the loading screen fades away; the HUD drops in from the top and the pedals rise from the bottom
     G.to(loadingScreen, { opacity: 0, duration: SCREEN_FADE, ease: 'power1.inOut', onComplete: () => { loadingScreen.remove(); go(); } });
     G.from(root.querySelectorAll(RL ? '.drive-rbar > *, .drive-row2 > *' : '.drive-hud > *'), { y: -24, opacity: 0, duration: 0.45, stagger: 0.07, delay: 0.15, ease: 'back.out(1.7)', clearProps: 'transform,opacity' });
     G.from(root.querySelectorAll('.drive-pad'), { y: 40, opacity: 0, duration: 0.5, stagger: 0.08, delay: 0.2, ease: 'back.out(1.5)', clearProps: 'transform,opacity' });
   } else { loadingScreen.remove(); go(); }
+  }
   // test hooks (drive QA + screenshots)
   Object.assign(api, { car, world, route, spot, keys, result, guide, camR: CAM_R, audio, fx, city, comic, adaptRes: { res, step: adaptRes, PR_MIN, PR_MAX },
     three: { scene, camera, carRig, THREE, renderer },

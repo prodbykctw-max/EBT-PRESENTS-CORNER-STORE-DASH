@@ -919,6 +919,19 @@ How long START DRIVE takes to reach the first frame, and what was done about it 
 - **The weather** (Open-Meteo, up to 2.5 s) is asked for at the same time (`preWeather`), not after START.
 - **Cache.** Every file is still `max-age=0, must-revalidate`, so an update is instant; a revisit costs one conditional request per file (a 304). Long caching would need a version in the URL.
 - **Timers.** The only waits on a timer are the 8 s caps on the cars / people / animals (`within`), which are cancelled the moment the files are there.
+- **Prepared start (the drive is built on the title screen).** About 3 s after the title card has assembled (and only while the tab is visible), `standalone/csd.js` `schedulePrepare` calls
+  `prepareDrive()` (drive.js), which runs the normal `startDrive({ prepared })`: the same world, city, cars, people, animals, crowd, renderer, compiled shaders and ONE drawn frame, but frozen
+  and hidden: no clock, traffic, flyover, rAF loop, input or audio (`frozen()` is true until the tap). The build yields to the browser between phases and every ~8 ms inside the long loops
+  (`slice()`, `macrotask()`), and the heavy builders (`buildCity`, `buildStreets`, `raiseDecks`, `ribbonMesh`, `buildFreeway`, `buildCover`, `drapedPolygon`, `buildStreetscape`, `tileForCulling`,
+  `splitMesh`) are generators (`steps.js` `drain`/`slicer`) with sync wrappers that keep the same calls in the same order, so the output and the `Math.random` draws are unchanged. Materials compile
+  with `compileAsync` one at a time, textures upload in slices. START DRIVE (`startPrepared`): if the build is done, the how-to-play hides, the canvas shows and `P.start()` opens the gate (clock,
+  flyover, audio unlock, HUD entrance start then), so the first frame is a tap away; if the build is still running the old loader shows its real progress over the SAME build (never a second one);
+  if it had not begun, it begins under the loader. A failed or lost-context prepare disposes and builds the old way once (`startFreshDrive`). Only the page's first drive is prepared (`prepUsed`);
+  restart, BUSTED and the second drive after the store build fresh as before. `?noprepare` (or Save-Data) turns it off. The only `Math.random` change: the 88,200 audio noise draws now happen at the tap.
+  Hurry mode: `steps.js` `pace.slow` is true only while the prepared drive is frozen; START DRIVE (or any normal start) turns it off, so the builders stop yielding and the remaining build runs back to back (a tap mid-prepare is never slower than the old build; measured 18 s vs 35-38 s, and a fast tap 32-34 s vs 36 s, on software WebGL). Nothing in the build waits on requestAnimationFrame.
+  Still costly and not splittable: GL-bound steps (PMREM sky, render targets, texture uploads, shader compile, the first frame) are one long task each; on software WebGL they are seconds, on a phone GPU far less.
+  Tools: `tools-load/prebuild.mjs` (tap to first drive frame, cases a/b/c/d, long tasks, rAF gaps, heap), `prepprof.mjs`, `chunks.mjs` (longest CPU chunk per builder), `prerandom.mjs`, `prepflow.mjs`.
+
 - **Marks.** `performance.getEntriesByType('mark')` filtered to `drive:` gives the phases: start, downloaded, assets-ready, buildCity, upgradeCity, cars-people-ready, crowd, pre-first-frame, first-frame,
   flyover-or-chase-start. `tools-load/net.mjs` (requests + timing on a throttled link), `sum.mjs`, `lastdl.mjs`, `prof.mjs` (CPU profile by phase), `rn.mjs` (Math.random count and state vs another server), `pix.mjs` (frame hash).
   On software WebGL the renderer, render-target and first-frame numbers are the CPU emulating a GPU and mean nothing for a phone; the JS phases (buildCity: landscape `drapedPolygon`, roads `ribbonMesh`, ground sampling) are real CPU.
