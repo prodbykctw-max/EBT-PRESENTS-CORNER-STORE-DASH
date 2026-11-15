@@ -1216,7 +1216,13 @@ function bullyEnters(){
   announce(S.bullyTail? "HE FOLLOWED YOU IN!" : "HE’S IN THE STORE!");
 }
 // warm the drive's code while the title screen is up, so START feels instant
-function prefetchDrive(){ if(driveAvailable()) setTimeout(function(){ import(DRIVE_URL).catch(function(){}); }, 1200); }
+// ...and its files: warm.js asks for every model / texture / sound / data file of the drive at once, so
+// they download while the player reads the title and the drive how-to-play instead of after START DRIVE; drive.js's warmDrive() adds the weather.
+// Only network: nothing is parsed or built, so the drive starts exactly as before. (Docs: docs/DRIVE.md "Loading".)
+function prefetchDrive(){ if(driveAvailable()) setTimeout(function(){
+  // the code first (its ~30 small files would queue behind 8 MB of data otherwise), then the data
+  import(DRIVE_URL).then(function(m){ if(m.warmDrive) m.warmDrive(); }).catch(function(){});
+}, 1200); }
 
 /** a different corner of the store every run: any open floor at least ~560px from the entrance (so he never starts
  *  on top of you), and not right on the checkout pads. He loiters around that spot until the first pickup. */

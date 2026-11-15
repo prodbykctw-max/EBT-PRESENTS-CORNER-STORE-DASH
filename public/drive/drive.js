@@ -25,6 +25,7 @@ import { WIND, NEAR_CUT } from './landscape.js';
 import { Guide } from './guide.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather } from './weather.js';
+import { warm } from './warm.js';
 import * as SkeletonUtils from './vendor/SkeletonUtils.js';
 import { makeBullyMaterial, makeRunClip, makeStandClip, addArmSwing, ARMS, MODEL_H, PLAYER_H, BULLY_H } from './people.js';
 
@@ -69,6 +70,12 @@ async function loadAltPeople(kinds) {
     return { AltPeople: alt.AltPeople, variants };
   } catch (e) { console.warn('realistic pedestrians unavailable, drawing the usual ones:', e?.message || e); return null; }
 }
+// Loading (docs/DRIVE.md "Loading"): the store page calls this while the player is still on the title / how-to-play screens, so the drive's files (warm.js) and the
+// weather are already on their way when START DRIVE is tapped. Nothing is parsed or built here and no Math.random is drawn.
+let preWeather = null;
+export function warmDrive() { warm(); if (!preWeather) preWeather = fetchWeather(); }
+// performance marks for the startup phases (read them with performance.getEntriesByType('mark') filtered to 'drive:'; tools-load/net.mjs prints them)
+const mk = (n) => { try { performance.mark('drive:' + n); } catch {} };
 const nextFrame = QA ? (f) => setTimeout(f, 16) : requestAnimationFrame;
 // screen-to-screen fades (the loader lifting, the fade to black at the end): the store page's SCREEN_FADE, one pace
 const SCREEN_FADE = 0.3;
@@ -84,6 +91,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   WIND.value = 0;   // the tree canopies' sway clock starts from the same place on every start (a restart is exactly a fresh start)
   // which look: the realistic look (the default) or the comic ink look (?look=comic, or startDrive({ look: 'comic' })); mode.js
   const REAL = resolveLook(lookOption);
+  mk('start');
+  warm({ real: REAL });   // every download at once, now (a second call, after the title screen's, does nothing)
   // ---------- load (the game has no loader of its own, so the drive shows one) ----------
   if (!document.querySelector('link[data-drive-css]')) {
     const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = new URL('drive.css', BASE).href; l.dataset.driveCss = '';
@@ -146,11 +155,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     loader.loadAsync(new URL('car.glb', BASE).href),
     loader.loadAsync(new URL('props.glb', BASE).href),
     loader.loadAsync(new URL('trees.glb', BASE).href),
-    fetchWeather(),
+    (() => { const p = preWeather || fetchWeather(); preWeather = null; return p; })(),   // (the one asked for on the title screen, if there is one)
     gsapReady,
     loader.loadAsync(new URL('character.glb', BASE).href),   // you and the bully on foot (people.js)
     realReady,
   ]);
+  mk('downloaded');
   const { R: RL, T: realTex } = realPack || {};
   if (REAL && !RL) fallbackToComic();   // real.js or its textures failed to load: exactly the comic look from here on (everything below keys off RL)
   // ?wx=rain|overcast|fog|storm (tests only): force the weather the lighting and the roads follow
@@ -214,8 +224,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   for (const t of Object.values(tex)) if (t) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; }
   const ground = makeGround(W);
   const route = new RouteFrame(W, ground, 200); // road continues 200 m past the store: traffic drives on out of view
+  mk('assets-ready');
   const city = buildCity(W, tex, ground, route, props.scene, trees.scene);
+  mk('buildCity');
   if (RL) RL.upgradeCity({ city, T: realTex, scene });   // PBR facades, worn roads, concrete, lit trees (real.js)
+  mk('upgradeCity');
   scene.add(city.group, hero.scene);
   // the city and the storefront row never move: their matrices are worked out once here, instead of three.js
   // recomposing every one of their hundreds of objects every frame (and again for the shadow pass)
@@ -253,6 +266,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     altPeople = alt; ContactBlobs = blobs;
     if (anim) { try { animals = new anim.m.Animals(anim.data, scene, { mobile: MOBILE }); } catch (e) { console.warn('realistic animals unavailable, drawing the usual ones:', e?.message || e); } }   // (made under a private random generator: the shared stream is untouched)
   }
+  mk('cars-people-ready');
   const world = new World({ route, props: props.scene, scene, W, sEnd: spot.s, audio, surfAt, camera, marks: city.streets.routeMarks, carSets, animals });
   for (const cs of Object.values(world.carSets)) cs.shadowOnly(renderer);   // the cars' shadow proxies are drawn in the sun's shadow pass only
   // the sun's shadow box, so the props that can't cast a shadow into it skip the shadow pass (World.render)
@@ -298,6 +312,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   });
   crowd.shadowBox = world.shadowBox;
   crowd.vehicles = () => world.ambient;   // (walking groups wait at a side street's mouth while a vehicle drives through it)
+  mk('crowd');
   world.relocateDogs();   // (the dogs were placed before the crowd existed: out of any stretch with no room between curb and wall)
   world.planCorners(signals);   // water sellers and panhandlers working the red lights
   // flocks fly over the roofs: height of whatever is under a point (roofs, freeway decks, landmarks), by a ray from above
@@ -1603,8 +1618,11 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // (it used to start fading before the first frame was drawn, so on a phone it froze half-faded while the GPU
   // caught up). Nothing moves while it fades (holding): the chase starts on the picture you can see. The loader sits
   // above the HUD (drive.css), so no button shows before the screen is ready; the HUD drops in as it lifts.
+  mk('pre-first-frame');
   last = performance.now(); frame(); holding = true;
+  mk('first-frame');
   await new Promise((ok) => nextFrame(() => nextFrame(ok)));
+  mk('flyover-or-chase-start');
   const go = () => { holding = false; last = performance.now(); };
   if (G) {   // the loading screen fades away; the HUD drops in from the top and the pedals rise from the bottom
     G.to(loadingScreen, { opacity: 0, duration: SCREEN_FADE, ease: 'power1.inOut', onComplete: () => { loadingScreen.remove(); go(); } });
