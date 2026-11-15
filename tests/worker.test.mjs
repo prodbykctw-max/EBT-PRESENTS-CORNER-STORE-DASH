@@ -100,7 +100,7 @@ test('500 hides the error text', async () => {
 
 // ── live game (v: 2): standalone store + drive ──────────────────────────────
 import { validateLive, speedBonus, LIVE, LIVE_MAX_SCORE } from '../worker/score-rules.js';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 const liveRun = (o = {}) => ({ v: 2, name: 'KCT', items: 7, run_seconds: 60, won: true,
   drive: { bonus: 0, time_left: 0, tokens: 0, near_misses: 0 }, ...o });
@@ -246,4 +246,53 @@ test('live names must be exactly three letters A-Z (what the game sends)', async
   assert.match(csd, /LETTERS="ABCDEFGHIJKLMNOPQRSTUVWXYZ", initials=\["E","B","T"\]/);
   assert.match(csd, /var entry=\{initials:initials\.join\(""\),score:S\.score\}/);
   assert.match(csd, /name:entry\.initials/);
+});
+
+// ---- the drive's big binary files go out brotli-compressed (worker/index.js driveBinary, scripts/compress-drive.mjs)
+import { brotliDecompressSync } from 'node:zlib';
+import { existsSync } from 'node:fs';
+import { driveBinaries, DRIVE_DIR } from '../scripts/compress-drive.mjs';
+
+// a stand-in for the assets binding: serves public/ from disk, 404 for what is not there
+const assets = {
+  async fetch(req) {
+    const f = new URL('../public' + new URL(req.url).pathname, import.meta.url);
+    if (!existsSync(f)) return new Response('nope', { status: 404 });
+    return new Response(readFileSync(f), { status: 200, headers: { etag: '"x"' } });
+  },
+};
+const asset = (path, ae) => worker.fetch(new Request(ORIGIN + path, { headers: ae ? { 'accept-encoding': ae } : {} }), { ASSETS: assets });
+
+test('every .br file decodes to exactly its source (and none is left without one)', () => {
+  for (const f of driveBinaries()) {
+    const src = readFileSync(f), br = f + '.br';
+    if (existsSync(br)) assert.ok(brotliDecompressSync(readFileSync(br)).equals(src), 'stale: ' + br + ' (run node scripts/compress-drive.mjs)');
+  }
+  // a .br without a source (or for a skipped file) would be served to nobody: none left behind
+  const stray = []; const walk = (d) => { for (const n of readdirSync(d, { withFileTypes: true })) { const p = d + '/' + n.name; if (n.isDirectory()) walk(p); else if (n.name.endsWith('.br') && !driveBinaries().includes(p.slice(0, -3))) stray.push(p); } };
+  walk(DRIVE_DIR);
+  assert.deepEqual(stray, []);
+});
+
+test('the Worker answers a drive binary with its brotli copy, and anything else as it always did', async () => {
+  const raw = readFileSync(new URL('../public/drive/props.glb', import.meta.url));
+  const r = await asset('/drive/props.glb', 'gzip, deflate, br');
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('content-encoding'), 'br');
+  assert.equal(r.headers.get('content-type'), 'model/gltf-binary');
+  assert.match(r.headers.get('vary'), /accept-encoding/i);
+  assert.ok(brotliDecompressSync(Buffer.from(await r.arrayBuffer())).equals(raw));
+  // a browser without br gets the file itself
+  const plain = await asset('/drive/props.glb', 'gzip');
+  assert.equal(plain.headers.get('content-encoding'), null);
+  assert.ok(Buffer.from(await plain.arrayBuffer()).equals(raw));
+  // a file with no .br copy (hero.glb: already compressed) is served as is, with the br header absent
+  const hero = await asset('/drive/hero.glb', 'br');
+  assert.equal(hero.status, 200); assert.equal(hero.headers.get('content-encoding'), null);
+  // on Cloudflare the header is normalised; the browser's own list is request.cf.clientAcceptEncoding
+  const req = new Request(ORIGIN + '/drive/props.glb', { headers: { 'accept-encoding': 'gzip, br' } });
+  Object.defineProperty(req, 'cf', { value: { clientAcceptEncoding: 'gzip' } });
+  assert.equal((await worker.fetch(req, { ASSETS: assets })).headers.get('content-encoding'), null);
+  // other paths pass straight through
+  assert.equal((await asset('/drive/drive.js', 'br')).headers.get('content-encoding'), null);
 });

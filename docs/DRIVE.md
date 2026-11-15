@@ -896,3 +896,29 @@ unchanged (`snapshot()` with `?look=comic` is pixel-identical to the comic look 
 - QA only: `?qa&wx=rain|overcast|fog` forces the weather.
 - Concrete albedo (`real.js` `groundPatch` / `curbPatch`): the sidewalk is `diffuseColor * 0.4` and the curbs `* 0.30` (the curbs' vertex colours are 0.55-0.8, so a curb top is about 0.24 albedo against the sidewalk's 0.22). Curbs were `* 0.9` (0.72 on a sunlit top), which put them far over the bloom threshold: a bright glowing strip between the road and the sidewalk. Both now stay under it (sunlit curb top about luma 170-200, sidewalk about 150-175). Keep new pavement tints in that range.
 - If `real.js` or its textures fail to load, `drive.js` catches it, calls `fallbackToComic()` (mode.js) and the drive runs exactly as the comic look; everything downstream keys off `RL`.
+
+## Loading
+
+How long START DRIVE takes to reach the first frame, and what was done about it (Nov 2026; measured with `tools-load/`, 9 Mbps down / 80 ms RTT).
+
+- **Bytes.** Cloudflare compresses at the edge only a fixed list of content types; `.glb`, `.bin`, `.cars` and `.wav` are not on it, so people2.bin
+  (2.50 MB), animals.bin, props.glb, car.glb... used to go out raw. `scripts/compress-drive.mjs` (run by `npm run build:standalone`) writes a brotli
+  copy of each one that shrinks by 10 % or more next to it (`props.glb.br`; hero.glb and bc.cars are already compressed and have none; the old
+  `people.bin`, kept for cached pages, is skipped: nothing asks for it). The Worker (`driveBinary` in `worker/index.js`, paths listed in
+  `wrangler.toml` `run_worker_first`) answers a request for one of them with the `.br` copy and `content-encoding: br` when the browser accepts br
+  (read from `request.cf.clientAcceptEncoding`: on Cloudflare the header itself is normalised), and with the file itself otherwise. `new Response(..., { encodeBody: 'manual' })`
+  is what stops the runtime encoding the body a second time. `tests/worker.test.mjs` fails if a `.br` is stale. About 3.5 MB less to download. The GitHub Pages copy
+  serves the plain files (GitHub gzips them itself).
+- **Start early, in parallel.** `public/drive/warm.js` lists every file the drive asks for. The store page calls `warmDrive()` (drive.js) 1.2 s after load, once the drive's code has
+  arrived, so the data downloads while the player is on the title and the drive how-to-play; `startDrive()` calls it again at the top (a second call does nothing).
+  Before, the files came as a chain (real.js, then its textures, then the cars / people / animals, then the last eight textures). Everything is fetched into the HTTP cache; the loaders
+  join the same request later. Only network: nothing is parsed or built, so no `Math.random` is drawn. Two groups: what building the city needs first, and the car, character,
+  cars, people, animals and sounds when those have landed (they download while the city is built; drive.js `coreLanded` gates its own cars / animals / people requests the same way, and
+  awaits the car and the character just before the world is made, so every id they draw still lands before the traffic, crowd and planner take their draws). **Keep `warm.js` in step with the loaders**
+  (a file missing from it is just loaded late; one it lists that nobody asks for is wasted).
+- **The weather** (Open-Meteo, up to 2.5 s) is asked for at the same time (`preWeather`), not after START.
+- **Cache.** Every file is still `max-age=0, must-revalidate`, so an update is instant; a revisit costs one conditional request per file (a 304). Long caching would need a version in the URL.
+- **Timers.** The only waits on a timer are the 8 s caps on the cars / people / animals (`within`), which are cancelled the moment the files are there.
+- **Marks.** `performance.getEntriesByType('mark')` filtered to `drive:` gives the phases: start, downloaded, assets-ready, buildCity, upgradeCity, cars-people-ready, crowd, pre-first-frame, first-frame,
+  flyover-or-chase-start. `tools-load/net.mjs` (requests + timing on a throttled link), `sum.mjs`, `lastdl.mjs`, `prof.mjs` (CPU profile by phase), `rn.mjs` (Math.random count and state vs another server), `pix.mjs` (frame hash).
+  On software WebGL the renderer, render-target and first-frame numbers are the CPU emulating a GPU and mean nothing for a phone; the JS phases (buildCity: landscape `drapedPolygon`, roads `ribbonMesh`, ground sampling) are real CPU.
