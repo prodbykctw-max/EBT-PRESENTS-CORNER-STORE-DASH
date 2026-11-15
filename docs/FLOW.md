@@ -22,6 +22,14 @@ next. The code is `standalone/csd.js` (the flow functions, `show` / `hide`, the 
   a fade plays from its start instead of being already over on the first frame you see.
 - **Nothing shows before it's ready**: the title's card and button rise only after LOADING has faded; the drive's
   loader stays on top of its HUD and buttons until the first 3D frame is on screen.
+- **Nothing just appears (glide).** A panel opened by a button grows out of that button and closes back into it:
+  the store's PAUSED panel from the pause button (`show("ovPause", 0, el("btnPause"))`, so the pause button, `P` and
+  `Esc` all use it), the drive's pause panel from the drive's pause button (`setPaused` in `drive.js`), the credits
+  from ROLL CREDITS (`creditsIn`), and the two plain-black how-to-play screens bring their lines and button in from
+  the button that opened them (TAP TO START). `show(id, delay, from)`, `glideFrom` and `overlayIn` / `overlayOut` in
+  `csd.js` carry it. **Motion only**: `S.mode`, which overlay is up and the end state of every screen change exactly
+  when they did before, and no game state waits for the animation (the drive's closing shrink is played by a
+  throw-away copy of the panel, so the real one is gone at once). Reduced motion or no GSAP: instant, as above.
 - **Reduced motion** (phone setting) or no GSAP: the same order, with instant changes instead of fades and rises
   (the drive's fade to black stays as a plain 0.3 s CSS fade).
 

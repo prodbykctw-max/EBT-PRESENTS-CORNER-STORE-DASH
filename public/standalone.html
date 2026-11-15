@@ -947,22 +947,45 @@ var REVEAL={k:1,idx:-1}, PAYIN={k:1,on:false};
 var SCREEN_FADE=0.3;
 // coverNow: the overlay's backing is up at once (a solid how-to-play, or the title coming up under the boot loader),
 // so nothing behind it shows through on the way in. contentDelay: its words and buttons wait that long to rise.
-function overlayIn(o,contentDelay){
+// GLIDE ("nothing just appears"): a panel opened by a button grows out of that button and shrinks back into it, and
+// the plain-black how-to-play screens bring their words in from the button that opened them. MOTION ONLY: the
+// state (S.mode, which overlay is up) changes exactly when it always did, and the end state of every screen is the
+// same. Under reduced motion (MOTION off) none of this runs. from: the button that opened the overlay.
+function glideFrom(btn){   // the button's centre in viewport pixels (the overlays fill the viewport), or null
+  if(!MOTION||!btn||!btn.getBoundingClientRect) return null;
+  var r=btn.getBoundingClientRect(); if(!r.width||!r.height) return null;
+  var x=r.left+r.width/2, y=r.top+r.height/2;
+  return {x:x,y:y,org:x+"px "+y+"px"};
+}
+function overlayIn(o,contentDelay,from,turned){
   if(!MOTION){ o.classList.add("ready"); return; }
   GS.killTweensOf(o); GS.killTweensOf(o.children);
   GS.set(o,{pointerEvents:"auto"});
+  var solid=o.hasAttribute("data-solid"), g=glideFrom(from);
   // the plain-black how-to-play screens (data-solid) cover the game at once, so nothing of it ever shows through;
   // only their words and button move
-  if(o.hasAttribute("data-solid")||contentDelay) GS.set(o,{opacity:1});
+  if(g&&!solid&&turned) GS.to(o,{opacity:1,scale:1,duration:0.2,ease:"power2.out",clearProps:"transform,transformOrigin"});   // reopened while it was still shrinking away: from where it is
+  else if(g&&!solid) GS.fromTo(o,{opacity:0,scale:0.55,transformOrigin:g.org},{opacity:1,scale:1,duration:0.24,ease:"power3.out",clearProps:"transform,transformOrigin"});
+  else if(solid||contentDelay) GS.set(o,{opacity:1});
   else GS.fromTo(o,{opacity:0},{opacity:1,duration:SCREEN_FADE,ease:"power2.out"});
   // .ready once everything has risen: TAP TO START's pulse waits for it (shell2.html), so it never pops in early
-  GS.fromTo(o.children,{y:18,opacity:0,scale:0.96},{y:0,opacity:1,scale:1,duration:0.45,delay:contentDelay||0,ease:"back.out(1.6)",stagger:0.06,clearProps:"transform,opacity",
-    onComplete:function(){ o.classList.add("ready"); }});
+  var ready=function(){ o.classList.add("ready"); };
+  if(g&&solid){   // each line and button comes in from the button's centre (measured now, at rest, before anything moves)
+    var dx=[], dy=[];
+    Array.prototype.forEach.call(o.children,function(t){ var c=t.getBoundingClientRect(); dx.push(g.x-(c.left+c.width/2)); dy.push(g.y-(c.top+c.height/2)); });
+    GS.fromTo(o.children,{x:function(i){ return dx[i]; },y:function(i){ return dy[i]; },opacity:0,scale:0.5},
+      {x:0,y:0,opacity:1,scale:1,duration:0.38,delay:contentDelay||0,ease:"power3.out",stagger:0.05,clearProps:"transform,opacity",onComplete:ready});
+  }
+  else if(g) GS.fromTo(o.children,{opacity:0},{opacity:1,duration:0.24,delay:contentDelay||0,ease:"power2.out",stagger:0.04,clearProps:"opacity",onComplete:ready});
+  else GS.fromTo(o.children,{y:18,opacity:0,scale:0.96},{y:0,opacity:1,scale:1,duration:0.45,delay:contentDelay||0,ease:"back.out(1.6)",stagger:0.06,clearProps:"transform,opacity",onComplete:ready});
 }
 function overlayOut(o){
   GS.killTweensOf(o); GS.killTweensOf(o.children);
   o._leaving=true; GS.set(o,{pointerEvents:"none"});
-  GS.to(o,{opacity:0,duration:SCREEN_FADE,ease:"power1.inOut",onComplete:function(){ o._leaving=false; o.classList.remove("on"); GS.set(o,{clearProps:"opacity,pointerEvents"}); }});
+  var g=o.hasAttribute("data-solid")?null:glideFrom(o._from);   // back into the button it came out of
+  var v={opacity:0,duration:g?0.2:SCREEN_FADE,ease:g?"power2.in":"power1.inOut",onComplete:function(){ o._leaving=false; o.classList.remove("on"); GS.set(o,{clearProps:"opacity,pointerEvents,transform,transformOrigin"}); }};
+  if(g){ v.scale=0.55; v.transformOrigin=g.org; }
+  GS.to(o,v);
 }
 // buttons give under the finger and spring back (the dip matches the old CSS press: 3px for big buttons, 1px small)
 function springButtons(){
@@ -1577,7 +1600,7 @@ function goMenu(){
   S.mode="title"; storeView(true); show("ovTitle");
 }
 function togglePause(){
-  if(S.mode==="play"){ S.mode="paused"; show("ovPause"); }
+  if(S.mode==="play"){ S.mode="paused"; show("ovPause",0,el("btnPause")); }
   else if(S.mode==="paused"){ hide("ovPause"); S.mode="play"; last=0; }
 }
 function winCheck(){
@@ -1849,6 +1872,7 @@ function creditsIn(){
   if(src) src.innerHTML.split(/<br\s*\/?>/i).forEach(function(line){ add("crL",line); });
   o.classList.toggle("still",!MOTION);
   end.classList.remove("on"); end.style.opacity="0";
+  var gl=glideFrom(el("btnCredits"));   // measured before the end screen starts to leave
   o.classList.add("on","ready"); hide("ovEnd");
   var cv=el("crCart"), W=innerWidth;
   var drawS=function(f){
@@ -1860,6 +1884,7 @@ function creditsIn(){
   var cw=Math.round(112*(cv.width/cv.height||1));
   if(!MOTION){ end.style.opacity="1"; end.classList.add("on"); cv.style.transform="translateX("+Math.round((W-cw)/2)+"px)"; return; }
   GS.set(o,{opacity:0}); GS.to(o,{opacity:1,duration:0.4});
+  if(gl) GS.fromTo(o,{scale:0.6,transformOrigin:gl.org},{scale:1,duration:0.4,ease:"power3.out",clearProps:"transform,transformOrigin"});   // the credits grow out of ROLL CREDITS
   // the cart faces left in the art; mirrored it rolls to the right, wheels turning
   var f=0; END.ride=setInterval(function(){ f=(f+1)%CART_SN; drawS(f); },100);
   GS.killTweensOf(cv); GS.set(cv,{x:-cw-20,scaleX:-1,y:0});
@@ -1997,7 +2022,7 @@ function startPrepared(){
 // Once you get to the store (the drive is over, or there is no drive): the store's how-to-play, on its own plain
 // screen. START RUN starts the run, then banks the drive's bonus on top of the fresh score.
 var arrival=null;
-function showStoreHow(r){ arrival=r||null; S.mode="how"; storeView(false); hide("ovTitle"); hide("ovDriveHow"); show("ovHow"); }
+function showStoreHow(r,from){ arrival=r||null; S.mode="how"; storeView(false); hide("ovTitle"); hide("ovDriveHow"); show("ovHow",0,from); }
 /* The store only shows on its own turn: dimmed behind the title card, then the run and its pause / end screens. From
    the drive's how-to-play until START RUN (the drive, its loading screens, the store's how-to-play) it is hidden and
    not drawn at all, so no fade or hand-off can ever flash it, and a phone isn't drawing a hidden store under the drive. */
@@ -2604,10 +2629,11 @@ function submitScore(){
 
 /* ---------- boot / loop ---------- */
 function el(id){ return document.getElementById(id); }
-function show(id,contentDelay){
+function show(id,contentDelay,from){   // from: the button that opened it (the panel grows out of it and closes back into it)
   var o=el(id);
   if(o.classList.contains("on")&&!o._leaving) return;   // already up (a fade-out in progress is turned back around)
-  o._leaving=false; o.classList.remove("ready"); o.classList.add("on"); overlayIn(o,contentDelay);
+  var turned=o._leaving; o._from=from||null;
+  o._leaving=false; o.classList.remove("ready"); o.classList.add("on"); overlayIn(o,contentDelay,from,turned);
   if(id==="ovTitle") TitleScene.start({intro:true,sprites:{player:playerImg,bully:bullyImg}});   // (intro only plays the first time)
 }
 function hide(id){
@@ -2847,7 +2873,7 @@ function init(){
   setTimeout(fit,300); setTimeout(fit,1000);
   // TAP TO START -> the drive's how-to-play -> START DRIVE -> the drive -> at the store, the store's how-to-play
   // -> START RUN -> the run. With no drive (opened from disk, ?nodrive) it goes straight to the store's.
-  el("btnTitle").addEventListener("click",function(){ if(TITLE.skipped){ TITLE.skipped=false; return; } if(!TITLE.done) return; titleIdleOff(); hide("ovTitle"); if(driveAvailable()){ storeView(false); show("ovDriveHow"); } else showStoreHow(null); });
+  el("btnTitle").addEventListener("click",function(){ if(TITLE.skipped){ TITLE.skipped=false; return; } if(!TITLE.done) return; titleIdleOff(); hide("ovTitle"); if(driveAvailable()){ storeView(false); show("ovDriveHow",0,el("btnTitle")); } else showStoreHow(null,el("btnTitle")); });
   el("btnDrive").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
   el("btnStart").addEventListener("click",function(){ sfx.start(); startStoreRun(); });
   springButtons();
@@ -2876,7 +2902,7 @@ function init(){
     el("dn"+s).addEventListener("click",function(){cycleInit(s,-1);});
   });
   document.addEventListener("visibilitychange",function(){
-    if(document.hidden&&S.mode==="play"){ S.mode="paused"; show("ovPause"); }
+    if(document.hidden&&S.mode==="play"){ S.mode="paused"; show("ovPause",0,el("btnPause")); }
   });
   el("ovPause").addEventListener("click",function(){ hide("ovPause"); if(S.mode==="paused"){S.mode="play"; last=0;} });
   bindTouch();
