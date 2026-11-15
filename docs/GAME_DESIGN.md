@@ -99,7 +99,7 @@ starts as before. Same card, words and colours; motion only. Reduced motion: no 
 *The street behind the card* (`standalone/titlescene.js`, `TitleScene`): a painted dusk street in the card's pink and gold, drawn
 procedurally (gradients, soft brush blobs, grain, rim light) and baked once per size into layers: sky, drifting clouds, far and
 near skyline, left and right buildings, the corner store (awning, lit CORNER STORE sign, window, EBT door), sidewalk and street,
-a lamp. (Now painted art: five WebP layers sharing one frame, see CLAUDE.md; the paragraph describes the behaviour, the procedural street is only the fallback.) They fly in staggered (about 1.5 s) while the card assembles, then sway slowly; the sign flickers, the lamp glows. Every
+a lamp. (Now painted art: five WebP layers sharing one frame, see CLAUDE.md; the paragraph describes the behaviour, the procedural street is only the fallback.) They fly in staggered (about 1.5 s) while the card assembles, then hold still (no idle sway since Nov 15 2026: the owner saw the buildings moving); the sign flickers, the lamp glows. Every
 ~9.5 s a gag plays (about 3.5 s) on the sidewalk, alternating direction: the guy sprints across, the bully follows a beat later,
 the guy skids (dust), an E.B.T card flips out of his pocket and spins down to the sidewalk, they run off the far side; the sprites
 are the store's own sheets, drawn like `drawSheet`. A tap during the intro puts every layer in place (no game start). Reduced

@@ -3,7 +3,7 @@
    brush blobs, grain, rim light; no image files) and baked ONCE per size into a few offscreen layers, back to front:
    sky, drifting clouds, far skyline, near skyline, left building, right building, the store front, sidewalk + street,
    the lamp post. Every frame is then only drawImage calls. Like Will Hill's title the layers FLY IN (staggered, about
-   1.5 s) while the title card assembles on top, then idle: a slow parallax sway, clouds drifting, the sign flickering,
+   1.5 s) while the title card assembles on top, then idle: the buildings stay still (no sway, Nov 15 2026), the sign flickering,
    the lamp glowing. A little gag plays on the street every ~10 s: the guy sprints across, the bully chases a beat
    later, the guy skids, an E.B.T card flips out of his pocket and spins down to the sidewalk, they run off the far side.
    The guy and the bully are the store's own sprite sheets (player.b64 / bully.b64) drawn the way drawSheet draws them.
@@ -224,12 +224,12 @@ function bake(){
   // each layer: where it is drawn, how it flies in (dx,dy from, t0..t1, easing, fades), and how it sways (ax,ay px, phase)
   L={G:G, sky:{s:sky, x:0, y:0, f:{t0:0,t1:0.55,fade:1,ease:eOut}},
     clouds:{s:clouds, x:0, y:VH*0.1, f:{t0:0.2,t1:0.9,fade:1,ease:eOut}, Wc:Math.round(VW*1.5)},
-    far:{s:far, x:-MG, y:by-far.h+2, f:{t0:0.15,t1:0.8,dy:VH*0.22,fade:1,ease:eOut}, ax:2.2*U, ph:0.4},
-    near:{s:near, x:-MG, y:by-near.h+2, f:{t0:0.3,t1:0.95,dy:VH*0.26,fade:1,ease:eOut}, ax:3.4*U, ph:1.3},
-    lb:{s:lb.s, x:lb.x, y:lb.y, f:{t0:0.4,t1:1.05,dx:-VW*0.7,ease:eOut}, ax:2.6*U, ph:2.1},
-    rb:{s:rb.s, x:rb.x, y:rb.y, f:{t0:0.5,t1:1.15,dx:VW*0.7,ease:eOut}, ax:2.6*U, ph:2.9},
+    far:{s:far, x:-MG, y:by-far.h+2, f:{t0:0.15,t1:0.8,dy:VH*0.22,fade:1,ease:eOut}},
+    near:{s:near, x:-MG, y:by-near.h+2, f:{t0:0.3,t1:0.95,dy:VH*0.26,fade:1,ease:eOut}},
+    lb:{s:lb.s, x:lb.x, y:lb.y, f:{t0:0.4,t1:1.05,dx:-VW*0.7,ease:eOut}},
+    rb:{s:rb.s, x:rb.x, y:rb.y, f:{t0:0.5,t1:1.15,dx:VW*0.7,ease:eOut}},
     st:{s:st.s, x:st.x, y:st.y, f:{t0:0.55,t1:1.15,dy:VH*0.25,ease:eOut}},
-    store:{s:store.s, x:store.x, y:store.y, f:{t0:0.8,t1:1.45,dy:VH*0.55,ease:eBack}, ax:1.6*U, ph:3.7, sign:store.sign, open:store.open},
+    store:{s:store.s, x:store.x, y:store.y, f:{t0:0.8,t1:1.45,dy:VH*0.55,ease:eBack}, sign:store.sign, open:store.open},
     lamp:{s:lamp.s, x:lamp.x, y:lamp.y, f:{t0:1.1,t1:1.65,dy:-VH*0.5,ease:eBack}, glow:lamp.glow},
     vig:{s:vig, x:0, y:0, f:{t0:0.1,t1:0.8,fade:1,ease:eOut}}
   };
@@ -247,9 +247,10 @@ function bakeArt(){
   var ft=function(t0,t1,o){ o.t0=t0; o.t1=t1; return o; };
   L={art:true, wide:!tall, s:sc, ox:ox, oy:oy, top:"rgb("+px[0]+","+px[1]+","+px[2]+")", foot:Math.round(oy+FR.foot*sc), disp:Math.round(clamp(170*sc,48,230)),
     G:{gy:oy+FR.foot*sc, walk:0},
-    f:{ sky:ft(0,0.55,{fade:1,ease:eOut}), skyline:ft(0.15,0.8,{dy:VH*0.22,fade:1,ease:eOut,ax:1.2,ph:0.4}),
-        sideL:ft(0.35,0.95,{dx:-VW*0.6,ease:eOut,ax:2,ph:1.3}), sideR:ft(0.45,1.05,{dx:VW*0.6,ease:eOut,ax:2,ph:1.3}),
-        store:ft(0.8,1.45,{dy:VH*0.55,ease:eBack,ax:2.6,ph:2.9}), street:ft(0.55,1.15,{dy:VH*0.25,ease:eOut,ax:3.4,ph:3.7}) }};
+    // once landed, the buildings, store and street stay put (no idle sway: the owner saw the buildings moving, Nov 15 2026); only the light pulses and the gag move
+    f:{ sky:ft(0,0.55,{fade:1,ease:eOut}), skyline:ft(0.15,0.8,{dy:VH*0.22,fade:1,ease:eOut}),
+        sideL:ft(0.35,0.95,{dx:-VW*0.6,ease:eOut}), sideR:ft(0.45,1.05,{dx:VW*0.6,ease:eOut}),
+        store:ft(0.8,1.45,{dy:VH*0.55,ease:eBack}), street:ft(0.55,1.15,{dy:VH*0.25,ease:eOut}) }};
   if(!tall){ L.bw=[0,184]; L.bandR=mkBand(FR.w-184,FR.w); }
 }
 function mkBand(x0,x1){      // an edge strip of the two building layers, darkened a little: repeated (mirrored) outside the frame on landscape screens
