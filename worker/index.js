@@ -37,12 +37,17 @@ const withCors = (res) => {
 // type up to 16 characters, so cleanName stays for it.
 const LIVE_NAME = /^[A-Z]{3}$/;
 
+// ⚠️ Security audit 2026-11-15 (Unicode names, v1 path only): NFKC first, so
+// fullwidth, math-styled and superscript letters become the plain letters they
+// imitate; then Latin letters and digits only, so a Cyrillic "А" can't pose as an
+// "A" on the shared board. Cut by code point, never mid-letter.
 function cleanName(value) {
-  return String(value ?? '')
-    .replace(/[^\p{L}\p{N} _.-]/gu, '')
-    .trim()
-    .slice(0, 16)
-    .toUpperCase() || 'SHOPPER';
+  return Array.from(
+    String(value ?? '')
+      .normalize('NFKC')
+      .replace(/[^\p{Script=Latin}\p{Nd} _.-]/gu, '')
+      .trim(),
+  ).slice(0, 16).join('').trim().toUpperCase() || 'SHOPPER';
 }
 
 async function listScores(env, limit) {

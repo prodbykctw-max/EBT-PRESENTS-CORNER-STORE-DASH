@@ -296,3 +296,11 @@ test('the Worker answers a drive binary with its brotli copy, and anything else 
   // other paths pass straight through
   assert.equal((await asset('/drive/drive.js', 'br')).headers.get('content-encoding'), null);
 });
+
+// Security audit 2026-11-15: lookalike names on the v1 path (the live game only sends three A-Z letters).
+test('v1 names: fullwidth/superscript fold to plain letters, Cyrillic lookalikes and invisible characters are dropped', async () => {
+  const env = { DB: fakeDB(), SCORE_LIMIT: limiter(100) };
+  for (const name of ['ＡＣＥ', 'ᴬᶜᴱ', 'AСE', 'A​C‮E', 'José', 'A'.repeat(15) + '𝐁𝐁'])
+    assert.equal((await worker.fetch(post({ ...perfect, name }), env)).status, 201, name);
+  assert.deepEqual(env.DB.rows.map((r) => r[0]), ['ACE', 'ACE', 'AE', 'ACE', 'JOSÉ', 'A'.repeat(15) + 'B']);
+});
