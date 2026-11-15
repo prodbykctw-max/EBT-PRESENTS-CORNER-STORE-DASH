@@ -118,8 +118,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // the realistic look's cars (cars.js: cars/bc.cars unless ?cars= says otherwise). Nothing here is requested until the realistic look's own code and
   // textures have loaded (realReady resolves with the pack): the comic look never loads cars.js or a .cars file, and a failed realistic look doesn't
   // fetch them for nothing. A set that fails to load only costs the new cars: the drive starts with the props.glb ones (see CARS_WAIT_MS below).
+  // `coreLanded` opens once everything the city needs has downloaded (just after the big Promise.all below): the cars, animals and people are asked for then and not before,
+  // so they never share the link with the city's own files (hero.glb used to finish last because of it); they download while the city is built.
+  let coreOpen; const coreLanded = new Promise((ok) => { coreOpen = ok; });
   const carsReady = realReady ? realReady.then(async (pack) => {
     if (!pack) return null;
+    await coreLanded;
     try {
       const C = await import('./cars.js');
       const sets = await Promise.all(C.carSetsFromURL().map(async (n) => {
@@ -134,6 +138,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const animalsOff = /^(none|0|off|false|no)$/i.test(new URLSearchParams(location.search).get('animals') || '');
   const animalsReady = realReady && !animalsOff ? realReady.then(async (pack) => {
     if (!pack) return null;
+    await coreLanded;
     try { const m = await import('./animals.js'); return { m, data: await m.loadAnimalData(MOBILE) }; }
     catch (e) { console.warn('realistic animals unavailable, drawing the usual ones:', e?.message || e); return null; }
   }) : null;
@@ -142,7 +147,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const peopleKinds = peopleKindsFromURL();
   // phones only: the contact shadow under each pedestrian (contact.js); desktop and the comic look never request it
   const contactReady = MOBILE && realReady ? realReady.then((pack) => (pack ? import('./contact.js').then((m) => m.ContactBlobs).catch((e) => { console.warn('contact shadows unavailable:', e?.message || e); return null; }) : null)) : null;
-  const peopleReady = realReady && peopleKinds ? realReady.then((pack) => (pack ? loadAltPeople(peopleKinds) : null)) : null;
+  const peopleReady = realReady && peopleKinds ? realReady.then(async (pack) => { if (!pack) return null; await coreLanded; return loadAltPeople(peopleKinds); }) : null;
   // motion (GSAP): the store page already carries it; on its own (/drive/index.html) the drive loads the same
   // vendored copy. Phones set to reduce motion, or no GSAP at all, keep the plain CSS behaviour.
   const gsapReady = window.gsap ? Promise.resolve(window.gsap) : new Promise((ok) => {
@@ -158,7 +163,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     gsapReady,
     realReady,
   ]);
-  mk('downloaded');
+  mk('downloaded'); coreOpen();
   // the car and the character are not needed to BUILD the city, so the city starts building without waiting for them: warm.js downloads them after the files the city needs
   // (the `later` group) and this load joins that download, so they arrive while the city is built. They are awaited just before the world is made (below), so every Math.random
   // draw they make (the ids of what GLTFLoader makes) still lands before the traffic, crowd and planner take theirs: the stream is exactly the one it was.
