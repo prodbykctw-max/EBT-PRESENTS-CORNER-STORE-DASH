@@ -425,16 +425,39 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const honk = () => { if (hornT <= 0) { audio.horn(); hornT = 0.6; } };
   // ---------- pause ----------
   let paused = false;
+  // The pause panel grows out of the pause button and, on resume, shrinks back into it ("nothing just appears"). Motion
+  // only: `paused`, the panel's `hidden` and the world all change exactly when they always did; on resume a throw-away
+  // copy of the panel (no listeners, no taps) plays the shrink while the real one is already gone.
+  const pauseBtn = root.querySelector('[data-pause]');
+  const glideAt = () => { const b = pauseBtn?.getBoundingClientRect(); return b && b.width && b.height ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null; };
+  const clearGhosts = () => { for (const g of root.querySelectorAll('.drive-paused.ghost')) { G?.killTweensOf(g); g.remove(); } };
   const setPaused = (p) => {
     if (p && !(state === 'driving' || state === 'countdown' || state === 'onfoot')) return;   // nothing to pause at the finish
+    const was = paused;
     paused = p; keys.clear();                                                     // no stuck gas / steering on resume
     try { endStick(); } catch {}                                                 // nor a drag (try: a pause before the level has loaded)
     for (const b of root.querySelectorAll('[data-k].on')) b.classList.remove('on');
-    const panel = root.querySelector('.drive-paused');
+    const panel = root.querySelector('.drive-paused:not(.ghost)');
+    clearGhosts();
+    const at = G ? glideAt() : null;
+    if (!p && was && at) {   // resumed: a copy of the panel shrinks back into the pause button
+      const ghost = panel.cloneNode(true);
+      ghost.classList.add('ghost'); ghost.hidden = false; ghost.style.pointerEvents = 'none'; ghost.setAttribute('aria-hidden', 'true');
+      for (const e of ghost.querySelectorAll('button')) { e.tabIndex = -1; for (const a of [...e.attributes]) if (a.name.startsWith('data-')) e.removeAttribute(a.name); }
+      root.appendChild(ghost);
+      G.killTweensOf(panel); G.killTweensOf(panel.children);
+      G.fromTo(ghost, { opacity: 1, scale: 1, transformOrigin: at.x + 'px ' + at.y + 'px' }, { opacity: 0, scale: 0.55, duration: 0.2, ease: 'power2.in', onComplete: () => ghost.remove() });
+    }
     panel.hidden = !p;
-    if (p && G) {   // the pause panel fades up and its buttons pop in; resuming is instant (no waiting to drive)
-      G.fromTo(panel, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: 'power1.out' });
-      G.fromTo(panel.children, { y: 14, opacity: 0, scale: 0.94 }, { y: 0, opacity: 1, scale: 1, duration: 0.35, stagger: 0.06, ease: 'back.out(1.8)', clearProps: 'transform,opacity' });
+    if (p && G) {   // the pause panel grows out of the pause button (fades up where there is no button to grow from) and its buttons come in
+      G.killTweensOf(panel); G.killTweensOf(panel.children);
+      if (at) {
+        G.fromTo(panel, { opacity: 0, scale: 0.55, transformOrigin: at.x + 'px ' + at.y + 'px' }, { opacity: 1, scale: 1, duration: 0.24, ease: 'power3.out', clearProps: 'transform,transformOrigin' });
+        G.fromTo(panel.children, { opacity: 0 }, { opacity: 1, duration: 0.24, stagger: 0.04, ease: 'power2.out', clearProps: 'opacity' });
+      } else {
+        G.fromTo(panel, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: 'power1.out' });
+        G.fromTo(panel.children, { y: 14, opacity: 0, scale: 0.94 }, { y: 0, opacity: 1, scale: 1, duration: 0.35, stagger: 0.06, ease: 'back.out(1.8)', clearProps: 'transform,opacity' });
+      }
     }
     root.classList.toggle('is-paused', p);
     try { p ? audio.ctx?.suspend() : audio.ctx?.resume(); } catch {}
