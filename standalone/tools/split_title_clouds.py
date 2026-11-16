@@ -66,7 +66,6 @@ def main():
     al = smooth(T0, T1, d)
     al[CLOUD_H:] = 0                                           # the clouds are all in the top rows; below, differences are only compression noise
     al[:CLOUD_H] = np.where(gaussian_filter(al[:CLOUD_H], 1.5) > 0.02, al[:CLOUD_H], 0)   # drop isolated noise specks (no cloud pixel has no neighbours)
-    # colour: exact where alpha is solid enough, else the alpha-weighted neighbourhood of the solid colour
     # the original's compression leaves a few faint smudges in the open sky (distance 5..15 from the gradient, no solid core):
     # they are not clouds and would drift as dirt, so any connected patch whose strongest pixel is not clearly a cloud is dropped
     lab, nl = label(al > 0, structure=np.ones((3, 3)))
@@ -74,15 +73,12 @@ def main():
     dropped = [i for i in range(1, nl + 1) if peak[i] < SOLID_D]
     print('patches: %d kept, %d faint smudges dropped (peak distance < %d)' % (nl - len(dropped), len(dropped), SOLID_D))
     al = np.where(np.isin(lab, dropped), 0, al)
+    # colour: solved so that the alpha-composite over B(y) gives the original pixel back, C = B + (P - B) / a. The layer is stored
+    # lossless (a lossy encode would smear these colours across the edge as a halo), and the clouds only ever move sideways over a
+    # background that is the same on every column, so this is exact at every offset. Where a very faint pixel would need a colour outside
+    # 0..255 it is clamped (the clouds then contribute a touch less there, never a wrong colour).
     A = np.maximum(al, 1e-3)[..., None]
-    Cx = np.clip(Bf + (im - Bf) / A, 0, 255)
-    w = (al >= 0.6).astype(np.float64)
-    num = np.stack([gaussian_filter(Cx[..., c] * w, 2.0) for c in range(3)], -1)
-    den = gaussian_filter(w, 2.0)[..., None]
-    num2 = np.stack([gaussian_filter(Cx[..., c] * w, 5.0) for c in range(3)], -1)
-    den2 = gaussian_filter(w, 5.0)[..., None]
-    fill = np.where(den > 1e-3, num / np.maximum(den, 1e-9), num2 / np.maximum(den2, 1e-9))
-    C = np.where((al >= 0.6)[..., None], Cx, fill)
+    C = np.clip(Bf + (im - Bf) / A, 0, 255)
     C = np.where(al[..., None] > 0, C, Bf)
     # what the page will show at rest: clouds over the clean sky
     rec = Bf * (1 - al[..., None]) + C * al[..., None]
