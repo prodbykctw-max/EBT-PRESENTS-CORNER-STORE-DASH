@@ -1023,7 +1023,7 @@ export class World {
         AN.dog(m4, c.set(e.color), { gw: e.gw || 0, dist: e.gp || 0, sniff: !!e.sniff, id: e.cid ?? e.s, st: e }, big || 1, t);
       } else put(e.type === 'dog' ? (Math.sin(e.gait) > 0 ? 'dog_a' : 'dog_b') : e.type, p.x, p.y, z, yaw, e.color, roll, pitch, big ? sc3.setScalar(big) : one, e.cid);
       if (HALO[e.type] && !e.flying && !e.hitDone && Math.abs(e.d) < this.route.hw(e.s) + 0.3 && e.s > car.s - 4 && e.s - car.s < 110 && halos < 200) {
-        const [rad, col] = HALO[e.type], pulse = 1 + 0.12 * Math.sin(t * 7 + e.s);
+        const [rad, col] = HALO[e.type], pulse = 1 + 0.12 * Math.sin(t * 5 + e.s);
         if (inStreet && surf === undefined) surf = this.surfAt(p.x, p.y, p.z + 1.2);
         m4.compose(pos.set(p.x, (inStreet ? (surf ?? z) : z) + 0.14, -p.y), q.identity(), sc3.set(rad * pulse, 1, rad * pulse));
         this.halo.setMatrixAt(halos, m4); this.halo.setColorAt(halos, c.set(col)); halos++;
