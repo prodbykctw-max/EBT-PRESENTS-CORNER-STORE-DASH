@@ -11,7 +11,9 @@
    its own seeded random (never Math.random: the drive shares that stream); no timers or RAF once #ovTitle is not
    showing or the tab is hidden (the loop simply is not rescheduled, and the layers are freed); prefers-reduced-motion
    = everything placed, one still frame, no loop at all, no gag; no GSAP needed (its own easing). A tap on the title
-   during the intro calls settle() (csd.js), which puts every layer in place and cancels a running gag. */
+   during the intro calls settle() (csd.js), which puts every layer in place and cancels a running gag.
+   With the painted street it also lays out the boxless title lettering (layoutTitle) and runs the store sign as the start button
+   (CORNER STORE / TAP TO START with a neon flicker, signMode); see docs/GAME_DESIGN.md "The painted title". */
 var TitleScene=(function(){
 "use strict";
 var C={pink:"#E85D9E",mag:"#C2255C",gold:"#F5C518",cream:"#FFF3E0",coral:"#F08C4B",navy:"#1E2340",ink:"#0A0A0C"};
@@ -19,6 +21,12 @@ var SETTLED=1.75, GAG_FIRST=3.2, GAG_EVERY=9.5;           // seconds: layers all
 var cv=null, g=null, host=null, L=null, raf=0, running=false, frames=0, seen=false, hold=false, rsz=0;
 var VW=0, VH=0, Q=1, U=1, T=0, last=0, acc=0, sprites=null, reduced=false, noisePat=null, MG=14;
 var gag={t:-1, next:0, dir:1, n:0, seg:null};
+/* the store sign as the start button: CORNER STORE (the painted original) and TAP TO START (title_signtap) swap with a neon flicker.
+   at: the clock time the cycle starts (1e9 = not yet: csd.js calls signGo() when the title has assembled); cv: the four sign pictures
+   (null if title_signtap did not decode: no flashing, the sign is still the button); ph: the plain 0/1 swap used under reduced motion;
+   test: forces a state for the tests ("orig"|"dO"|"tap"|"dT"); noGlow: the tests switch the glow off to compare pixels. */
+var SG={at:1e9, cv:null, ph:0, tm:0, test:null, noGlow:false};
+var SG_HOLD=1.4, SG_FLK=[0.07,0.07,0.06], SG_CYC=2*(SG_HOLD+0.2);   // seconds: each word holds 1.4 s, the flicker is dim / other word / dim
 
 /* ---- little helpers ---- */
 function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
@@ -54,17 +62,19 @@ function vgrad(x,y0,y1,stops){ var gr=x.createLinearGradient(0,y0,0,y1); stops.f
    line on the sidewalk and the door height (sprites are sized from it). If any image fails to decode the procedural
    street below is drawn instead (kept as the fallback). To change the art: replace the .b64 files, re-measure FR. */
 var FR={w:1024,h:1536,cx:530,foot:1338,doorH:200,
-  sign:{x:308,y:850,w:437,h:80}, open:{x:322,y:1040,w:104,h:56}, lamp:{x:225,y:575}};
+  sign:{x:308,y:850,w:437,h:80}, open:{x:322,y:1040,w:104,h:56}, lamp:{x:225,y:575},
+  signtap:{x:300,y:850,w:444,h:88, clip:{x:305,y:867,w:424,h:65}},   // the store layer's rect that title_signtap replaces: the sign with CORNER STORE rebuilt as TAP TO START (exact 1:1 crop, same pixels outside the letters; clip: the box the letters changed (frame x 307..726, y 869..929, plus a pixel or two))
+  roof:511};                          // frame y of the rooftop line: the title lettering sits centred in the sky above it
 var ARTK=["sky","skyline","sides","store","street"], artImg={}, artState="none", artCbs=[];
 function loadArt(cb){
   if(artState==="ok"||artState==="fail"){ cb(); return; }
   artCbs.push(cb); if(artState==="loading") return;
   var src=(typeof TITLE_ART_SRC!=="undefined")?TITLE_ART_SRC:null;
   if(!src){ artState="fail"; var c0=artCbs; artCbs=[]; c0.forEach(function(f){ f(); }); return; }
-  artState="loading"; var left=ARTK.length, bad=false;
-  ARTK.forEach(function(k){ var im=new Image();
+  artState="loading"; var keys=ARTK.concat(["signtap"]), left=keys.length, bad=false;   // signtap (the flashing sign word) is optional: if it fails the sign just does not flash
+  keys.forEach(function(k){ var im=new Image();
     im.onload=function(){ artImg[k]=im; if(--left===0) done(); };
-    im.onerror=function(){ bad=true; if(--left===0) done(); };
+    im.onerror=function(){ if(k!=="signtap") bad=true; if(--left===0) done(); };
     im.src=src[k]||""; });
   function done(){ artState=bad?"fail":"ok"; if(bad) artImg={}; var c=artCbs; artCbs=[]; c.forEach(function(f){ f(); }); }
 }
@@ -218,6 +228,7 @@ function measure(){
 }
 function bake(){
   if(artState==="ok"){ bakeArt(); return; }
+  if(host) host.classList.remove("art");        // the plain street keeps today's card and yellow button
   noisePat=null;
   var G=geom(), sky=bakeSky(G), clouds=bakeClouds(), far=bakeSkyline(G,false), near=bakeSkyline(G,true), lb=building(G,-1,3), rb=building(G,1,9), store=bakeStore(G), st=bakeStreet(G), lamp=bakeLamp(G), vig=bakeVignette();
   var by=G.gy-VH*0.01;
@@ -252,6 +263,65 @@ function bakeArt(){
         sideL:ft(0.35,0.95,{dx:-VW*0.6,ease:eOut}), sideR:ft(0.45,1.05,{dx:VW*0.6,ease:eOut}),
         store:ft(0.8,1.45,{dy:VH*0.55,ease:eBack}), street:ft(0.55,1.15,{dy:VH*0.25,ease:eOut}) }};
   if(!tall){ L.bw=[0,184]; L.bandR=mkBand(FR.w-184,FR.w); }
+  SG.cv=mkSign(); layoutTitle(); sgTimer();
+}
+/* ---- the sign pictures: the original sign crop and the TAP TO START one, each also dimmed to ~55% (the flicker) ---- */
+function mkSign(){
+  var st=artImg.store, tp=artImg.signtap, S=FR.signtap;
+  if(!tp||!st||tp.naturalWidth!==S.w||tp.naturalHeight!==S.h) return null;
+  var c2=function(){ var c=document.createElement("canvas"); c.width=S.w; c.height=S.h; return c; }, kk=st.naturalWidth/FR.w;
+  var o=c2(); o.getContext("2d").drawImage(st,S.x*kk,S.y*kk,S.w*kk,S.h*kk,0,0,S.w,S.h);
+  var t=c2(); t.getContext("2d").drawImage(tp,0,0);
+  var dim=function(src){ var d=c2(), x=d.getContext("2d"); x.drawImage(src,0,0); x.globalCompositeOperation="source-atop"; x.fillStyle="rgba(0,0,0,0.45)"; x.fillRect(0,0,S.w,S.h); return d; };
+  return {dO:dim(o), tap:t, dT:dim(t)};
+}
+function signMode(){        // which sign picture shows now: "orig" (nothing drawn over the store), "dO", "tap" or "dT"
+  if(!SG.cv) return "orig";
+  if(SG.test) return SG.test;
+  if(reduced) return SG.ph?"tap":"orig";
+  var t=T-SG.at; if(t<0) return "orig";
+  var u=t%SG_CYC, tapSide=u>=SG_HOLD+0.2&&u<SG_CYC-0.2;     // 0..1.4 original, flicker, 1.6..3.0 TAP TO START, flicker
+  if(u<SG_HOLD) return "orig";
+  if(u<SG_HOLD+0.2||u>=SG_CYC-0.2){                           // a flicker: dim the word that was showing, the new word, dim it again
+    var a=u<SG_HOLD+0.2? u-SG_HOLD : u-(SG_CYC-0.2), toTap=u<SG_HOLD+0.2, f=SG_FLK;
+    if(a<f[0]) return toTap?"dO":"dT";
+    if(a<f[0]+f[1]) return toTap?"tap":"orig";
+    return toTap?"dT":"dO";
+  }
+  return tapSide?"tap":"orig";
+}
+function signBusy(){        // true while a flicker runs: the loop draws at full rate so the 60-70 ms steps show
+  if(!SG.cv||reduced||SG.test) return false;
+  var t=T-SG.at; if(t<0) return false; var u=t%SG_CYC; return (u>=SG_HOLD&&u<SG_HOLD+0.2)||u>=SG_CYC-0.2;
+}
+function sgTimer(){         // reduced motion has no loop: a plain swap every 2 s
+  clearTimeout(SG.tm); SG.tm=0;
+  if(!reduced||!SG.cv||!L||!L.art) return;
+  SG.tm=setTimeout(function(){ SG.tm=0; if(!host||!L||!host.classList.contains("on")) return; SG.ph^=1; render(); sgTimer(); },2000);
+}
+/* ---- the title lettering and the sign button, placed from the painted frame (css custom properties on #ovTitle; csd.js / shell2.html
+   style them; no transforms, GSAP owns those). Run on every bake (resize / rotate). ---- */
+function outline(col,w,drop){ var a=[]; for(var i=0;i<16;i++){ var r=i/8*Math.PI; a.push((Math.cos(r)*w).toFixed(2)+"px "+(Math.sin(r)*w).toFixed(2)+"px 0 "+col); } a.push("0 "+drop.toFixed(2)+"px 0 "+col); return a.join(","); }
+var LOGO_GAP=8, LOGO_MIN=22;   // px clear above the roof; the smallest CORNER STORE size the logo is shrunk to
+function layoutTitle(){
+  var card=host&&host.querySelector(".card"), main=document.getElementById("ttMain"), btn=document.getElementById("btnTitle");
+  if(!card||!main||!L||!L.art) return;
+  var st=host.style, s=L.s, FONT="40px 'Sedgwick Ave Display'";
+  host.classList.add("art");
+  st.setProperty("--lg","200px"); var w200=main.offsetWidth||1;
+  var fs=200*Math.min(VW*0.88,620)/w200;                                 // CORNER STORE fitted to min(88vw, 620px) wide
+  var pad=parseFloat(getComputedStyle(host).paddingTop)||0, roof=L.oy+FR.roof*s, avail=roof-LOGO_GAP-pad;   // the sky between the top padding and the rooftop line (8 px kept clear above the roof)
+  var set=function(f){ fs=f; st.setProperty("--lg",f.toFixed(2)+"px");
+    st.setProperty("--olM",outline(C.navy,Math.max(2,f*0.07),f*0.12));
+    st.setProperty("--olE",outline(C.navy,Math.max(1.5,f*0.035),0));
+    st.setProperty("--olD",outline(C.navy,Math.max(2,f*0.06),f*0.09)); return card.offsetHeight; };
+  var h=set(fs), shrunk=false;
+  for(var it=0; it<5&&h>avail&&fs>LOGO_MIN; it++){ h=set(Math.max(LOGO_MIN,fs*avail/h)); shrunk=true; }   // too tall for the sky (short landscape screens): scale the whole logo down so it never sits over the buildings; at the floor it stays at the padding
+  st.setProperty("--lgTop",(shrunk&&h<=avail? pad+(avail-h)/2 : roof-pad>=h? pad+(roof-pad-h)/2 : pad).toFixed(2)+"px");   // centred in the sky; if even the floor does not fit, its top is at the padding
+  var S=FR.signtap, bh=Math.max(44,S.h*s);                               // the invisible real button, exactly over the painted sign (>= 44 px tall)
+  st.setProperty("--sgX",(L.ox+S.x*s).toFixed(2)+"px"); st.setProperty("--sgW",(S.w*s).toFixed(2)+"px");
+  st.setProperty("--sgY",(L.oy+(S.y+S.h/2)*s-bh/2).toFixed(2)+"px"); st.setProperty("--sgH",bh.toFixed(2)+"px");
+  if(document.fonts&&document.fonts.check&&!document.fonts.check(FONT)&&!L.fontWait){ L.fontWait=1; document.fonts.load(FONT).then(function(){ if(L&&L.art) layoutTitle(); },function(){}); }
 }
 function mkBand(x0,x1){      // an edge strip of the two building layers, darkened a little: repeated (mirrored) outside the frame on landscape screens
   var c=document.createElement("canvas"); c.width=x1-x0; c.height=FR.h; var x=c.getContext("2d");
@@ -300,10 +370,14 @@ function drawArt(){
   if(wd){ if(oL) bands(oL,false); if(oR) bands(oR,true); }
   if(oL) put("sides",F.sideL,0,FR.w/2,oL); if(oR) put("sides",F.sideR,FR.w/2,FR.w,oR);
   var oS=artOff(F.store); if(oS) put("store",F.store,0,FR.w,oS);
+  if(oS&&SG.cv){                                                               // the sign's other word / its flicker: over the store layer, same transform and offset, so it lines up pixel for pixel and flies in with the store
+    var sm=signMode(); if(sm!=="orig"){ var sp=FR.signtap, cl=sp.clip;   // TAP TO START is clipped to the box the new letters can change, so every other pixel of the store stays the store's own, byte for byte
+      g.save(); if(sm==="tap"){ g.beginPath(); g.rect(fx(cl.x,oS),fy(cl.y,oS),cl.w*L.s,cl.h*L.s); g.clip(); }   // (the dimmed pictures darken the whole sign board, so they are not clipped)
+      g.drawImage(SG.cv[sm],fx(sp.x,oS),fy(sp.y,oS),sp.w*L.s,sp.h*L.s); g.restore(); } }
   var oT=artOff(F.street); if(oT) { if(wd) tile("street",oT); else put("street",F.street,0,FR.w,oT); }
   // light pulses over the painted sign, the OPEN neon and the lamp (frame coordinates, riding their layer's offset)
   var up=oS?clamp((T-1.5)/0.3,0,1):0;
-  if(up>0){
+  if(up>0&&!SG.noGlow){
     var fl= reduced? 0.10 : 0.09+0.04*Math.sin(T*9.3)*Math.sin(T*2.1)+(((T*0.43)%1)<0.025?-0.09:0); if(T<1.9&&!reduced) fl*=(Math.sin(T*70)>0?1:0.3); fl=Math.max(0,fl)*up;
     var sg=FR.sign, op=FR.open, sx0=fx(sg.x,oS), sy0=fy(sg.y,oS), sw0=sg.w*L.s, sh0=sg.h*L.s;
     g.globalCompositeOperation="lighter"; g.fillStyle=rgba(C.gold,fl); g.fillRect(sx0,sy0,sw0,sh0); glowAt(sx0+sw0/2,sy0+sh0/2,sw0*0.62,C.gold,fl*1.1);
@@ -431,7 +505,7 @@ function tick(ts){
   if(!host||!host.classList.contains("on")){ halt(); return; }       // the title is gone: nothing left running, layers freed
   if(document.hidden){ last=0; return; }                              // tab hidden: not rescheduled; visibilitychange restarts it
   var dt=last? Math.min(0.1,(ts-last)/1000) : 0.016; last=ts;
-  var busy=T<SETTLED+0.3||gag.t>=0;
+  var busy=T<SETTLED+0.3||gag.t>=0||signBusy();
   acc+=dt;
   if(!busy && acc<0.03){ raf=requestAnimationFrame(tick); return; }  // idle: about 30 fps is plenty for a sway
   var step=acc; acc=0;
@@ -446,6 +520,7 @@ function tick(ts){
 function halt(){
   running=false; if(raf){ cancelAnimationFrame(raf); raf=0; }
   L=null; gag.t=-1; freeArt(); if(cv){ cv.width=1; cv.height=1; }
+  clearTimeout(SG.tm); SG.tm=0; SG.cv=null;
 }
 function onVis(){ if(!document.hidden&&running&&!raf){ last=0; acc=0; raf=requestAnimationFrame(tick); } }
 function onResize(){
@@ -468,6 +543,7 @@ function start(o){
   var intro=!!(o&&o.intro)&&!reduced&&!seen;
   seen=true;
   running=!reduced; L=null; T= intro? 0 : SETTLED+0.8; gag.t=-1; gag.next= T+(intro? GAG_FIRST : 2.2); acc=0; last=0; hold=false;
+  SG.at= (o&&o.assemble&&!reduced)? 1e9 : T+0.2; SG.ph=0;               // the title assembly calls signGo() when it ends; any other start flashes at once
   loadArt(function(){                                                    // the painted layers decode first (a few ms: they are in the page); fails -> the procedural street
     if(!host.classList.contains("on")||L) return;
     measure(); bake(); g=cv.getContext("2d");
@@ -477,11 +553,15 @@ function start(o){
 }
 function settle(){                      // a tap during the intro: every layer in place, no gag
   if(T<SETTLED+0.8) T=SETTLED+0.8;
-  gag.t=-1; gag.next=T+1.8; render();
+  gag.t=-1; gag.next=T+1.8; signGo(); render();
 }
+function signGo(){ if(SG.at>T) SG.at=T; }      // the title has assembled (or was skipped): the sign starts its cycle
 return {
-  start:start, settle:settle, stop:halt,
+  start:start, settle:settle, stop:halt, signGo:signGo,
   get frames(){ return frames; }, get running(){ return running; }, get T(){ return T; },
+  _sign:function(m,noGlow){ SG.test=m||null; SG.noGlow=!!noGlow; if(L) render(); },     // test hook: force a sign picture ("orig"|"dO"|"tap"|"dT"), glow off; _sign() releases it
+  _signAt:function(t){ var T0=T, a=SG.at, h=SG.test; T=t; SG.at=0; SG.test=null; var m=signMode(); T=T0; SG.at=a; SG.test=h; return m; },   // test hook: the sign picture t seconds into the cycle
+  get _art(){ return !!(L&&L.art); }, get _signOk(){ return !!SG.cv; },
   _seek:function(t,gt){ hold=true; T=t; gag.t=-1; if(gt!=null){ gag.next=1e9; if(gag.t<0) startGag(); gag.t=gt; } render(); }   // test hook
 };
 })();
