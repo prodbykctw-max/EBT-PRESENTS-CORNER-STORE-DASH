@@ -1020,6 +1020,7 @@ var HAP = {
 var player=null, bully=null, bubbles=[];
 var board=null, bctx=null, view=null, vctx=null;
 var walk=null, field=null, nav=null;   // Uint8Array masks
+var MASKINFO={specks:[],shadowCells:0};   // what buildMasks opened beyond the colour test (tests read it through __csd.mask)
 var scale=1;
 
 /* ---------- motion (GSAP) ------------------------------------------------
@@ -1123,17 +1124,20 @@ function buildMasks(imgCanvas){
     var n=floorish(bx+1,by+1)+floorish(bx+3,by+1)+floorish(bx+1,by+3)+floorish(bx+3,by+3);
     walk[cy*MW+cx]=n>=3?1:0;
   }
+  // forbid: every cell that was closed on purpose (an explicit rect or the measured wall curve). The floor-shadow
+  // and floor-speck passes below only ever open cells of painted floor, never one of these.
+  var forbid=new Uint8Array(MW*MH);
   function setRect(x0,y0,x1,y1,v){
     for(var y=Math.max(0,y0/MC|0);y<Math.min(MH,Math.ceil(y1/MC));y++)
-      for(var x=Math.max(0,x0/MC|0);x<Math.min(MW,Math.ceil(x1/MC));x++) walk[y*MW+x]=v;
+      for(var x=Math.max(0,x0/MC|0);x<Math.min(MW,Math.ceil(x1/MC));x++){ walk[y*MW+x]=v; forbid[y*MW+x]=v?0:1; }
   }
   setRect(0,0,IW,95,0);
   // accurate outer-wall clip, one measured row per mask cell
   for(var i=0;i<CLIP_L.length;i++){
     var cyy=CLIP_CY0+i; if(cyy>=MH) break;
     var loCell=Math.max(0,(CLIP_L[i]-1)/MC|0), hiCell=Math.min(MW,(CLIP_R[i]/MC|0)+2);
-    for(var x3=0;x3<loCell;x3++) walk[cyy*MW+x3]=0;
-    for(var x4=hiCell;x4<MW;x4++) walk[cyy*MW+x4]=0;
+    for(var x3=0;x3<loCell;x3++){ walk[cyy*MW+x3]=0; forbid[cyy*MW+x3]=1; }
+    for(var x4=hiCell;x4<MW;x4++){ walk[cyy*MW+x4]=0; forbid[cyy*MW+x4]=1; }
   }
   setRect(0,1540,IW,IH,0);
   // --- SIGNAGE IS AN OVERLAY, NOT A WALL ---------------------------------
@@ -1180,6 +1184,11 @@ function buildMasks(imgCanvas){
   // cut it at 1650, which opened a strip of street below the corrals. The
   // corrals are now blocked to the same 1634 so neither pocket can come back.)
   setRect(14,1470,840,1634,1);
+  // The tile runs out to the image edge here (read off the art: mean brightness 180-235 at x=0..14 from y=1360 and at
+  // x=840..852 from y=1480, down to the storefront line at y~1555), but the measured wall curve (CLIP_L 8..12) and the
+  // vestibule band's 14 / 840 ends closed a 10-14 px strip of it along both screen edges: floor you could see and not
+  // stand on. Open it to the 4 px border guard below.
+  setRect(4,1360,14,1556,1); setRect(840,1480,IW-4,1556,1);
   // Cart corrals, re-measured off the art with a 10px grid overlay rather than
   // eyeballed: both top rails start at y~1498 and the posts span x 41..227 and
   // x 600..790. The old rects started at y=1478 and ran x 18..215 / 588..808,
@@ -1247,6 +1256,66 @@ function buildMasks(imgCanvas){
       field[n2]=1; q.push(n2);
     }
   }
+  /* ---- painted floor the colour test could not read: shelf shadows and floor specks (milk-block fix) ----------
+     The floor test above is "bright and not blue". A shelf (and a counter) throws a soft brown shadow on the tile
+     in front of and beside it, 10-16 px wide, darker than the test's 150 cut-off: it was read as wall, so you
+     stopped 14 px short of every shelf front (the Dairy aisle's Milk spot is right under one) with clear tile in
+     front of your feet. A few small dark specks on the tile (a crumb on a pink tile at x 142..153, y 295..307, 43 px
+     left of the Milk spot) were read as walls too. Neither is an obstacle, so both are opened here, after the flood
+     fill, so that only floor the player can already reach is ever extended:
+       shadow: a cell whose colour is the floor colour darkened (red > green > blue in floor proportions, not the
+               navy of a shelf base, the saturated orange / red of products, or a wall) and that touches the floor,
+               up to SHADOW_REACH cells (4 px each) out along the shadow;
+       speck:  a blocked blob of at most SPECK_MAX cells that has floor on every side.
+     Cells closed on purpose (forbid: the wall curve, the corrals, the wall steps, the screen edge) stay closed. */
+  function shadowish(x,y){
+    if(x<0||y<0||x>=IW||y>=IH) return 0;
+    var i=(y*IW+x)*4, r=data[i],g=data[i+1],b=data[i+2], m=(r+g+b)/3;
+    return (r>=95 && g>=0.72*r && g<=0.95*r && b>=0.55*r && b<=0.92*r && m<=170) ? 1 : 0;
+  }
+  var SHADOW_REACH=6, SPECK_MAX=12;
+  var shCell=new Uint8Array(MW*MH);
+  for(var sy0=0;sy0<MH;sy0++)for(var sx0=0;sx0<MW;sx0++){
+    var sbx=sx0*MC, sby=sy0*MC;
+    var sn=(floorish(sbx+1,sby+1)||shadowish(sbx+1,sby+1))+(floorish(sbx+3,sby+1)||shadowish(sbx+3,sby+1))+(floorish(sbx+1,sby+3)||shadowish(sbx+1,sby+3))+(floorish(sbx+3,sby+3)||shadowish(sbx+3,sby+3));
+    shCell[sy0*MW+sx0]=(sn>=3 && !forbid[sy0*MW+sx0])?1:0;
+  }
+  for(var pass=0;pass<SHADOW_REACH;pass++){
+    var add=[];
+    for(var gy2=1;gy2<MH-1;gy2++)for(var gx2=1;gx2<MW-1;gx2++){
+      var gi=gy2*MW+gx2;
+      if(field[gi]||!shCell[gi]) continue;
+      if(field[gi-1]||field[gi+1]||field[gi-MW]||field[gi+MW]) add.push(gi);
+    }
+    if(!add.length) break;
+    for(var ai=0;ai<add.length;ai++){ walk[add[ai]]=1; field[add[ai]]=1; }
+    MASKINFO.shadowCells+=add.length;
+  }
+  // specks: small blocked blobs ringed by floor (4-connected blob; every one of its 8-neighbours is floor or in it)
+  var comp=new Int32Array(MW*MH), nComp=0, SPECKS=[];
+  for(var ky=0;ky<MH;ky++)for(var kx=0;kx<MW;kx++){
+    var ki=ky*MW+kx;
+    if(field[ki]||comp[ki]) continue;
+    nComp++; var blob=[ki]; comp[ki]=nComp;
+    for(var bi=0;bi<blob.length;bi++){
+      var bc=blob[bi], bxx=bc%MW, byy=(bc/MW)|0, nb4=[];
+      if(bxx>0) nb4.push(bc-1); if(bxx<MW-1) nb4.push(bc+1); if(byy>0) nb4.push(bc-MW); if(byy<MH-1) nb4.push(bc+MW);
+      for(var q4=0;q4<nb4.length;q4++){ var n4=nb4[q4]; if(!field[n4]&&!comp[n4]){ comp[n4]=nComp; blob.push(n4); } }
+    }
+    if(blob.length>SPECK_MAX) continue;
+    var okRing=true;
+    for(var bj=0;bj<blob.length&&okRing;bj++){
+      var c0=blob[bj], cx0=c0%MW, cy0=(c0/MW)|0;
+      if(forbid[c0]||cx0<1||cy0<1||cx0>=MW-1||cy0>=MH-1){ okRing=false; break; }
+      for(var ey=-1;ey<=1&&okRing;ey++)for(var ex=-1;ex<=1;ex++){
+        if(!(ex||ey)) continue;
+        var n3=c0+ey*MW+ex;
+        if(!field[n3]&&comp[n3]!==nComp){ okRing=false; break; }
+      }
+    }
+    if(okRing){ for(var bj3=0;bj3<blob.length;bj3++){ walk[blob[bj3]]=1; field[blob[bj3]]=1; } SPECKS.push({cells:blob.length,x:(blob[0]%MW)*MC,y:((blob[0]/MW)|0)*MC}); }
+  }
+  MASKINFO.specks=SPECKS;
   // nav grid (16px): cell ok only if the actor box fits across a small
   // cross-pattern spanning most of the cell, not just its dead center. A
   // thin wall (e.g. a shelf's base trim, 1-2 mask rows thick) can sit
@@ -3031,6 +3100,7 @@ window.__csd={ get S(){return S;}, get player(){return player;}, get bully(){ret
   tp:function(x,y){ var s=snapToField(x,y); player.x=s.x; player.y=s.y; return [s.x,s.y]; },
   freeze:function(v){ S.freezeBully=!!v; },
   setInput:function(x,y){ S.testVec=(x===null)?null:{x:x,y:y}; },
+  get mask(){ return MASKINFO; },
   arrive:function(r){ arrival=r; } };   // tests: what the drive hands over (so the store side of the race can be tested without driving)
 if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded",init); } else { init(); }
 
