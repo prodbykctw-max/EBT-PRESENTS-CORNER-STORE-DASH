@@ -70,6 +70,24 @@
   .card{ background:linear-gradient(160deg,var(--pink),var(--magenta));
     border:4px solid var(--navy); box-shadow:0 6px 0 var(--navy), 0 0 0 3px var(--gold);
     padding:22px 18px 18px; max-width:340px; width:92%; }
+  /* Title font: Sedgwick Ave Display (SIL OFL 1.1, standalone/font_sedgwick_OFL.txt), inlined by build.mjs; only the painted title uses it */
+  @font-face{ font-family:'Sedgwick Ave Display'; font-style:normal; font-weight:400; font-display:block;
+    src:url(data:font/woff2;base64,%%FONT_SEDGWICK%%) format('woff2'); }
+  /* The painted title (titlescene.js adds .art to #ovTitle only when the painted street is in use; the plain street keeps the card and
+     the yellow button above exactly). The card loses its box: EBT PRESENTS / CORNER STORE / DASH are lettering on the sky. titlescene.js
+     sets, on #ovTitle: --lg (CORNER STORE's font size, fitted to min(88vw,620px)), --lgTop (the logo's top: centred in the sky above
+     the rooftop), --olE / --olM / --olD (the navy outlines + drop shadows), --sgX/--sgY/--sgW/--sgH (the painted sign's screen rect,
+     at least 44px tall). Nothing here uses transform: GSAP owns transforms and its clearProps wipes inline styles. */
+  #ovTitle.art .card{ position:absolute; left:0; right:0; top:var(--lgTop,20px); margin:0; width:auto; max-width:none; padding:0;
+    background:none; border:0; box-shadow:none; font-family:'Sedgwick Ave Display',Impact,'Arial Black',sans-serif; pointer-events:none; }
+  #ovTitle.art .eyebrow{ font-size:max(11px,calc(var(--lg) * .3)); letter-spacing:.22em; color:var(--cream); margin-bottom:calc(var(--lg) * .18); text-shadow:var(--olE); }
+  #ovTitle.art .title{ font-size:var(--lg); line-height:1.1; font-weight:400; color:var(--gold); text-shadow:var(--olM); }
+  #ovTitle.art #ttMain{ white-space:nowrap; font-kerning:none; }
+  #ovTitle.art .title small{ font-size:.75em; line-height:1.15; font-weight:400; color:#fff; margin-top:calc(var(--lg) * .08); text-shadow:var(--olD); }
+  /* the painted sign IS the button: the real #btnTitle, invisible, exactly over the sign (keyboard Enter/Space and focus still work) */
+  #ovTitle.art #btnTitle{ position:absolute; left:var(--sgX); top:var(--sgY); width:var(--sgW); height:var(--sgH); margin:0; padding:0; border:0;
+    background:transparent; box-shadow:none; color:transparent; font-size:0; animation:none; }
+  #ovTitle.art #btnTitle:focus-visible{ outline:3px solid var(--gold); outline-offset:3px; }
   .eyebrow{ font-size:12px; letter-spacing:.22em; color:var(--cream); opacity:.9; margin-bottom:10px; }
   .title{ font-size:34px; line-height:.95; font-weight:900; color:var(--gold); text-shadow:3px 3px 0 var(--navy); }
   .title small{ display:block; font-size:19px; color:#fff; text-shadow:2px 2px 0 var(--navy); margin-top:4px; }
@@ -188,8 +206,8 @@
       <div class="eyebrow">EBT PRESENTS</div>
       <div class="title"><span id="ttMain">CORNER STORE</span><small>DASH</small></div>
     </div>
-    <button class="btn pulse" id="btnTitle">TAP TO START</button>
-    <div class="credits">Engine sound: DerMeehdrescher / Meehdrescher Studios (CC BY-SA 4.0)<br>Sound effects: BigSoundBank &amp; OpenGameArt (CC0)<br>Car model: Car Concept, Eric Chadwick / Darmstadt Graphics Group (CC BY 4.0), modified<br>Dog: &ldquo;PitBull&rdquo; by Joseph AYYAD (CC BY 4.0), pigeon: &ldquo;Pigeon&rdquo; by kenchoo after NMC BC (CC BY), both modified<br>Map data © OpenStreetMap contributors<br>Shopping cart: &ldquo;Shopping Cart&rdquo; by AdrianXY (CC BY 4.0), modified</div>
+    <button class="btn pulse" id="btnTitle" aria-label="Tap to start">TAP TO START</button>
+    <div class="credits">Engine sound: DerMeehdrescher / Meehdrescher Studios (CC BY-SA 4.0)<br>Sound effects: BigSoundBank &amp; OpenGameArt (CC0)<br>Car model: Car Concept, Eric Chadwick / Darmstadt Graphics Group (CC BY 4.0), modified<br>Dog: &ldquo;PitBull&rdquo; by Joseph AYYAD (CC BY 4.0), pigeon: &ldquo;Pigeon&rdquo; by kenchoo after NMC BC (CC BY), both modified<br>Map data © OpenStreetMap contributors<br>Shopping cart: &ldquo;Shopping Cart&rdquo; by AdrianXY (CC BY 4.0), modified<br>Title font: Sedgwick Ave Display (SIL OFL 1.1)</div>
   </div>
 
   <div class="ov" id="ovDriveHow" data-solid>
@@ -254,7 +272,7 @@
   </div>
 
 <script>%%GSAP%%</script>
-<script>var TITLE_ART_SRC={sky:"data:image/webp;base64,%%TA_SKY%%",skyline:"data:image/webp;base64,%%TA_SKYLINE%%",sides:"data:image/webp;base64,%%TA_SIDES%%",store:"data:image/webp;base64,%%TA_STORE%%",street:"data:image/webp;base64,%%TA_STREET%%"};</script>
+<script>var TITLE_ART_SRC={sky:"data:image/webp;base64,%%TA_SKY%%",skyline:"data:image/webp;base64,%%TA_SKYLINE%%",sides:"data:image/webp;base64,%%TA_SIDES%%",store:"data:image/webp;base64,%%TA_STORE%%",street:"data:image/webp;base64,%%TA_STREET%%",signtap:"data:image/webp;base64,%%TA_SIGNTAP%%"};</script>
 <script>%%TITLESCENE%%</script>
 <script>
 var BOARD_SRC="data:image/webp;base64,%%B64%%";

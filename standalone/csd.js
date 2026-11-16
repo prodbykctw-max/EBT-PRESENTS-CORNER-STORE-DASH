@@ -904,6 +904,11 @@ function endScreen(won){
    A tap while it assembles skips to the finished card and does NOT start the game (TITLE.skipped swallows that
    tap's click). Reduced motion / no GSAP: the title simply appears, as before. */
 var TITLE={done:true,tl:null,skipped:false,idle:[]};
+function titleFontReady(cb){
+  var done=false, go=function(){ if(!done){ done=true; cb(); } };
+  setTimeout(go,1500);
+  try{ if(document.fonts&&document.fonts.load) document.fonts.load("40px 'Sedgwick Ave Display'").then(go,go); else go(); }catch(e){ go(); }
+}
 function titleAssemble(){
   var o=el("ovTitle"), card=o.querySelector(".card"), eye=o.querySelector(".eyebrow"), ttl=o.querySelector(".title"),
       main=el("ttMain"), dash=ttl.querySelector("small"), btn=el("btnTitle"), cr=o.querySelector(".credits"), ld=el("loading");
@@ -913,7 +918,7 @@ function titleAssemble(){
   TITLE.done=false; TITLE.skipped=false;
   // the dimmed store is on at once under the black loader (so it never shows undimmed); the pieces wait
   o._leaving=false; o.classList.remove("ready"); o.classList.add("on"); GS.killTweensOf(o); GS.set(o,{opacity:1,pointerEvents:"auto"});
-  TitleScene.start({intro:true,sprites:{player:playerImg,bully:bullyImg}});   // the painted street behind the card (titlescene.js)
+  TitleScene.start({intro:true,assemble:true,sprites:{player:playerImg,bully:bullyImg}});   // the painted street behind the card (titlescene.js); assemble: the store sign starts flashing when this assembly ends (finish -> signGo)
   ld.style.color="transparent";   // the black plate still fades off over the street, but its LOADING… word is gone at once (it showed faintly over the sky)
   GS.set([card],{opacity:0,scale:0.15,rotation:-5}); GS.set([eye,dash,btn,cr],{opacity:0}); GS.set(letters,{opacity:0});
   var tl=GS.timeline({onComplete:finish});
@@ -929,10 +934,10 @@ function titleAssemble(){
     if(TITLE.done) return; TITLE.done=true;
     GS.killTweensOf([card,eye,dash,btn,cr,ld].concat(letters));
     main.textContent=word; GS.set([card,eye,dash,btn,cr],{clearProps:"all"}); ld.style.display="none";
-    o.classList.add("ready");
-    // idle: the card floats and sways a little, the button glows
-    TITLE.idle=[GS.to(card,{y:-4,rotation:0.35,duration:2.2,ease:"sine.inOut",yoyo:true,repeat:-1}),
-                GS.fromTo(btn,{boxShadow:"0 4px 0 #1E2340, 0 0 0 rgba(245,197,24,0)"},{boxShadow:"0 4px 0 #1E2340, 0 0 20px rgba(245,197,24,.85)",duration:0.8,ease:"sine.inOut",yoyo:true,repeat:-1})];
+    o.classList.add("ready"); TitleScene.signGo();
+    // idle: the card floats and sways a little, the button glows (with the painted street the button is the invisible hit area over the store sign: no glow box; the sign's own light pulses in titlescene.js)
+    TITLE.idle=[GS.to(card,{y:-4,rotation:0.35,duration:2.2,ease:"sine.inOut",yoyo:true,repeat:-1})];
+    if(!o.classList.contains("art")) TITLE.idle.push(GS.fromTo(btn,{boxShadow:"0 4px 0 #1E2340, 0 0 0 rgba(245,197,24,0)"},{boxShadow:"0 4px 0 #1E2340, 0 0 20px rgba(245,197,24,.85)",duration:0.8,ease:"sine.inOut",yoyo:true,repeat:-1}));
   }
   TITLE.finish=function(){ if(TITLE.tl) TITLE.tl.progress(1); finish(); TitleScene.settle(); };
   o.addEventListener("pointerdown",function skip(){ if(TITLE.done){ o.removeEventListener("pointerdown",skip); return; }
@@ -2084,8 +2089,11 @@ function init(){
     // the title's dimmed backing is up at once under the loader (so the store never shows undimmed), the loader
     // fades off it, and only then do the card and TAP TO START rise (they used to rise through the fading LOADING)
     S.mode="title"; titleAt=performance.now();
-    if(MOTION){ titleAssemble(); return; }
-    show("ovTitle",0); el("loading").style.display="none";
+    // the painted title's lettering is Sedgwick Ave Display (inlined, shell2.html): the assembly waits for it (about 1.5 s at most), under the loader
+    titleFontReady(function(){
+      if(MOTION){ titleAssemble(); return; }
+      show("ovTitle",0); el("loading").style.display="none";
+    });
   }
   img.onload=function(){
     board=document.createElement("canvas"); board.width=IW; board.height=IH;

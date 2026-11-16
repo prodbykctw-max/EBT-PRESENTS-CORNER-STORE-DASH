@@ -107,6 +107,21 @@ motion: one still frame, no loop, no gag. One canvas inside `#ovTitle` (z-index 
 30 fps when idle; the loop is not rescheduled when the tab is hidden and it stops and frees its layers when the title is not showing
 (no frame loop of its own runs in the drive or the store).
 
+*The painted title (when the painted street is in use; the plain street keeps the boxed card and the yellow button).* The card has no
+box: EBT PRESENTS / CORNER STORE / DASH are lettering on the sky in Sedgwick Ave Display (SIL OFL 1.1, inlined; the assembly waits up to
+1.5 s for it): CORNER STORE gold, fitted to min(88vw, 620px) wide, with a navy outline and drop shadow; EBT PRESENTS cream; DASH white.
+The logo is centred in the sky between the screen's top padding and the rooftop line (frame y 511, `FR.roof`); if it does not fit, its
+top sits at the padding (on a short landscape phone it then reaches down over the roof). `titlescene.js` sets CSS custom properties on
+`#ovTitle` (`--lg`, `--lgTop`, `--olM/E/D`, `--sgX/Y/W/H`) and the class `.art` on every bake (resize, rotate); nothing positions with a
+transform because GSAP owns those. The store sign IS the start button: it swaps between CORNER STORE (the painted original) and TAP TO
+START (`title_signtap.b64`, the same sign with the letters rebuilt, drawn over the store layer with the store's own transform so it
+flies in with it), each held 1.4 s with a neon flicker between (about 55 % dim for 70 ms, the other word for 70 ms, dim again for
+60 ms). The cycle starts when the assembly ends (or at once after a skip tap); reduced motion swaps plainly every 2 s with no flicker;
+nothing runs when the title is hidden. The real `#btnTitle` is an invisible hit area exactly over the sign (at least 44 px tall,
+`aria-label="Tap to start"`, a gold focus ring for keyboard focus only), so Enter / Space, focus and the glide out of the button still
+work. Tapping the sky does nothing, as before. If `title_signtap` fails to decode the sign just does not flash. The font is credited on
+the title's credits line (and so in the win ending's credits).
+
 **Ending (winning the store run only; CAUGHT / THE BULLY GOT YOU! is unchanged).** Three beats, a tap skips to the next:
 1. *Victory:* play freezes, the screen flashes white three times, a 2.4 s synthesised fanfare plays, YOU WIN! slams in with a
    shake, you pop up behind a shopping cart, both hands on its handle, hopping and leaning into it, then the score fills part by part like an EXP bar
