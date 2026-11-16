@@ -38,6 +38,8 @@ const TIME_LIMIT = 70;   // the traffic (TRAFFIC = 0.25 of what it was: see traf
 // sideways position it points at (1 = the car stays centred; the comic camera uses 0.35), yCar = where the car's rear-bottom edge
 // (2.45 m behind its centre, 0.3 m up) lands on screen (0 top .. 1 bottom; the tyres and bumper hang a little lower, so the car's
 // lowest edge is about 0.06 below it), rear = how far that edge is behind the car's centre.
+// the body leans out of a turn with the side acceleration (k rad per m/s^2, at most max rad); the front wheels turn `lock` rad at full lock
+const CAR_LEAN = { k: 0.0025, max: 0.05, lock: 0.5 }, LEAN_SIGN = 1, WHEEL_SIGN = 1;
 const CAM_R = { back: 6.8, backV: 0.03, h: 2.8, ahead: 10, aimD: 1, yCar: 0.77, rear: 2.45 };
 const REAR_AXLE = 1.45; // car.glb origin sits on the rear axle; the runner tracks the car's centre
 // Curbside parking space in front of the EBT Corner Store (world frame; the row faces north onto Auburn).
@@ -418,8 +420,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   if (frozen()) await macrotask();
 
   // ---------- input: you drive it (GTA Chinatown Wars layout) ----------
-  // Phone: ◀ ▶ change lanes (bottom left), GAS, BRAKE (hold at a stop to reverse) and HORN (bottom right), all held
-  // buttons. Keys: ↑/W gas, ↓/S brake / reverse, ←/→ or A/D one lane per press, Space/H horn.
+  // Phone: ◀ ▶ steer (bottom left), GAS, BRAKE (hold at a stop to reverse) and HORN (bottom right), all held
+  // buttons. Keys: ↑/W gas, ↓/S brake / reverse, ←/→ or A/D steer (hold to turn, let go and the car straightens), Space/H horn.
   const keys = new Set();
   let hornT = 0;
   const honk = () => { if (hornT <= 0) { audio.horn(); hornT = 0.6; } };
@@ -470,40 +472,30 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     audio.unlock();
     const k = KEYMAP[e.code]; if (!k) return; e.preventDefault();
     if (k === 'horn') honk();
-    if ((k === 'left' || k === 'right') && !e.repeat) tapLane(k);   // a held key's auto-repeat is not another press
+    if ((k === 'left' || k === 'right') && !e.repeat) tapHold[k] = TAP_MIN;   // a held key's auto-repeat is not another press
     keys.add(k);
   };
   const ku = (e) => { const k = KEYMAP[e.code]; if (k) keys.delete(k); };
   addEventListener('keydown', kd); addEventListener('keyup', ku);
-  // the four lanes (your parking lane, your lane, the oncoming lane, the far parking lane, where the street has them):
-  // used for the haptic tick each time you cross into a lane, and as the edges of the road you can drive on
+  // the four lanes (your parking lane, your lane, the oncoming lane, the far parking lane, where the street has them): the
+  // edges of the road you can drive on (runner.js steps with them)
   const laneCentres = (s) => [route.parkD(s, -1), route.lane(s, 0), route.lane(s, 1), route.parkD(s, 1)].filter((v) => v !== null);
-  // ?bot: the QA autopilot (autopilot.js) steers by writing car.targetD itself, 20 times a second, along any line
-  // it likes. The player's lane steering below must stand aside for it, or followLane() would overwrite the bot's
-  // line every frame and it could never dodge anything.
+  // ?bot: the QA autopilot (autopilot.js) steers by writing car.targetD itself, 20 times a second, along any line it likes;
+  // the car then steers itself toward that line (runner.js, no `steerIn`). The player's own steering stands aside for it.
   const BOT = new URLSearchParams(location.search).has('bot');
-  let laneWas = null;
-  const steerFeel = () => {                                       // a haptic tick each time you cross into a new lane
-    const cs = laneCentres(car.s), i = cs.reduce((b, c, k) => Math.abs(c - car.d) < Math.abs(cs[b] - car.d) ? k : b, 0);
-    if (laneWas !== null && i !== laneWas) haptic(HAP.lane, 90);
-    laneWas = i;
-    if (car.scrape > 0) { haptic(HAP.edge, 400); car.scrape = 0; }
-  };
-  // ◀ ▶ move the car the instant they're pressed, from the press itself, not whenever the next frame looks at the
-  // held keys: a quick tap (finger down and up between two frames, easy on a phone drawing the city at 30 fps) used
-  // to be missed entirely. One lane per press; holding does nothing more.
-  const tapLane = (k) => {
-    if (state === 'onfoot') return;   // on foot ◀ ▶ are held directions (footVec), like the store's arrows, not steps
-    if (state !== 'driving' || BOT || paused) return;
-    laneShift(k === 'left' ? 1 : -1); followLane();
-  };
+  const steerFeel = () => { if (car.scrape > 0) { haptic(HAP.edge, 400); car.scrape = 0; } };   // a light tick when the curb is hit
+  // ◀ ▶ are held: the steering turns while they are down. A quick tap (finger down and up between two frames, easy on a
+  // phone drawing the city at 30 fps) must still steer a little, so a press counts for at least TAP_MIN seconds.
+  const TAP_MIN = 0.12, tapHold = { left: 0, right: 0 };
+  // the first seconds after getting in: your car sits at the curb and swings out into the travel lane by itself (as it always did), until you steer yourself
+  let pullOut = false, pullT = 0;
   for (const b of root.querySelectorAll('[data-k]')) {
     // held buttons. Touch drives them from raw touch events (what iOS always delivers, even with the page's
     // long-press guard on), each button tracking its own finger(s), so GAS + steer + HORN work together; a mouse
     // or pen uses pointer events with capture.
     const k = b.dataset.k, fingers = new Set();
     const press = () => {
-      if (!keys.has(k)) { audio.unlock(); if (k === 'horn') honk(); if (k === 'left' || k === 'right') tapLane(k); haptic(HAP.tap); }
+      if (!keys.has(k)) { audio.unlock(); if (k === 'horn') honk(); if (k === 'left' || k === 'right') tapHold[k] = TAP_MIN; haptic(HAP.tap); }
       keys.add(k); b.classList.add('on');
     };
     const release = () => { keys.delete(k); b.classList.remove('on'); };
@@ -610,28 +602,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   let t = TIME_LIMIT, drove = 0, hits = 0, tokens = 0, nearMisses = 0, state = SKIPFOOT ? 'countdown' : 'onfoot', countdown = 3, shake = 0, endT = 0;
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3(), tmp3 = new THREE.Vector3(), lastCar = new THREE.Vector3(); let lastRz = 0;
   const camV = { dist: 0, px: 0, py: 0, pz: 0, lx: 0, ly: 0, lz: 0 }; let camDist = null, camAng = 0;   // on-foot camera: how far behind you it is (smoothDamp state: camV.dist)
-  // ---------- stiff lane steering ----------
-  // The car sits in one of four lanes, right to left: 0 the right parking lane, 1 your lane, 2 the oncoming lane,
-  // 3 the left parking lane (d grows to the left, so that is also smallest d to largest). ◀ ▶ move it one lane.
-  // The lane is remembered by WHICH lane it is, not by a distance in metres, because both of these change along
-  // the route: lanes widen and narrow with the street (route.travel), and parking lanes only exist where the
-  // street has room for one (route.parkD is null otherwise). followLane() re-reads the lane's centre every frame,
-  // so the car stays centred in its lane through every width change, and if a parking lane runs out under you
-  // the car moves to the travel lane beside it instead of grinding the kerb where the lane used to be.
-  const laneAt = (s, k) => k === 0 ? route.parkD(s, -1) : k === 1 ? route.lane(s, 0) : k === 2 ? route.lane(s, 1) : route.parkD(s, 1);
-  let laneK = 1;                                                  // start in your own lane
-  /** one lane across: dir +1 = left, -1 = right. Skips a parking lane that doesn't exist here. */
-  function laneShift(dir) {
-    let k = laneK + dir;
-    while (k >= 0 && k <= 3 && laneAt(car.s, k) === null) k += dir;
-    if (k < 0 || k > 3) return;                                     // already in the outermost lane on that side
-    laneK = k;
-  }
-  /** aim at the centre of the chosen lane as it is HERE, every frame */
-  function followLane() {
-    if (laneAt(car.s, laneK) === null) laneK = laneK === 0 ? 1 : 2; // that parking lane ended: step onto the road
-    car.targetD = laneAt(car.s, laneK);
-  }
+  // ---------- steering ----------
+  // The car steers like a car (runner.js `STEER`): see RunnerCar.step. No lanes to snap to: it stays wherever you leave it across the road.
   let camA = route.at(0).a, arrivalFrom = null;
   let cpFrom = car.s, cpSeen = 0;   // the realistic HUD's CHECKPOINT: 11 points of progress from where you got into the car to the store
   const result = { arrived: false, parked: false, timeLeft: 0, cleanPark: false, hits: 0, tokens: 0, nearMisses: 0, bonus: 0 };
@@ -754,9 +726,10 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // (the first version) you ran the last few metres with your shoulder 0.3 m inside the car.
   const doorS = homeS + 0.25, doorD = homeD + 1.6;
   // nobody else is parked in your space
-  for (const e of world.ents) if (e.parked && e.d < 0 && Math.abs(e.s - homeS) < 7.5) e.alive = false;
+  const PULLOUT_CLEAR = 17;   // m ahead of the car's spot kept free of parked cars: with real steering the pull-out takes about this much road
+  for (const e of world.ents) if (e.parked && e.d < 0 && e.s - homeS > -7.5 && e.s - homeS < PULLOUT_CLEAR) e.alive = false;   // (and none close ahead of it: the car now swings out at the speed it is going, see `pullOut`)
   world.ents = world.ents.filter((e) => e.alive);
-  if (!SKIPFOOT) { car.s = homeS; car.d = car.targetD = homeD; laneK = inParkLane ? 0 : 1; }
+  if (!SKIPFOOT) { car.s = homeS; car.d = car.targetD = homeD; }
   // hazard lamps on the four corners of your car (children of the car, so they sit on it wherever it is)
   const hazardMat = new THREE.SpriteMaterial({ map: glowTex, color: 0xffa21a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
   const hazards = new THREE.Group();
@@ -1127,7 +1100,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     endStick(); root.classList.remove('onfoot');
     if (G) G.from(root.querySelectorAll('.drive-pad'), { y: 40, opacity: 0, duration: 0.45, stagger: 0.07, ease: 'back.out(1.5)', clearProps: 'transform,opacity' });
     // you peel out: the car swings straight into the travel lane (the parking lane ahead is full of parked cars)
-    laneK = 1; followLane(); if (BOT) car.targetD = route.lane(car.s, 0);
+    car.targetD = route.lane(car.s, 0); pullOut = !BOT && Math.abs(car.d - car.targetD) > 0.35;   // (the bot always steers to car.targetD)
     cpFrom = car.s;
     hud.pop.replaceChildren();   // a taunt still floating up would sit on top of GO! GO! GO!
     flash('GO! GO! GO!', 900); haptic(HAP.go); audio.chime();
@@ -1363,7 +1336,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // and many screens aren't 60 or 120 Hz), so drawing the car exactly where the last step left it showed it up to
   // a step behind on some frames and not others: a hitch, most visible in a quick lane change. The car (and the
   // camera following it) is drawn between the last two steps instead, acc / FIXED of the way.
-  let prevS = car.s, prevD = car.d;
+  let prevS = car.s, prevD = car.d, prevN = car.nose;
   // QA: api.tick(dt) runs one whole frame at exactly that dt and draws nothing (api.manual = true stops the live
   // loop first), so a test can replay any frame-time pattern, a phone's uneven one included, and measure each frame
   let tickDt = null;
@@ -1402,25 +1375,24 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     drawRaceBar();
     setText(hud.dist.previousElementSibling, state === 'onfoot' ? 'YOUR CAR' : 'STORE');
     const braking = keys.has('down');
-    // Stiff lane steering: each press of ◀ ▶ moves the whole car exactly one lane (tapLane, the moment it's
-    // pressed); holding does nothing further. The car never turns: runner.js pins yaw to zero on the lateral path,
-    // and the front wheels and body lean are held still below, so the car slides across parallel to the road.
-    // Here: keep aiming at the chosen lane's centre as the street widens and narrows.
-    if (state === 'driving' && !BOT) followLane();
+    // Steering: ◀ ▶ held (a tap counts for at least TAP_MIN) is the steering input; runner.js turns it into a steering value, the
+    // nose angle and the side speed. Left out for the autopilot (?bot) and during the pull-out: then the car steers itself to car.targetD.
+    const steerIn = (keys.has('left') || tapHold.left > 0 ? 1 : 0) - (keys.has('right') || tapHold.right > 0 ? 1 : 0);
+    tapHold.left = Math.max(0, tapHold.left - dt); tapHold.right = Math.max(0, tapHold.right - dt);
+    if (pullOut) { pullT += dt; car.targetD = route.lane(car.s, 0); if (steerIn || pullT > 4 || Math.abs(car.d - car.targetD) < 0.35 || state !== 'driving') pullOut = false; }
+    const selfSteer = BOT || pullOut;
     if (state === 'driving') steerFeel();
     const approaching = car.s > spot.s - 95;
     if (state === 'driving' || state === 'parked' || state === 'late' || state === 'busted') {
       acc += dt;
       while (acc >= FIXED) {
         acc -= FIXED;
-        prevS = car.s; prevD = car.d;   // where the car was one physics step ago, to draw it between steps
+        prevS = car.s; prevD = car.d; prevN = car.nose;   // where the car was one physics step ago, to draw it between steps
         car.step(FIXED, {
           // once the run is over (parked / late / busted) the brake holds the car where it stopped: without `hold`,
           // a held brake at a standstill is reverse, and the car used to back out of the spot during the arrival shot
-          targetD: car.targetD, brake: braking || state !== 'driving', hold: state !== 'driving', gas: state === 'driving' && keys.has('gas') ? 1 : 0,
+          targetD: car.targetD, steerIn: selfSteer ? undefined : state === 'driving' ? steerIn : 0, brake: braking || state !== 'driving', hold: state !== 'driving', gas: state === 'driving' && keys.has('gas') ? 1 : 0,
           lanes: laneCentres(car.s),
-          // steer omitted on purpose: that selects runner.js's lateral path,
-          // which springs d toward targetD and never touches yaw.
         });
         // in the painted space: parked, right now (checked every physics step, so even a long frame at full speed cannot jump over the 7 m box)
         if (state === 'driving' && inSpot(car.s, car.d)) { park(true); break; }
@@ -1488,7 +1460,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         if (!cutPlaced && endT >= CUT_T) {
           cutPlaced = true; x = 1;
           const o = route.at(car.s, car.d), z0 = ground(o.x, o.y);
-          car.s = spot.s; car.d = spot.d; car.targetD = spot.d; car.v = 0; car.dv = 0; car.yaw = 0; prevS = car.s; prevD = car.d;   // (at rest, straight, in the middle of the box)
+          car.s = spot.s; car.d = spot.d; car.targetD = spot.d; car.v = 0; car.dv = 0; car.yaw = 0; car.slide = 0; car.steer = 0; prevS = car.s; prevD = car.d; prevN = 0;   // (at rest, straight, in the middle of the box)
           const n = route.at(car.s, car.d), a = toV3(o.x, o.y, z0), b = toV3(n.x, n.y, ground(n.x, n.y));
           if (arrivalFrom) arrivalFrom.add(b.sub(a));   // the camera keeps its place relative to the car
         } else x = cutPlaced ? 1 - (endT - CUT_T) / CUT_T : endT / CUT_T;
@@ -1499,22 +1471,23 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     }
 
     // car transform
-    if (Math.abs(car.s - prevS) > 2 || Math.abs(car.d - prevD) > 2) { prevS = car.s; prevD = car.d; }   // put there by a test hook (?demo), not driven: no in-between
-    const along = Math.min(1, acc / FIXED), drawS = prevS + (car.s - prevS) * along, drawD = prevD + (car.d - prevD) * along;
-    const p = route.at(drawS, drawD); p.a += car.yaw || 0;   // = car.pose, drawn between physics steps (see FIXED)
+    if (Math.abs(car.s - prevS) > 2 || Math.abs(car.d - prevD) > 2) { prevS = car.s; prevD = car.d; prevN = car.nose; }   // put there by a test hook (?demo), not driven: no in-between
+    const along = Math.min(1, acc / FIXED), drawS = prevS + (car.s - prevS) * along, drawD = prevD + (car.d - prevD) * along, drawN = prevN + (car.nose - prevN) * along;
+    const p = route.at(drawS, drawD); p.a += drawN;   // = car.pose, drawn between physics steps (see FIXED)
     // all four wheels on the road: height, pitch and roll from the ground under the axles and both sides
     const onRoad = (x, y) => surfAt(x, y, ground(x, y) + 1.2) ?? ground(x, y) + LEVEL.ROUTE;
     const st = standOn(onRoad, p.x, p.y, p.a, 1.47, 0.82);
     carRig.position.copy(toV3(p.x, p.y, st.z));
     carRig.rotation.set(st.pitch, p.a - Math.PI / 2, st.roll, 'YXZ');
-    carModel.rotation.z = 0;   // stiff: no lean into a lane change, the car moves as one block
+    carModel.rotation.z = LEAN_SIGN * THREE.MathUtils.clamp(car.ay * CAR_LEAN.k, -CAR_LEAN.max, CAR_LEAN.max);   // the body leans out of a turn with the side acceleration
     carModel.visible = true;   // (it used to blink 6 times a second while recovering from a hit: a flash. The CRASH message, the shake and the sparks say it already)
     const lit = keys.has('down') || car.accel < -4;
     for (const m of tailLamps) { m.emissive.copy(lit ? BRAKE_GLOW : m.userData.base.color); m.emissiveIntensity = lit ? 4 : m.userData.base.k; }
     wheelRoll = (wheelRoll + car.v * dt / TYRE_R) % (Math.PI * 2);
     for (const w of wheelSpin) w.o.quaternion.copy(w.q0).multiply(dq.setFromAxisAngle(X, wheelRoll));
-    // front wheels stay straight: a lane change is a sideways slide of the whole car, not a steer
-    for (const w of wheelSteer) w.o.quaternion.copy(w.q0);
+    // the front wheels turn with the steering (CAR_LEAN.lock rad at full lock, less at speed: the same value that turns the nose)
+    const lock = car.steer * CAR_LEAN.lock * (1 - 0.5 * THREE.MathUtils.smoothstep(Math.abs(car.v), 5, 30));
+    for (const w of wheelSteer) w.o.quaternion.copy(w.q0).multiply(dq.setFromAxisAngle(Y, WHEEL_SIGN * lock));
     world.render(car, drove, dt);
     signals.update(dt); WIND.value += dt;   // traffic lights; the tree canopies sway
     if (state !== 'driving') { world.updateFrustum(); trams.render(); }   // (world.update keeps the frustum current while driving)
@@ -1524,7 +1497,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     beacon.material.opacity = 0.12 + 0.08 * Math.sin(now / 250);
     spotGroup.visible = state === 'driving' || state === 'countdown' || (cutOn && !cutPlaced);   // (the held picture keeps its marker until it is dark)
     // the lines follow the lane being steered to (a lane tap swings them across); with the autopilot, the line it is steering
-    if (guide) guide.update(state === 'driving' || (cutOn && !cutPlaced), drawS, drawD, (ss) => { if (BOT) return car.targetD; let k = laneK; if (laneAt(ss, k) === null) k = k === 0 ? 1 : 2; return laneAt(ss, k); });
+    if (guide) guide.update(state === 'driving' || (cutOn && !cutPlaced), drawS, drawD, () => (selfSteer ? car.targetD : drawD));   // (the lines run straight ahead from where the car is; the autopilot's, along its own line)
     // overpass cutaway: a soft hole in anything above the runner. ON FOOT it is still needed: that camera is 6 m up and 10 m back, which is
     // inside the Connector's slab under it (the slab's top is ~6.7 m over the street). The DRIVING camera no longer needs it: the Connector
     // used to clear the route by 1.9 m, so the chase camera ran through the slab and the deck walled off the view ahead (that is why the
@@ -1662,10 +1635,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     // the pedal the engine hears: light throttle to hold speed, more to pull away (never floored for long), none
     // coasting or on the brakes
     const pedal = state === 'driving' && keys.has('gas') && !braking ? Math.max(0.2, Math.min(1, 0.3 + car.accel / 9)) : 0;
-    // tyre squeal from a lane change: counted as the side speed the car used to be limited to (3 m/s + 0.6 x road
-    // speed), so the much quicker lane change squeals the tyres no more than before, and not at all from a stop
-    const sideSlip = Math.min(Math.abs(car.dv), 3 + Math.abs(car.v) * 0.6);
-    audio.update(car.v, pedal, Math.min(1, sideSlip / 14 + (braking && car.v > 6 ? 0.6 : 0)), dt);
+    // tyre squeal: from the side acceleration of a hard turn at speed (runner.js `ay`), none at a crawl
+    const sideSlip = Math.min(1, Math.max(0, (Math.abs(car.ay) - 6) / 16) * THREE.MathUtils.smoothstep(Math.abs(car.v), 6, 16));   // hard turning at speed squeals
+    audio.update(car.v, pedal, Math.min(1, sideSlip + (braking && car.v > 6 ? 0.6 : 0)), dt);
     if (RL) {
       // the realistic HUD: the clock as M:SS.ss, your place in the race (the bully is the other racer: red when he's within 2.5 s of you), and
       // how far along the way to the store you are, in 11 steps (0/11 on foot, 11/11 parked)
