@@ -99,7 +99,7 @@ starts as before. Same card, words and colours; motion only. Reduced motion: no 
 *The street behind the card* (`standalone/titlescene.js`, `TitleScene`): a painted dusk street in the card's pink and gold, drawn
 procedurally (gradients, soft brush blobs, grain, rim light) and baked once per size into layers: sky, drifting clouds, far and
 near skyline, left and right buildings, the corner store (awning, lit CORNER STORE sign, window, EBT door), sidewalk and street,
-a lamp. (Now painted art: five WebP layers sharing one frame, see CLAUDE.md; the paragraph describes the behaviour, the procedural street is only the fallback.) They fly in staggered (about 1.5 s) while the card assembles, then hold still (no idle sway since Nov 15 2026: the owner saw the buildings moving); the sign flickers, the lamp glows. Every
+a lamp. (Now painted art: five WebP layers sharing one frame, see CLAUDE.md; the paragraph describes the behaviour, the procedural street is only the fallback.) They fly in staggered (about 1.5 s) while the card assembles, then hold still (no idle sway since Nov 15 2026: the owner saw the buildings moving); the sign swaps words by a slow crossfade (no flicker), the lamp glows (all pulses at most 0.7 a second). Every
 ~9.5 s a gag plays (about 3.5 s) on the sidewalk, alternating direction: the guy sprints across, the bully follows a beat later,
 the guy skids (dust), an E.B.T card flips out of his pocket and spins down to the sidewalk, they run off the far side; the sprites
 are the store's own sheets, drawn like `drawSheet`. A tap during the intro puts every layer in place (no game start). Reduced
@@ -115,15 +115,14 @@ top sit at the padding. `titlescene.js` sets CSS custom properties on
 `#ovTitle` (`--lg`, `--lgTop`, `--olM/E/D`, `--sgX/Y/W/H`) and the class `.art` on every bake (resize, rotate); nothing positions with a
 transform because GSAP owns those. The store sign IS the start button: it swaps between CORNER STORE (the painted original) and TAP TO
 START (`title_signtap.b64`, the same sign with the letters rebuilt, drawn over the store layer with the store's own transform so it
-flies in with it), each held 1.4 s with a neon flicker between (about 55 % dim for 70 ms, the other word for 70 ms, dim again for
-60 ms). The cycle starts when the assembly ends (or at once after a skip tap); reduced motion swaps plainly every 2 s with no flicker;
+flies in with it), each held 1.4 s with a 0.6 s eased crossfade between (TAP TO START fades in over CORNER STORE inside the clip box; no dimming, no flicker: `signK`). The cycle (4 s) starts when the assembly ends (or at once after a skip tap); reduced motion swaps plainly every 2 s;
 nothing runs when the title is hidden. The real `#btnTitle` is an invisible hit area exactly over the sign (at least 44 px tall,
 `aria-label="Tap to start"`, a gold focus ring for keyboard focus only), so Enter / Space, focus and the glide out of the button still
 work. Tapping the sky does nothing, as before. If `title_signtap` fails to decode the sign just does not flash. The font is credited on
 the title's credits line (and so in the win ending's credits).
 
 **Ending (winning the store run only; CAUGHT / THE BULLY GOT YOU! is unchanged).** Three beats, a tap skips to the next:
-1. *Victory:* play freezes, the screen flashes white three times, a 2.4 s synthesised fanfare plays, YOU WIN! slams in with a
+1. *Victory:* play freezes, the dark victory screen fades in softly over 0.7 s (no flash: WCAG 2.3.1), a 2.4 s synthesised fanfare plays, YOU WIN! slams in with a
    shake, you pop up behind a shopping cart, both hands on its handle, hopping and leaning into it, then the score fills part by part like an EXP bar
    (items, drive bonus, checkout, speed bonus, beat him out, never caught: only the parts that applied, the same numbers as
    before) into the total, with a tick sound; the two bonuses get extra flair.
@@ -131,7 +130,7 @@ the title's credits line (and so in the win ending's credits).
    initials, SAVE SCORE and the leaderboard (the same controls and ids as the old end screen), plus ROLL CREDITS and RUN IT BACK / MAIN MENU.
 3. *Credits:* the title and the title screen's credit lines (plus the shopping cart model's) scroll up while you push the cart
    along the bottom (an 8-frame walk, hands on the handle, wheels turning); it ends on RUN IT BACK / MAIN MENU. No names or roles beyond those credit lines.
-Reduced motion: no flashes or counting; the victory screen is one still page and the credits a static list.
+Reduced motion: no fade or counting; the victory screen is one still page and the credits a static list.
 
 ## Store motion: why it was choppy and what fixed it
 

@@ -11,7 +11,7 @@ def sub(m, mask): return Mesh(m.V, m.F[mask], m.N, m.C[mask], m.P[mask], m.T[mas
 def lightbar(roof_y, x0):
     parts = []
     parts.append(box(x0, roof_y + 0.035, 0, 0.30, 0.05, 1.20, 0x15161a, 8))
-    for k, (z0, c_) in enumerate(((-0.30, 0xb10101), (0.30, 0x0108e2))):
+    for k, (z0, c_) in enumerate(((-0.30, 0x0108e2), (0.30, 0x0108e2))):
         parts.append(box(x0, roof_y + 0.095, z0, 0.26, 0.085, 0.50, c_, 9))
     parts.append(box(x0, roof_y + 0.095, 0.0, 0.26, 0.075, 0.12, 0xdadfe3, 9))
     parts.append(box(x0, roof_y + 0.145, 0, 0.30, 0.012, 1.18, 0x15161a, 8))

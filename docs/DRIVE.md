@@ -350,7 +350,7 @@ The drive opens on foot (`state === 'onfoot'`, `updateFoot` in `drive.js`; tunin
   The paragraphs below were written for the old street-locked run (sidewalk lanes, `stepSide`, `streetPath`): where they talk about
   lanes, a curb band or the 9 m pull to the door, the code above is the truth.
 - **On foot.** You start on the right sidewalk of Luckie St (s = 14 m) with the bully 8 m behind you. Your car is parked
-  at the right curb up the block with its **hazards flashing** and a yellow ▼ over it, in the first stretch of parking
+  at the right curb up the block with its **hazards pulsing softly (0.8 a second, never off)** and a yellow ▼ over it, in the first stretch of parking
   lane where it sits level (Luckie St is steep: on its cross-slope a car rolls ~10°, so the spot is picked by measuring
   the car's roll and pitch with `standOn`). **You move the way you move in the store**
   (owner, Nov 2026): put a thumb down anywhere that isn't a button and drag; a gold ring appears there and the knob
@@ -936,3 +936,15 @@ How long START DRIVE takes to reach the first frame, and what was done about it 
 - **Marks.** `performance.getEntriesByType('mark')` filtered to `drive:` gives the phases: start, downloaded, assets-ready, buildCity, upgradeCity, cars-people-ready, crowd, pre-first-frame, first-frame,
   flyover-or-chase-start. `tools-load/net.mjs` (requests + timing on a throttled link), `sum.mjs`, `lastdl.mjs`, `prof.mjs` (CPU profile by phase), `rn.mjs` (Math.random count and state vs another server), `pix.mjs` (frame hash).
   On software WebGL the renderer, render-target and first-frame numbers are the CPU emulating a GPU and mean nothing for a phone; the JS phases (buildCity: landscape `drapedPolygon`, roads `ribbonMesh`, ground sampling) are real CPU.
+
+## No flashing (WCAG 2.3.1; the owner has epilepsy)
+
+Nothing may flash, for every player: no large-area or white/red flashes, nothing cycling faster than once a second, every pulse smooth. What was changed (Nov 16 2026):
+
+- **Win ending** (`winSeq`, csd.js): the three white full-screen flashes (`#flash`, now removed) are one 0.7 s eased fade into the dark victory screen; `winShake` is one soft 0.6 s thump instead of a 20 Hz jitter.
+- **Store**: the active item / shelf glow (`strobe()`, was ~2.4 flashes a second) and the PAY pads (was 3 hard toggles a second) are a 0.7 a second sine at a much smaller amplitude; the red threat edges and the "HE'S COMING" pill border swell at 0.7 a second (the edges by +-12 % only); the Hall of Fame sparkles twinkle one at a time (1.2 s each); the cart hops and rolls at under 1 Hz. Reduced motion holds the glows still.
+- **Title** (titlescene.js): the sign's dim flicker is a 0.6 s eased crossfade (`signK`); the sign light's 1.5 Hz shimmer, its drop-outs and the 11 Hz intro strobe, and the lamp's 2 Hz shimmer are gone (one slow swell, 0.45 a second). The `.pulse` button animation is 2.4 s, 100 % to 70 %.
+- **Drive** (drive.js, both looks): police light bars are BLUE ONLY (Georgia reserves flashing blue for law enforcement): the lamps' swell alternates left/right at 0.8 a second, smooth, never off (was red/blue at 6 toggles a second); the lens vertex colours in `cars/*.cars` and `props.glb` were red on one side, now blue (`drive/tools/cars/police_blue.py`, `build_c.py`); the BUSTED text glow is blue. The car no longer blinks 6 times a second after a hit; the hazards on your parked car swell at 0.8 a second (was a hard 1.3 Hz blink); the token halo pulse is 0.8 a second.
+- **Left as motion, not luminance**: screen/camera shake (store `SHAKE`, drive `shake`: decays in under half a second), character walk cycles and sprite frames. Static stripes (crosswalks, road lines, awnings, the guide chevrons) do not animate.
+
+Measured (headless, fixed clock, relative-luminance swings of 10 % reversing within 1 s, over at least 25 % of the area; before -> after): win sequence 2.5 -> 0 flashes a second over the screen (mean luminance jump 0.98 -> 0.03 a frame); title sign box 2.5 -> 0 (any pixel 3.5 -> 1.0); police light bar crop (realistic) 2.0 -> 0 (comic 0.5 -> 0); item glow, PAY pads and threat edges were already under the 10 % pixel threshold and are now smaller still (mean luminance range 0.0079 -> 0.0072, 0.0075 -> 0.0042, 0.020 -> 0.013). The BUSTED card (a one-way 0.35 s fade) was not in the drive capture window.
