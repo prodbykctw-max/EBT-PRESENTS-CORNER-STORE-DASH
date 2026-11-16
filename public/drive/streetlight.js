@@ -17,7 +17,7 @@ const quiet = (fn) => { const real = Math.random; Math.random = isoRandom; try {
 
 // the lamp head on prop_lamp (props.glb, after the node transform): 8.6 m up, 2.3 m out along the arm (local -Z), measured from the model's vertices
 const HEAD = new THREE.Vector3(0, 8.6, -2.3), UP = new THREE.Vector3(0, 1, 0);
-const POOL_R = 11;   // metres: a cobra-head lamp at 9 m lights the road out to about this
+const POOL_R = 8;   // metres: a cobra-head lamp at 9 m lights the road out to about this
 
 export function lampPools(city, scene) {
   const lamps = city.furniture?.lamp || [];
@@ -28,7 +28,7 @@ export function lampPools(city, scene) {
       uniforms: { uLamp: GLOW.uLamp, uPoolK: GLOW.uPoolK, uCol: { value: new THREE.Color(1.0, 0.7, 0.4) } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }',
       fragmentShader: `uniform float uLamp, uPoolK; uniform vec3 uCol; varying vec2 vUv;
-        void main() { float r = length(vUv - 0.5) * 2.0, a = max(0.0, 1.0 - r * r); a *= a; gl_FragColor = vec4(uCol * a * uLamp * uPoolK * 0.7, 1.0); }`,
+        void main() { float r = length(vUv - 0.5) * 2.0, a = max(0.0, 1.0 - r * r); a *= a; gl_FragColor = vec4(uCol * a * uLamp * uPoolK * 0.6, 1.0); }`,
       blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false, toneMapped: false,
     });
     const im = new THREE.InstancedMesh(geo, mat, lamps.length), m4 = new THREE.Matrix4(), v = new THREE.Vector3(), q = new THREE.Quaternion();
@@ -65,12 +65,12 @@ export function shopSpill(root, city) {
       uniforms: { uLit: GLOW.uLit, uPoolK: GLOW.uPoolK },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }',
       fragmentShader: `uniform float uLit, uPoolK; varying vec2 vUv;
-        void main() { float r = length(vUv - 0.5) * 2.0, a = max(0.0, 1.0 - r * r); a *= a; gl_FragColor = vec4(vec3(1.0, 0.78, 0.5) * a * uLit * min(uPoolK, 1.0) * 0.55, 1.0); }`,
+        void main() { float r = length(vUv - 0.5) * 2.0, a = max(0.0, 1.0 - r * r); a *= a; gl_FragColor = vec4(vec3(1.0, 0.78, 0.5) * a * uLit * min(uPoolK, 1.0) * 0.28, 1.0); }`,
       blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false, toneMapped: false,
     });
     const im = new THREE.InstancedMesh(geo, mat, spots.length), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3();
     spots.forEach(([x, z, w], i) => {
-      m4.compose(v.set(x, city.ground(x, -z) + LEVEL.CURB_TOP + 0.05, z), q.identity(), new THREE.Vector3(w + 6, 1, w + 6));
+      m4.compose(v.set(x, city.ground(x, -z) + LEVEL.CURB_TOP + 0.05, z), q.identity(), new THREE.Vector3(w + 2, 1, w + 2));
       im.setMatrixAt(i, m4);
     });
     im.name = 'shop_spill'; im.frustumCulled = false; im.renderOrder = 3; im.matrixAutoUpdate = false;
