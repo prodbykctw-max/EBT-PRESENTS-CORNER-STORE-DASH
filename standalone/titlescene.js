@@ -302,6 +302,7 @@ function sgTimer(){         // reduced motion has no loop: a plain swap every 2 
 /* ---- the title lettering and the sign button, placed from the painted frame (css custom properties on #ovTitle; csd.js / shell2.html
    style them; no transforms, GSAP owns those). Run on every bake (resize / rotate). ---- */
 function outline(col,w,drop){ var a=[]; for(var i=0;i<16;i++){ var r=i/8*Math.PI; a.push((Math.cos(r)*w).toFixed(2)+"px "+(Math.sin(r)*w).toFixed(2)+"px 0 "+col); } a.push("0 "+drop.toFixed(2)+"px 0 "+col); return a.join(","); }
+var LOGO_GAP=8, LOGO_MIN=22;   // px clear above the roof; the smallest CORNER STORE size the logo is shrunk to
 function layoutTitle(){
   var card=host&&host.querySelector(".card"), main=document.getElementById("ttMain"), btn=document.getElementById("btnTitle");
   if(!card||!main||!L||!L.art) return;
@@ -309,12 +310,14 @@ function layoutTitle(){
   host.classList.add("art");
   st.setProperty("--lg","200px"); var w200=main.offsetWidth||1;
   var fs=200*Math.min(VW*0.88,620)/w200;                                 // CORNER STORE fitted to min(88vw, 620px) wide
-  st.setProperty("--lg",fs.toFixed(2)+"px");
-  st.setProperty("--olM",outline(C.navy,Math.max(2,fs*0.07),fs*0.12));
-  st.setProperty("--olE",outline(C.navy,Math.max(1.5,fs*0.035),0));
-  st.setProperty("--olD",outline(C.navy,Math.max(2,fs*0.06),fs*0.09));
-  var pad=parseFloat(getComputedStyle(host).paddingTop)||0, roof=L.oy+FR.roof*s, h=card.offsetHeight;   // centred between the top padding and the rooftop line; if it does not fit, its top is at the padding
-  st.setProperty("--lgTop",(roof-pad>=h? pad+(roof-pad-h)/2 : pad).toFixed(2)+"px");
+  var pad=parseFloat(getComputedStyle(host).paddingTop)||0, roof=L.oy+FR.roof*s, avail=roof-LOGO_GAP-pad;   // the sky between the top padding and the rooftop line (8 px kept clear above the roof)
+  var set=function(f){ fs=f; st.setProperty("--lg",f.toFixed(2)+"px");
+    st.setProperty("--olM",outline(C.navy,Math.max(2,f*0.07),f*0.12));
+    st.setProperty("--olE",outline(C.navy,Math.max(1.5,f*0.035),0));
+    st.setProperty("--olD",outline(C.navy,Math.max(2,f*0.06),f*0.09)); return card.offsetHeight; };
+  var h=set(fs), shrunk=false;
+  for(var it=0; it<5&&h>avail&&fs>LOGO_MIN; it++){ h=set(Math.max(LOGO_MIN,fs*avail/h)); shrunk=true; }   // too tall for the sky (short landscape screens): scale the whole logo down so it never sits over the buildings; at the floor it stays at the padding
+  st.setProperty("--lgTop",(shrunk&&h<=avail? pad+(avail-h)/2 : roof-pad>=h? pad+(roof-pad-h)/2 : pad).toFixed(2)+"px");   // centred in the sky; if even the floor does not fit, its top is at the padding
   var S=FR.signtap, bh=Math.max(44,S.h*s);                               // the invisible real button, exactly over the painted sign (>= 44 px tall)
   st.setProperty("--sgX",(L.ox+S.x*s).toFixed(2)+"px"); st.setProperty("--sgW",(S.w*s).toFixed(2)+"px");
   st.setProperty("--sgY",(L.oy+(S.y+S.h/2)*s-bh/2).toFixed(2)+"px"); st.setProperty("--sgH",bh.toFixed(2)+"px");

@@ -110,8 +110,8 @@ motion: one still frame, no loop, no gag. One canvas inside `#ovTitle` (z-index 
 *The painted title (when the painted street is in use; the plain street keeps the boxed card and the yellow button).* The card has no
 box: EBT PRESENTS / CORNER STORE / DASH are lettering on the sky in Sedgwick Ave Display (SIL OFL 1.1, inlined; the assembly waits up to
 1.5 s for it): CORNER STORE gold, fitted to min(88vw, 620px) wide, with a navy outline and drop shadow; EBT PRESENTS cream; DASH white.
-The logo is centred in the sky between the screen's top padding and the rooftop line (frame y 511, `FR.roof`); if it does not fit, its
-top sits at the padding (on a short landscape phone it then reaches down over the roof). `titlescene.js` sets CSS custom properties on
+The logo is centred in the sky between the screen's top padding and the rooftop line (frame y 511, `FR.roof`); if it is taller than that gap (less 8 px kept clear above the roof) the whole logo is scaled down to fit (CORNER STORE floor 22 px; on a short landscape phone about 87 px); only below that floor does its
+top sit at the padding. `titlescene.js` sets CSS custom properties on
 `#ovTitle` (`--lg`, `--lgTop`, `--olM/E/D`, `--sgX/Y/W/H`) and the class `.art` on every bake (resize, rotate); nothing positions with a
 transform because GSAP owns those. The store sign IS the start button: it swaps between CORNER STORE (the painted original) and TAP TO
 START (`title_signtap.b64`, the same sign with the letters rebuilt, drawn over the store layer with the store's own transform so it
