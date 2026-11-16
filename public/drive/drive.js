@@ -25,7 +25,7 @@ import { resolveLook, fallbackToComic } from './mode.js';
 import { WIND, NEAR_CUT } from './landscape.js';
 import { Guide } from './guide.js';
 import { ImpactFX } from './fx.js';
-import { fetchWeather, applyWeather } from './weather.js';
+import { fetchWeather, applyWeather, relight } from './weather.js';
 import { warm } from './warm.js';
 import * as SkeletonUtils from './vendor/SkeletonUtils.js';
 import { makeBullyMaterial, makeRunClip, makeStandClip, addArmSwing, ARMS, MODEL_H, PLAYER_H, BULLY_H } from './people.js';
@@ -273,7 +273,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const city = cityStep.value;
   mk('buildCity');
   if (frozen()) await macrotask();
-  if (RL) RL.upgradeCity({ city, T: realTex, scene });   // PBR facades, worn roads, concrete, lit trees (real.js)
+  if (RL) RL.upgradeCity({ city, T: realTex, scene, hero: hero.scene });   // PBR facades, worn roads, concrete, lit trees (real.js)
   mk('upgradeCity');
   if (frozen()) await macrotask();
   scene.add(city.group, hero.scene);
@@ -393,6 +393,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   for (const m of tailLamps) m.userData.base = { color: m.emissive.clone(), k: m.emissiveIntensity };
   const BRAKE_GLOW = new THREE.Color(1, 0.06, 0.03);
   const carRig = new THREE.Group(); carRig.add(carModel); carModel.position.z = REAR_AXLE;
+  const carSpot = RL ? RL.carLights(carRig) : null;   // the realistic look's headlights: one spot light, there only while it is dark (streetlight.js)
   // wheel pivots from the car model: *_SPIN roll about their axle (local X), the front *_STEER turn about up (local Y)
   const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), dq = new THREE.Quaternion();
   const pivot = (re) => { const out = []; carModel.traverse((o) => { if (!o.isMesh && re.test(o.name)) out.push({ o, q0: o.quaternion.clone() }); }); return out; };
@@ -1621,7 +1622,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
 
     if (RL) {   // the realistic look's shadow box rides a little ahead of the car and moves in whole shadow texels (no shimmer)
       const yawF = state === 'onfoot' ? camYaw : camA, fwd = tmp.set(Math.cos(yawF), 0, -Math.sin(yawF));   // (on foot the shadow box follows the runner and the way the camera faces)
-      RL.placeSun(sun, state === 'onfoot' ? (fly ? flyFocus : me.o.position) : carRig.position, fwd, sun.userData.dir);
+      RL.placeSun(sun, state === 'onfoot' ? (fly ? flyFocus : me.o.position) : carRig.position, fwd, sun.userData.dir, !!fly);   // (a wider shadow box while the flyover plays)
     } else {
       const sunAt = state === 'onfoot' ? (fly ? flyFocus : me.o.position) : carRig.position;
       sun.position.copy(sunAt).add(tmp.copy(sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35)).multiplyScalar(220));
@@ -1757,6 +1758,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     three: { scene, camera, carRig, THREE, renderer },
     ui: { flash, pop, bump, setHint, showBusted, gsap: G },   // the HUD's motion, for tests
     tick: (dt) => { tickDt = dt; try { frame(); } finally { tickDt = null; } },
+    // QA / previews: light the drive for another instant (ms) and weather without reloading; returns the phase name
+    relight: RL ? (when, wx) => { if (wx) Object.assign(weather, wx); const s2 = relight(weather, { scene, renderer, sun, hemi, roads: city.surfaces }, when); sky.dome = s2.dome; sky.env = s2.env; RL.tuneWeather(weather, { scene, renderer, sun, hemi, look: comic }); carSpot?.userData.refresh?.(); return scene.userData.light.phase; } : null,
     snapshot: (q = 0.85) => { city.cull(camera, scene.fog); comic.render(); return renderer.domElement.toDataURL('image/jpeg', q); } });
   // live getters (Object.assign would have frozen their values at assignment time)
   Object.defineProperties(api, { state: { get: () => state }, time: { get: () => t }, race: { get: () => race }, fly: { get: () => (fly ? { t: fly.t, dur: FLY.dur } : null) } });   // (fly: the opening flyover, null once it is over or if there is none)

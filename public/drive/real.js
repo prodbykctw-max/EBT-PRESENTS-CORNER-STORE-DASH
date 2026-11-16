@@ -13,7 +13,10 @@
 // customProgramCacheKey, so nothing the comic look relies on is replaced.
 import * as THREE from './vendor/three.module.min.js';
 import { hooks } from './mode.js';
+import { GLOW } from './daylight.js';
+import { lampPools, lightHero } from './streetlight.js';
 export { RealLook } from './real-post.js';
+export { carLights } from './streetlight.js';
 
 const W = new THREE.Vector3(0.2126, 0.7152, 0.0722);
 
@@ -93,7 +96,7 @@ function propGeo(g, name) {
     const ref = car ? 0.7 : Math.min(0.5, 0.25 * (top - low));
     let ao = 0.55 + 0.45 * THREE.MathUtils.smoothstep(y, 0, ref);
     if (ny < -0.3) ao *= 0.6;
-    out[i * 2] = car ? (CAR_PARTS[hex(i)] ?? 0) : 0; out[i * 2 + 1] = ao;
+    out[i * 2] = car ? (CAR_PARTS[hex(i)] ?? 0) : (name === 'prop_lamp' && hex(i) === 'ffe9b1' ? 10 : 0); out[i * 2 + 1] = ao;   // (10: the street lamp's lens, lit at night)
   }
   g.setAttribute('aProp', new THREE.BufferAttribute(out, 2));
 }
@@ -101,13 +104,14 @@ function propGeo(g, name) {
 function propMaterial() {
   const m = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.05, clearcoat: 1, clearcoatRoughness: 0.05 });
   chain(m, (sh) => {
+    sh.uniforms.uLamp = GLOW.uLamp;
     sh.vertexShader = rep(rep(sh.vertexShader, '#include <common>', 'attribute vec2 aProp; varying vec2 vProp;'),
       '#include <color_vertex>', `vProp = aProp;
       #ifdef USE_INSTANCING_COLOR
         // undo the blanket tint and re-apply it only to "paint" (white) vertices (as runner.js does for the comic look)
         vColor.rgb = color.rgb * mix(vec3(1.0), instanceColor.rgb, step(0.985, min(color.r, min(color.g, color.b))));
       #endif`);
-    let f = rep(sh.fragmentShader, '#include <common>', 'varying vec2 vProp;');
+    let f = rep(sh.fragmentShader, '#include <common>', 'varying vec2 vProp; uniform float uLamp;');
     f = rep(f, '#include <metalnessmap_fragment>', `
       int pc = int(vProp.x + 0.5); float pAO = vProp.y > 0.001 ? vProp.y : 1.0;
       float pCoat = 0.0, pCoatR = 0.05; vec3 pEmit = vec3(0.0);
@@ -119,15 +123,17 @@ function propMaterial() {
       } else if (pc == 3) {                           // rubber
         diffuseColor.rgb = max(diffuseColor.rgb, vec3(0.03)); roughnessFactor = 0.85; metalnessFactor = 0.0;
       } else if (pc == 4) {                           // headlamp
-        diffuseColor.rgb = vec3(0.9, 0.88, 0.8); roughnessFactor = 0.12; metalnessFactor = 0.0; pCoat = 1.0; pCoatR = 0.02; pEmit = vec3(2.4, 2.25, 1.9);
+        diffuseColor.rgb = vec3(0.9, 0.88, 0.8); roughnessFactor = 0.12; metalnessFactor = 0.0; pCoat = 1.0; pCoatR = 0.02; pEmit = vec3(2.4, 2.25, 1.9) * mix(1.0, 2.6, uLamp);   // (headlamps: brighter once the street lamps are on; steady)
       } else if (pc == 5) {                           // tail lamp
-        roughnessFactor = 0.15; metalnessFactor = 0.0; pCoat = 1.0; pCoatR = 0.03; pEmit = vec3(2.6, 0.06, 0.03);
+        roughnessFactor = 0.15; metalnessFactor = 0.0; pCoat = 1.0; pCoatR = 0.03; pEmit = vec3(2.6, 0.06, 0.03) * mix(1.0, 1.35, uLamp);
       } else if (pc == 6) {                           // chrome and bright metal
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.72), 0.6); roughnessFactor = 0.26; metalnessFactor = 0.95;
       } else if (pc == 8) {                           // satin trim
         diffuseColor.rgb = max(diffuseColor.rgb, vec3(0.02)); roughnessFactor = 0.5; metalnessFactor = 0.1;
       } else if (pc == 9) {                           // light-bar lens
         roughnessFactor = 0.2; metalnessFactor = 0.0; pCoat = 1.0; pCoatR = 0.03; pEmit = diffuseColor.rgb * 1.6;
+      } else if (pc == 10) {                          // street lamp lens: a steady warm glow once the lamps come on (uLamp), pale glass by day
+        diffuseColor.rgb = vec3(0.8, 0.72, 0.55); roughnessFactor = 0.2; metalnessFactor = 0.0; pEmit = vec3(1.0, 0.7, 0.38) * (0.15 + 7.0 * uLamp);
       } else { roughnessFactor = 0.62; metalnessFactor = 0.04; }`);
     f = rep(f, '#include <lights_physical_fragment>', 'material.clearcoat = pCoat; material.clearcoatRoughness = min(1.0, pCoatR + geometryRoughness);');
     f = rep(f, '#include <emissivemap_fragment>', 'totalEmissiveRadiance += pEmit;');
@@ -152,35 +158,37 @@ export function shadows(sun, mobile) {
   sun.shadow.bias = -0.0002; sun.shadow.normalBias = mobile ? 0.07 : 0.05;
   sun.userData.texel = (2 * half) / size;   // metres per shadow texel across the light's view
   sun.userData.lead = 16;                   // the box is centred a little ahead of the car: the camera looks ahead
+  // a low sun's shadows are long (a 30 m building throws 240 m at 7 degrees): the light stands further off and sees further, so tall buildings toward the sun are in the map
+  sun.userData.dist = 330; sun.shadow.camera.far = 760;
+  sun.userData.half = { near: half, fly: mobile ? 118 : 150 };   // the opening flyover looks over far more street than the chase does: a bigger box while it plays
+  sun.userData.size = size;
 }
 
 /** put the sun (and so its shadow box) round the car, ahead of it, snapped to whole shadow texels so the shadows don't shimmer as it moves */
-export function placeSun(sun, carPos, fwd, dir) {
+export function placeSun(sun, carPos, fwd, dir, wide = false) {
+  const want = wide ? sun.userData.half.fly : sun.userData.half.near, cam = sun.shadow.camera;
+  if (cam.right !== want) { Object.assign(cam, { left: -want, right: want, top: want, bottom: -want }); cam.updateProjectionMatrix(); sun.userData.texel = (2 * want) / sun.userData.size; sun.userData.lead = wide ? 0 : 16; }
   const texel = sun.userData.texel, t = carPos.clone().addScaledVector(fwd, sun.userData.lead);
   const d = dir.clone().normalize(), r = new THREE.Vector3(0, 1, 0).cross(d).normalize(), u = d.clone().cross(r);
   const a = t.dot(r), b = t.dot(u);
   t.addScaledVector(r, Math.round(a / texel) * texel - a).addScaledVector(u, Math.round(b / texel) * texel - b);
-  sun.target.position.copy(t); sun.position.copy(t).addScaledVector(d, 220);
+  sun.target.position.copy(t); sun.position.copy(t).addScaledVector(d, sun.userData.dist || 220);
 }
 
-/** the comic look's flat light (a strong hemisphere light, a 0.55 environment, exposure bumped under cloud) becomes physical:
- *  a warm sun, a weak hemisphere fill, and the sky's own environment doing most of the ambient and all of the reflections */
+/** the realistic light: the sun where it really is (daylight.js already worked it out for this instant and the weather: scene.userData.light),
+ *  its colour and strength, the hemisphere fill, the sky's own environment doing most of the ambient and all of the reflections, the haze and the grade */
 export function tuneWeather(w, { scene, renderer, sun, hemi, look }) {
-  const cloud = w.cloud / 100, grey = Math.min(1, cloud * 0.85 + w.rain * 0.3);
-  sun.intensity = THREE.MathUtils.lerp(6.0, 2.0, grey);                  // a hard sun and a weak fill: deep, cool shadows
-  sun.color.set(cloud > 0.7 ? 0xe6edf6 : 0xffeed6);
-  hemi.color.set(0xe4e8ee); hemi.groundColor.set(0x8a7a64);              // a near-neutral sky fill over a warm ground bounce (the comic look's is blue-tinted)
-  hemi.intensity = THREE.MathUtils.lerp(0.9, 1.0, cloud);              // the fill that keeps shade neutral (the sky environment alone made it blue)
-  scene.environmentIntensity = THREE.MathUtils.lerp(0.9, 1.0, grey);
-  renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = 1.0;
+  const L = scene.userData.light, cloud = w.cloud / 100;
+  sun.intensity = L.sunI; sun.color.copy(L.sunColor);                  // the sun by day (a hard sun and a weak fill: deep, cool shadows), the moon at night
+  hemi.color.copy(L.hemiSky); hemi.groundColor.copy(L.hemiGround); hemi.intensity = L.hemiI;
+  scene.environmentIntensity = L.env;
+  renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = L.exposure;
   const fog = w.code === 45 || w.code === 48;
   // aerial haze is the post pass's job (from depth); the linear fog is left only to hide the cull edge (city.cull reads fog.far, so that stays)
   scene.fog.near = scene.fog.far * 0.7;
-  // the haze colour: the horizon pulled 30% toward the zenith and darkened, not the pale horizon itself
-  const sky = scene.getObjectByName('sky')?.material.uniforms, haze = scene.fog.color.clone();
-  if (sky) haze.lerp(sky.uZenith.value, 0.3);
-  haze.multiplyScalar(0.8);
-  look.setAtmosphere({ haze, sunColor: sun.color, sunDir: sun.userData.dir, k: fog ? 0.006 : THREE.MathUtils.lerp(0.0004, 0.0009, grey), mix: fog ? 0.9 : 0.45 });
+  look.setAtmosphere({ haze: L.haze, sunColor: L.sunColor, sunDir: L.sunDir, k: fog ? 0.006 : THREE.MathUtils.lerp(0.0004, 0.0009, Math.min(1, cloud * 0.85 + w.rain * 0.3)), mix: fog ? 0.9 : 0.45 });
+  const u = look.m.fin.uniforms; u.uSat.value = L.sat; u.uContrast.value = L.con; u.uTint.value.copy(L.tint);
+  scene.getObjectByName('city_pools') && (scene.getObjectByName('city_pools').visible = L.lamp > 0.01);
 }
 
 // ------------------------------------------------------------------ the world
@@ -188,16 +196,17 @@ function wallPatch(T) {
   return (sh) => {
     Object.assign(sh.uniforms, {
       rBrickD: { value: T.brickD }, rBrickN: { value: T.brickN }, rConcD: { value: T.concD }, rConcN: { value: T.concN }, rCurtD: { value: T.curtD }, rCurtN: { value: T.curtN },
-      rMean: { value: new THREE.Vector3(T.mean.brickD, T.mean.concD, T.mean.curtD) },
+      rMean: { value: new THREE.Vector3(T.mean.brickD, T.mean.concD, T.mean.curtD) }, uLit: GLOW.uLit,
     });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec3 aInfo; varying vec3 vInfo; varying vec2 vFac;')
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvInfo = aInfo; vFac = uv;');
     let f = sh.fragmentShader;
     f = rep(f, '#include <common>', `
-      uniform sampler2D rBrickD, rBrickN, rConcD, rConcN, rCurtD, rCurtN; uniform vec3 rMean; varying vec3 vInfo; varying vec2 vFac;
+      uniform sampler2D rBrickD, rBrickN, rConcD, rConcN, rCurtD, rCurtN; uniform vec3 rMean; uniform float uLit; varying vec3 vInfo; varying vec2 vFac;
       ${GLSL_TBN}
       float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      vec3 wEm = vec3(0.0), wEmD = vec3(0.0);   // light given off: wEm only when it is dark (uLit), wEmD always (a sign's own faint colour)
       float wRough = 0.8, wMetal = 0.0, wAO = 1.0; vec3 wNr = vec3(0.5, 0.5, 1.0); vec2 wTilt = vec2(0.0), wUv = vec2(0.0);`);
     f = rep(f, '#include <color_fragment>', `
       float style = vInfo.x, height = vInfo.y, seed = vInfo.z;
@@ -222,6 +231,9 @@ function wallPatch(T) {
         diffuseColor.rgb = mix(diffuseColor.rgb, tint * 0.5, band);
         wRough = mix(0.5, clamp(nr.b * 0.5 + 0.03, 0.03, 0.4), pm * (1.0 - band)); wMetal = pm * (1.0 - band) * 0.25;
         wAO *= 1.0 - 0.15 * band;
+        // night: whole floors of the tower are lit, with the odd dark panel (steady, hashed from the panel's place)
+        vec2 tid = floor(vFac / vec2(1.55, 3.9)); float tfl = h21(vec2(tid.y, seed * 13.0 + 1.0)), tpc = h21(tid + seed * 91.0);
+        wEm += mix(vec3(1.0, 0.8, 0.52), vec3(0.78, 0.88, 1.0), step(0.6, h21(tid + 9.0 + seed))) * step(0.36, tfl) * step(0.14, tpc) * pm * (1.0 - band) * 0.8;
       } else {
         float bay = isTower ? 1.55 : (style > 1.5 ? 2.4 : 3.0), floorH = style > 2.5 ? 3.9 : 3.6;
         vec2 cell = vec2(fract(vFac.x / bay), fract(vFac.y / floorH)), id = vec2(floor(vFac.x / bay), floor(vFac.y / floorH));
@@ -245,10 +257,29 @@ function wallPatch(T) {
         wTilt = (t0 - t1) * win * 0.9;
         wNr.xy = mix(nr.xy, vec2(0.5), win * (1.0 - rim));
         wAO *= (1.0 - 0.3 * rim * win) * mix(1.0, 0.82, win);
+        // ---- the street's own light: lit rooms, and a shop sign over each ground-floor storefront
+        float grd = 1.0 - step(0.5, id.y);
+        float roomR = h21(id * 1.31 + seed * 53.0 + 4.7), roomC = h21(id.yx * 2.17 + seed * 29.0 + 1.3);
+        vec3 wc = roomC < 0.55 ? vec3(1.0, 0.7, 0.36) : (roomC < 0.85 ? vec3(0.95, 0.88, 0.7) : vec3(0.55, 0.65, 1.0));   // warm bulbs, white, and the odd TV blue
+        wEm += wc * win * (1.0 - rim) * step(grd > 0.5 ? 0.12 : 0.5, roomR) * mix(0.6, 1.5, roomR) * (grd > 0.5 ? 1.4 : 1.0);
+        if (grd > 0.5 && style < 2.5) {
+          float bw = bay * 2.0, sid = floor(vFac.x / bw);
+          vec2 q = (vec2(fract(vFac.x / bw), cell.y) - vec2(0.5, 0.9)) / vec2(0.42, 0.075);
+          float inB = step(abs(q.x), 1.0) * step(abs(q.y), 1.0) * step(0.35, h21(vec2(sid, seed * 17.0 + 2.0))) * step(0.0, vFac.y);
+          float pk = h21(vec2(sid + 3.0, seed * 7.0));
+          vec3 sc = pk < 0.16 ? vec3(1.0, 0.1, 0.08) : pk < 0.32 ? vec3(1.0, 0.72, 0.08) : pk < 0.48 ? vec3(0.1, 0.9, 0.32) : pk < 0.64 ? vec3(0.08, 0.72, 1.0) : pk < 0.8 ? vec3(1.0, 0.18, 0.72) : vec3(1.0, 0.45, 0.08);
+          float glyph = step(0.42, h21(vec2(floor((q.x * 0.5 + 0.5) * 11.0), floor((q.y * 0.5 + 0.5) * 2.0) + sid * 5.0 + seed * 7.0)));
+          float edge = smoothstep(0.74, 0.88, max(abs(q.x), abs(q.y))), tube = max(glyph * (1.0 - edge), edge);
+          diffuseColor.rgb = mix(diffuseColor.rgb, mix(sc * 0.06, mix(sc * 0.5, vec3(0.7, 0.66, 0.55), glyph), tube), inB);   // by day: a painted sign, readable
+          wEm += sc * tube * inB * 3.0;                    // at night: neon-bright lettering and a lit border (steady)
+          wEmD += sc * tube * inB * 0.06;
+          wRough = mix(wRough, 0.3, inB);
+        }
       }
       diffuseColor.rgb *= mix(1.0, 0.8, 1.0 - smoothstep(0.0, 0.25, vFac.y));       // street grime`);
     f = rep(f, '#include <roughnessmap_fragment>', 'roughnessFactor = wRough;');
     f = rep(f, '#include <metalnessmap_fragment>', 'metalnessFactor = wMetal;');
+    f = rep(f, '#include <emissivemap_fragment>', 'totalEmissiveRadiance += wEm * uLit + wEmD;');
     f = rep(f, '#include <normal_fragment_maps>', `{ vec3 mN = rNormal(wNr.xy, 1.0); mN.xy += wTilt; mN = normalize(mN); normal = normalize(rTBN(-vViewPosition, normal, wUv) * mN); }`, 'replace');
     f = rep(f, '#include <aomap_fragment>', 'reflectedLight.indirectDiffuse *= wAO; reflectedLight.indirectSpecular *= mix(1.0, wAO, 0.6);', 'replace');
     sh.fragmentShader = f;
@@ -353,8 +384,10 @@ function faceTerrainUp(city) {
 }
 
 /** change the city's materials after it is built and before anything is drawn or compiled */
-export function upgradeCity({ city, T, scene }) {
+export function upgradeCity({ city, T, scene, hero = null }) {
   faceTerrainUp(city);
+  if (hero) lightHero(hero, chain);   // the hand-built storefronts: their painted signs and shop windows light up at night
+  const pools = lampPools(city, scene); if (pools) scene.add(pools);   // soft light pools under the street lamps (streetlight.js)
   const seen = new Set(), once = (m, tag, fn) => { if (seen.has(m)) return; seen.add(m); (tag === 'walls' ? swap : chain)(m, fn, tag); };
   city.group.traverse((o) => {
     if (!o.isMesh) return;
@@ -406,6 +439,7 @@ export function upgradeCar(carModel, T) {
     else if (k === '04') { o.material = phys(src, { roughness: 0.85, metalness: 0, roughnessMap: null, metalnessMap: null, color: new THREE.Color(0.9, 0.9, 0.9) }); detail(o.material, 'rubber'); }
     else if (k === '06' || k === '07') o.material = phys(src, { envMapIntensity: 1.2 });
     else if (k === '02' || k === '03' || k === '08') o.material = phys(src, { clearcoat: k === '08' ? 1 : 0, clearcoatRoughness: 0.08 });
+    else if (k === '09') o.userData.headlamp = true;   // (streetlight.js carLights puts the headlights where these are)
     // 09 (headlamp), 10 (tail lamp) and 11 (marker) keep their own materials: drive.js finds the brake lamps by their emissive
   });
 }

@@ -97,11 +97,11 @@ export const atlantaClock = (t) => new Intl.DateTimeFormat('en-US', { timeZone: 
 //   sun: colour, strength (the day's was 6.0 at the old fixed sun); hemi: sky / ground colour and strength; env: the sky's reflected light;
 //   envSat: how much of the sky's colour the ambient keeps; ex: exposure; sat / con / tint: the final pass's grade
 const KEYS = [
-  { el: -18, sky: [0x040818, 0x060c20, 0x0a1230, 0x101a3a, 0x1a2646], sun: 0x000000, sunI: 0, hemi: 0x24326a, hemiG: 0x14141e, hemiI: 0.15, env: 0.15, envSat: 0.4, ex: 1.25, sat: 0.95, con: 0.1, tint: 0x9aa8d0, cloud: 0x10141f },
-  { el: -10, sky: [0x0b1236, 0x131b48, 0x1f2658, 0x40306a, 0x6a3a6c], sun: 0x000000, sunI: 0, hemi: 0x34447e, hemiG: 0x1c1822, hemiI: 0.22, env: 0.22, envSat: 0.5, ex: 1.2, sat: 1.02, con: 0.1, tint: 0xb4b0d6, cloud: 0x2a2a46 },
-  { el: -6.5, sky: [0x1a1446, 0x2d2468, 0x5a3584, 0xa24a86, 0xe0607a], sun: 0x000000, sunI: 0, hemi: 0x6a5a98, hemiG: 0x2a2028, hemiI: 0.34, env: 0.34, envSat: 0.55, ex: 1.18, sat: 1.1, con: 0.12, tint: 0xe0b8c8, cloud: 0x7a4a80 },
-  { el: -3, sky: [0xd81ea6, 0xf83a88, 0xfb6070, 0xfc9f48, 0xfece28], sun: 0xff7a40, sunI: 0.0, hemi: 0xd05a98, hemiG: 0x5a3a48, hemiI: 0.55, env: 0.5, envSat: 0.65, ex: 1.12, sat: 1.14, con: 0.12, tint: 0xffd0b8, cloud: 0xff6a8a },
-  { el: 0, sky: [0x5a3aa6, 0xc03a8c, 0xf0586c, 0xff8a40, 0xffb23c], sun: 0xff6a30, sunI: 1.0, hemi: 0xc57098, hemiG: 0x6a4a40, hemiI: 0.65, env: 0.58, envSat: 0.6, ex: 1.08, sat: 1.12, con: 0.12, tint: 0xffc89a, cloud: 0xff7a5a },
+  { el: -18, sky: [0x040818, 0x060c20, 0x0a1230, 0x101a3a, 0x1a2646], sun: 0x000000, sunI: 0, hemi: 0x2a3a70, hemiG: 0x14141e, hemiI: 0.09, env: 0.09, envSat: 0.4, ex: 1.2, sat: 0.95, con: 0.1, tint: 0x9aa8d0, cloud: 0x10141f },
+  { el: -10, sky: [0x0b1236, 0x131b48, 0x1f2658, 0x40306a, 0x6a3a6c], sun: 0x000000, sunI: 0, hemi: 0x34447e, hemiG: 0x1c1822, hemiI: 0.16, env: 0.16, envSat: 0.45, ex: 1.18, sat: 1.02, con: 0.1, tint: 0xb4b0d6, cloud: 0x2a2a46 },
+  { el: -6.5, sky: [0x1a1446, 0x2d2468, 0x5a3584, 0xa24a86, 0xe0607a], sun: 0x000000, sunI: 0, hemi: 0x7a6a9a, hemiG: 0x2a2028, hemiI: 0.3, env: 0.26, envSat: 0.35, ex: 1.15, sat: 1.1, con: 0.12, tint: 0xe0b8c8, cloud: 0x7a4a80 },
+  { el: -3, sky: [0xd81ea6, 0xf83a88, 0xfb6070, 0xfc9f48, 0xfece28], sun: 0xff7a40, sunI: 0.0, hemi: 0xa88a9c, hemiG: 0x5a3a48, hemiI: 0.5, env: 0.4, envSat: 0.3, ex: 1.1, sat: 1.12, con: 0.12, tint: 0xffe2cc, cloud: 0xff6a8a },
+  { el: 0, sky: [0x5a3aa6, 0xc03a8c, 0xf0586c, 0xff8a40, 0xffb23c], sun: 0xff6a30, sunI: 1.0, hemi: 0xb89098, hemiG: 0x6a4a40, hemiI: 0.62, env: 0.55, envSat: 0.3, ex: 1.08, sat: 1.12, con: 0.12, tint: 0xffc89a, cloud: 0xff7a5a },
   { el: 4, sky: [0x3a5aa4, 0x6a80b8, 0xc89aa0, 0xf4aa74, 0xffbc72], sun: 0xffa55c, sunI: 3.2, hemi: 0xc7b8c9, hemiG: 0x8a6a50, hemiI: 0.75, env: 0.78, envSat: 0.4, ex: 1.03, sat: 1.12, con: 0.13, tint: 0xffd29a, cloud: 0xffc89a },
   { el: 10, sky: [0x2c68c2, 0x4a86cd, 0x86a9d4, 0xdcc0a8, 0xf4d2a4], sun: 0xffcc8c, sunI: 4.6, hemi: 0xdde0ea, hemiG: 0x8a7a64, hemiI: 0.85, env: 0.86, envSat: 0.28, ex: 1.0, sat: 1.06, con: 0.12, tint: 0xffe6c0, cloud: 0xfff0e0 },
   { el: 24, sky: [0x2468c8, 0x3f86dc, 0x6aa6e8, 0x9cc6ee, 0xcadef0], sun: 0xffe6c4, sunI: 5.8, hemi: 0xe4e8ee, hemiG: 0x8a7a64, hemiI: 0.9, env: 0.9, envSat: 0.2, ex: 1.0, sat: 1.0, con: 0.12, tint: 0xfff5e6, cloud: 0xffffff },
@@ -109,7 +109,9 @@ const KEYS = [
 ];
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const col = (h) => new THREE.Color(h);
-const NUM = ['sunI', 'hemiI', 'env', 'envSat', 'ex', 'sat', 'con'], COL = ['sun', 'hemi', 'hemiG', 'tint', 'cloud'];
+const NUM = ['sunI', 'hemiI', 'env', 'envSat', 'ex', 'sat', 'con'], COL = ['sun', 'hemi', 'hemiG', 'cloud'];
+// the grade's tint multiplies display values (after the sRGB conversion), so it is a plain RGB triple, not a colour-managed one
+const raw = (h) => new THREE.Color().setRGB(((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255);
 const GREY = new THREE.Color(0x9aa3ad), PALE = new THREE.Color(0xe6edf6);
 
 /** the moon's direction: a fixed spot in the south-east sky (the real moon's phase and place are not modelled: it is a night light) */
@@ -140,7 +142,7 @@ export function lightFor(t, w = { cloud: 10, rain: 0, code: 0 }) {
   const sunI = num.sunI * THREE.MathUtils.lerp(1, 2 / 6, grey);
   const sunColor = c.sun.clone().lerp(PALE, smooth(0.5, 0.9, cloud) * 0.6 * dayW);
   const night = smooth(-6, -14, el);                  // 0 until the end of civil twilight, 1 at night
-  const moonI = 0.7 * night * (1 - grey * 0.5);
+  const moonI = 0.32 * night * (1 - grey * 0.5);
   const sunDir = sunVector(el, az);
   const useSun = el > -2.5;
   const lightDir = useSun ? sunVector(Math.max(el, 7), az) : MOON.clone();
@@ -153,6 +155,6 @@ export function lightFor(t, w = { cloud: 10, rain: 0, code: 0 }) {
     hemiSky: c.hemi.clone(), hemiGround: c.hemiG.clone(), hemiI: num.hemiI * (1 + 0.11 * cloud),
     env: num.env * (1 + 0.11 * grey), envSat: num.envSat, exposure: num.ex + cloud * 0.15 * dayW,
     sky, zenith, horizon, haze: horizon.clone().lerp(zenith, 0.3).multiplyScalar(0.8),
-    sat: num.sat, con: num.con, tint: c.tint, cloudTint: c.cloud, lit, lamp,
+    sat: num.sat, con: num.con, tint: raw(A.tint).lerp(raw(B.tint), f), cloudTint: c.cloud, lit, lamp,
   };
 }
