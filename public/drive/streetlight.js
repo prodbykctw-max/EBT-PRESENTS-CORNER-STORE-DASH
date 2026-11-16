@@ -57,7 +57,8 @@ export function shopSpill(root, city) {
       if (n.lengthSq() < 1e-6) return; n.normalize();
       box.setFromObject(o); const c = box.getCenter(new THREE.Vector3()), w = Math.min(14, Math.max(box.max.x - box.min.x, box.max.z - box.min.z));
       const key = Math.round(c.x / 2) + ',' + Math.round(c.z / 2); if (seen.has(key)) return; seen.add(key);
-      spots.push([c.x + n.x * 3.2, c.z + n.z * 3.2, w]);
+      const half = box.getSize(new THREE.Vector3()).multiplyScalar(0.5), reach = Math.abs(n.x) * half.x + Math.abs(n.z) * half.z;   // from the box centre out to the shop front, whatever its depth
+      spots.push([c.x + n.x * (reach + 2.4), c.z + n.z * (reach + 2.4), w]);                                                 // 2.4 m out: the middle of the wide sidewalk in front of the shop
     });
     if (!spots.length) return null;
     const geo = new THREE.PlaneGeometry(1, 1); geo.rotateX(-Math.PI / 2);
