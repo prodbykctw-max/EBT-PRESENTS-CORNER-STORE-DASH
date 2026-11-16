@@ -678,18 +678,18 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   };
   function lightsOn(pose) {
     const mk = (col) => new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: col, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
-    const red = mk(0xff1a1a), blue = mk(0x2a5cff), g = new THREE.Group(); g.add(red, blue); scene.add(g);
+    const red = mk(0x2a5cff), blue = mk(0x2a5cff), g = new THREE.Group(); g.add(red, blue); scene.add(g);   // both sides of the bar are BLUE (Georgia reserves flashing blue for the police; no red): `red` is just the left lamp
     beacons.push({ g, red, blue, pose });
   }
   function updateBeacons(now) {
-    const ph = Math.floor(now / 110) % 6;   // red-red, blue-blue, both
+    // the left and right blue lamps swell in turn, 0.8 a second (one left-right-left cycle every 1.25 s), smooth: no strobing, nothing is ever fully dark (WCAG 2.3.1)
+    const w = 0.5 + 0.5 * Math.sin(now / 1000 * Math.PI * 1.6), kr = w * w * (3 - 2 * w), kb = 1 - kr;
     for (const b of beacons) {
       const p = b.pose(), lx = -Math.sin(p.a) * 0.42, ly = Math.cos(p.a) * 0.42;   // across the light bar
       b.g.position.copy(toV3(p.x, p.y, p.z + 1.72));
       b.red.position.set(lx, 0, -ly); b.blue.position.set(-lx, 0, ly);
-      const r = ph < 2 || ph === 4, bl = (ph >= 2 && ph < 4) || ph === 4;
-      b.red.scale.setScalar(r ? 2.2 : 0.5); b.blue.scale.setScalar(bl ? 2.2 : 0.5);
-      b.red.material.opacity = r ? 1 : 0.25; b.blue.material.opacity = bl ? 1 : 0.25;
+      b.red.scale.setScalar(1.1 + 0.9 * kr); b.blue.scale.setScalar(1.1 + 0.9 * kb);
+      b.red.material.opacity = 0.35 + 0.55 * kr; b.blue.material.opacity = 0.35 + 0.55 * kb;
     }
   }
   function bust(e) {
@@ -1395,7 +1395,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         if (state === 'onfoot') updateFoot(FIXED); else updateHimLeft(FIXED);   // (getIn() may put you in the car mid-way)
       }
       const al = footAcc / FIXED;
-      if (state === 'onfoot') { posePerson(me, dt, al); focus.x = fly ? flyFocus.x : me.gx; focus.y = fly ? -flyFocus.z : me.gy; focus.z = fly ? flyFocus.y : me.zs; world.focus = crowd.focus = focus; hazardMat.opacity = Math.floor(now / 380) % 2 ? 1 : 0.12; markerSprite.position.y = 2.9 + Math.sin(now / 180) * 0.15; }
+      if (state === 'onfoot') { posePerson(me, dt, al); focus.x = fly ? flyFocus.x : me.gx; focus.y = fly ? -flyFocus.z : me.gy; focus.z = fly ? flyFocus.y : me.zs; world.focus = crowd.focus = focus; hazardMat.opacity = 0.6 + 0.3 * Math.sin(now / 1000 * Math.PI * 1.6); markerSprite.position.y = 2.9 + Math.sin(now / 180) * 0.15; }
       if (him.o.visible) posePerson(him, dt, al);
     }
     if (race && state === 'driving') updateRace(dt);
@@ -1508,7 +1508,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     carRig.position.copy(toV3(p.x, p.y, st.z));
     carRig.rotation.set(st.pitch, p.a - Math.PI / 2, st.roll, 'YXZ');
     carModel.rotation.z = 0;   // stiff: no lean into a lane change, the car moves as one block
-    carModel.visible = car.invuln <= 0 || Math.floor(car.invuln * 12) % 2 === 0; // blink while recovering
+    carModel.visible = true;   // (it used to blink 6 times a second while recovering from a hit: a flash. The CRASH message, the shake and the sparks say it already)
     const lit = keys.has('down') || car.accel < -4;
     for (const m of tailLamps) { m.emissive.copy(lit ? BRAKE_GLOW : m.userData.base.color); m.emissiveIntensity = lit ? 4 : m.userData.base.k; }
     wheelRoll = (wheelRoll + car.v * dt / TYRE_R) % (Math.PI * 2);
