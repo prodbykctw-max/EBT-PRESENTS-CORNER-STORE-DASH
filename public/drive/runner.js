@@ -164,7 +164,7 @@ export class RunnerCar {
     Object.assign(this, { route, s: s0, d: -route.hw(s0) / 2, v: 0, dv: 0, targetD: -route.hw(s0) / 2, stun: 0, invuln: 0, brakeT: 0, offBrake: 1, accel: 0 });
   }
   /** tight + snappy: the lateral position is a stiff critically-damped spring on the finger/keys */
-  step(dt, { targetD, brake, gas = 0, top = 30, cruise, stopAt, steer, lanes, hold = false }) {
+  step(dt, { targetD, brake, gas = 0, top = 30, cruise, steer, lanes, hold = false }) {
     const hw = this.route.hw(this.s), lim = hw - PLAYER.halfW - 0.05;
     if (steer === undefined) {
       // lateral path - the player's stiff lane steering (drive.js sets targetD to a lane centre) and the QA autopilot
@@ -216,7 +216,6 @@ export class RunnerCar {
     this.stopT = brake && Math.abs(this.v) < 0.4 ? (this.stopT || 0) + dt : 0;
     let vmax = top * cornerFactor(this.route, this.s, Math.max(0, this.v));
     if (this.stun > 0) { vmax = Math.min(vmax, 6); this.stun -= dt; }
-    if (stopAt !== undefined && this.s < stopAt + 1) vmax = Math.min(vmax, stopAt - this.s > 0.4 ? Math.max(1.2, Math.sqrt(2 * 3.4 * (stopAt - this.s))) : 0);   // parking assist: eases you into the space
     const v0 = this.v;
     // `hold` (the run is over: parked, too late or busted): brake to a stop and stay there, never back up
     const reversing = brake && !hold && (this.v < -0.05 || this.stopT > 0.5);   // half a second at a standstill first

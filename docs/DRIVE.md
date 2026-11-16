@@ -138,7 +138,17 @@ obstacles and collisions line up exactly with what's painted on the road.
   - Nothing sits in the street for no reason: a car is only stopped by a red light, the car in front, a work-zone
     flagger, a streetcar, a person in its lane or a police stop, and all of those clear.
   - Cross traffic never stops inside the route's road.
-- **Finish:** the car slows for the store by itself. Pull right to the curb into the P space.
+- **Finish (parking):** nothing slows you down on the way in: GAS stays GAS right up to the P space (the old `stopAt` parking assist, which braked the
+  car to a stop from 95 m out and cost about five seconds, is gone from `drive.js` and `runner.js`). The moment the car's reference point (`car.s`, `car.d`)
+  is inside the painted box (along the route within `SPOT.len / 2` = 3.5 m of `spot.s`, across within `spotW / 2` of `spot.d`, the width the yellow
+  marker shows, so you still have to pull into the curb lane) you are parked, at any speed. It is checked in every 1/120 s physics step, so a long frame at
+  full speed cannot jump the box. At that instant `park(true)` freezes `timeLeft`, the race result (`result.bully`) and `cleanPark` (`|car.d - spot.d| < 0.8`
+  where the car entered), and records `parkEntry` (`s`, `d`, `v`, `t`; also on `window.__drive.parkEntry`). The picture holds still and a black veil
+  (`.drive-cut`, below the HUD) rises over `CUT_T` = 0.35 s (smoothstep); on the frame it is fully black the car is put at rest in the middle of the space
+  (`s = spot.s`, `d = spot.d`, `v = 0`, yaw 0; the camera is shifted by the same move) and the veil falls again over the next 0.35 s onto the existing arrival
+  swing (which starts when the picture is dark). One dip to black, no flash. Missing the box (wrong lane, or past it) triggers nothing; stopping within 2 m
+  of the spot at under 0.3 m/s in any lane still parks, the old way (no cut, car not moved). The hint reads `Pull right to the curb ▸`, then `Drive into the P`
+  once you are in the curb lane. Proof: `tools-park/` (`measure.mjs`: 95 m out to parked, before and after; `cut.mjs`: the frames and the luminance over the cut).
   bonus = timeLeft × 50 + tokens × 25 + nearMisses × 50 + 500 (clean park) + 300 (no hits).
 - **Balance:** the QA bot parks clean with about 14 s left before the traffic was cut to a quarter. With `TRAFFIC = 0.25` the headless bot arrives with about 21 s left (7.7 s before, the means of 39 runs each, same harness and seeds; see "Less traffic, smoother traffic" below). `TIME_LIMIT`, `RACE.pace` and the scoring were not re-tuned for it.
 

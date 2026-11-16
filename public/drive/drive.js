@@ -636,10 +636,25 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   let cpFrom = car.s, cpSeen = 0;   // the realistic HUD's CHECKPOINT: 11 points of progress from where you got into the car to the store
   const result = { arrived: false, parked: false, timeLeft: 0, cleanPark: false, hits: 0, tokens: 0, nearMisses: 0, bonus: 0 };
 
-  function park() {
+  // PARKING: the moment the car's reference point (car.s, car.d) is inside the painted box (along the route within SPOT.len, across within the width the
+  // marker shows: you have to be in the curb lane) you are parked, at any speed, nothing slows you on the way in. The result (time left, the race, the clean
+  // park) is frozen at that instant; the picture holds still and fades to black (CUT_T), the car is put at rest in the middle of the space while it is dark, and
+  // the arrival shot then fades back in. One dip to black, no flash. A car that stops beside the spot (the old slow way: under 0.3 m/s within 2 m along, any
+  // lane) still parks, with no cut, as before. parkEntry is what the car was doing at the entry (tests read it).
+  const CUT_T = 0.35;   // seconds to fade out, and again to fade in (more than 0.3 s each way, one smooth ramp, never a step)
+  const parkEntry = {};
+  let cutOn = false, cutPlaced = false, cutEl = null;
+  const inSpot = (s, d) => Math.abs(s - spot.s) < SPOT.len / 2 && Math.abs(d - spot.d) < spotW / 2;
+  function park(entered = false) {
     state = 'parked';
+    if (entered) {
+      Object.assign(parkEntry, { s: car.s, d: car.d, v: car.v, t });
+      car.v = 0; car.dv = 0; car.targetD = car.d;   // stopped where it is: the picture holds still while it fades
+      cutOn = true; cutPlaced = false;
+      if (!cutEl) { cutEl = document.createElement('div'); cutEl.className = 'drive-cut'; cutEl.style.cssText = 'position:absolute;inset:0;z-index:1;background:#000;opacity:0;pointer-events:none'; root.appendChild(cutEl); }
+    }
     Object.assign(result, { arrived: true, parked: true, timeLeft: Math.max(0, t), hits, tokens, nearMisses });
-    result.cleanPark = Math.abs(car.d - spot.d) < 0.8;
+    result.cleanPark = Math.abs(car.d - spot.d) < 0.8;   // (from where it entered the space: the car has not been moved yet)
     result.bonus = Math.round(result.timeLeft * 50 + tokens * 25 + nearMisses * 50 + (result.cleanPark ? 500 : 0) + (hits === 0 ? 300 : 0));
     result.bully = raceResult();
     flash(result.cleanPark ? 'CLEAN PARK! 🅿️' : 'PARKED 🅿️', 2600);
@@ -1403,10 +1418,12 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
           // once the run is over (parked / late / busted) the brake holds the car where it stopped: without `hold`,
           // a held brake at a standstill is reverse, and the car used to back out of the spot during the arrival shot
           targetD: car.targetD, brake: braking || state !== 'driving', hold: state !== 'driving', gas: state === 'driving' && keys.has('gas') ? 1 : 0,
-          stopAt: approaching ? spot.s : undefined, lanes: laneCentres(car.s),
+          lanes: laneCentres(car.s),
           // steer omitted on purpose: that selects runner.js's lateral path,
           // which springs d toward targetD and never touches yaw.
         });
+        // in the painted space: parked, right now (checked every physics step, so even a long frame at full speed cannot jump over the 7 m box)
+        if (state === 'driving' && inSpot(car.s, car.d)) { park(true); break; }
       }
     }
     if (state === 'driving') {
@@ -1429,7 +1446,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       for (const h of ev.honks || []) { const g = Math.max(0, 1 - h.d / 45) * 0.45; if (g > 0.05) { audio.honkAt(g); if (h.skid) audio.skid(g); } }
       if (ev.nearMiss) { nearMisses += ev.nearMiss; pop('NEAR MISS +50'); audio.whoosh(); haptic(HAP.nearMiss); }
       if (ev.tokens) { tokens += ev.tokens; pop('+' + ev.tokens * 25); audio.token(); haptic(HAP.token, 60); bump(tokBox); }
-      if (approaching) setHint(Math.abs(car.d - spot.d) < 0.8 ? 'Nice — hold the curb' : 'Pull right to the curb ▸');
+      if (approaching) setHint(Math.abs(car.d - spot.d) < spotW / 2 ? 'Drive into the P' : 'Pull right to the curb ▸');
       if (state === 'driving' && approaching && car.v < 0.3 && Math.abs(car.s - spot.s) < 2) park();
       if (state === 'driving' && t <= 0) { t = 0; state = 'late'; Object.assign(result, { hits, tokens, nearMisses, bully: raceResult() }); flash('TOO LATE — walk it in', 2600); endT = 0; }
     } else if (state === 'busted') {   // the street carries on around you while the police pull up
@@ -1464,6 +1481,20 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     }
     if (state === 'parked' || state === 'late') {
       endT += dt; setHint('');
+      if (cutOn) {
+        // the cut: the veil rises to black over CUT_T (smoothstep, so it eases in and out), the frame it is fully black the car is put at rest in the space,
+        // and it falls away again over the next CUT_T onto the arrival shot
+        let x;
+        if (!cutPlaced && endT >= CUT_T) {
+          cutPlaced = true; x = 1;
+          const o = route.at(car.s, car.d), z0 = ground(o.x, o.y);
+          car.s = spot.s; car.d = spot.d; car.targetD = spot.d; car.v = 0; car.dv = 0; car.yaw = 0; prevS = car.s; prevD = car.d;   // (at rest, straight, in the middle of the box)
+          const n = route.at(car.s, car.d), a = toV3(o.x, o.y, z0), b = toV3(n.x, n.y, ground(n.x, n.y));
+          if (arrivalFrom) arrivalFrom.add(b.sub(a));   // the camera keeps its place relative to the car
+        } else x = cutPlaced ? 1 - (endT - CUT_T) / CUT_T : endT / CUT_T;
+        x = Math.max(0, Math.min(1, x));
+        cutEl.style.opacity = String(x * x * (3 - 2 * x));
+      }
       if (endT > 4.2) { finish(); return; } // 2.4 s camera swing + a beat on the storefronts
     }
 
@@ -1491,9 +1522,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     birds.update(dt, car, drove, hornT > 0 ? 1 : 0); updateBeacons(now);
     fx.update(dt, camera, renderer);
     beacon.material.opacity = 0.12 + 0.08 * Math.sin(now / 250);
-    spotGroup.visible = state === 'driving' || state === 'countdown';
+    spotGroup.visible = state === 'driving' || state === 'countdown' || (cutOn && !cutPlaced);   // (the held picture keeps its marker until it is dark)
     // the lines follow the lane being steered to (a lane tap swings them across); with the autopilot, the line it is steering
-    if (guide) guide.update(state === 'driving', drawS, drawD, (ss) => { if (BOT) return car.targetD; let k = laneK; if (laneAt(ss, k) === null) k = k === 0 ? 1 : 2; return laneAt(ss, k); });
+    if (guide) guide.update(state === 'driving' || (cutOn && !cutPlaced), drawS, drawD, (ss) => { if (BOT) return car.targetD; let k = laneK; if (laneAt(ss, k) === null) k = k === 0 ? 1 : 2; return laneAt(ss, k); });
     // overpass cutaway: a soft hole in anything above the runner. ON FOOT it is still needed: that camera is 6 m up and 10 m back, which is
     // inside the Connector's slab under it (the slab's top is ~6.7 m over the street). The DRIVING camera no longer needs it: the Connector
     // used to clear the route by 1.9 m, so the chase camera ran through the slab and the deck walled off the view ahead (that is why the
@@ -1527,7 +1558,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     let targetPos, targetLook;
     if (state === 'parked' || state === 'late') {
       // arrival: swing down to the street-level view of the storefronts (the intro's framing)
-      const k = Math.min(1, endT / 2.4), e = k * k * (3 - 2 * k);
+      const k = Math.min(1, (cutOn ? Math.max(0, endT - CUT_T) : endT) / 2.4), e = k * k * (3 - 2 * k);   // (after a park cut the swing starts when the picture is dark)
       const high = arrivalFrom || (arrivalFrom = camPos.clone()), street = toV3(-3, 21, ground(-3, 21) + 2.6);
       targetPos = high.clone().lerp(street, e);
       targetLook = toV3(p.x, p.y, p.z).lerp(toV3(-3, 0, ground(-3, 0) + 4.2), e);
@@ -1753,7 +1784,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   } else { loadingScreen.remove(); go(); }
   }
   // test hooks (drive QA + screenshots)
-  Object.assign(api, { car, world, route, spot, keys, result, guide, camR: CAM_R, audio, fx, city, comic, adaptRes: { res, step: adaptRes, PR_MIN, PR_MAX },
+  Object.assign(api, { car, world, route, spot, keys, result, parkEntry, guide, camR: CAM_R, audio, fx, city, comic, adaptRes: { res, step: adaptRes, PR_MIN, PR_MAX },
     three: { scene, camera, carRig, THREE, renderer },
     ui: { flash, pop, bump, setHint, showBusted, gsap: G },   // the HUD's motion, for tests
     tick: (dt) => { tickDt = dt; try { frame(); } finally { tickDt = null; } },
