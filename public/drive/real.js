@@ -233,7 +233,8 @@ function wallPatch(T) {
         wAO *= 1.0 - 0.15 * band;
         // night: whole floors of the tower are lit, with the odd dark panel (steady, hashed from the panel's place)
         vec2 tid = floor(vFac / vec2(3.1, 3.9)); float tfl = h21(vec2(tid.y, seed * 13.0 + 1.0)), tpc = h21(tid + seed * 91.0);
-        wEm += mix(vec3(1.0, 0.8, 0.52), vec3(0.78, 0.88, 1.0), step(0.6, h21(tid + 9.0 + seed))) * step(0.36, tfl) * step(0.14, tpc) * pm * (1.0 - band) * 0.7;
+        float far = smoothstep(1.0, 4.0, max(fwidth(vFac.x), fwidth(vFac.y)));   // a pixel that covers several rooms shows the average, not noise
+        wEm += mix(vec3(1.0, 0.8, 0.52), vec3(0.78, 0.88, 1.0), step(0.6, h21(tid + 9.0 + seed))) * mix(step(0.36, tfl) * step(0.14, tpc), 0.55, far) * pm * (1.0 - band) * 0.7;
       } else {
         float bay = isTower ? 1.55 : (style > 1.5 ? 2.4 : 3.0), floorH = style > 2.5 ? 3.9 : 3.6;
         vec2 cell = vec2(fract(vFac.x / bay), fract(vFac.y / floorH)), id = vec2(floor(vFac.x / bay), floor(vFac.y / floorH));
@@ -261,7 +262,8 @@ function wallPatch(T) {
         float grd = 1.0 - step(0.5, id.y);
         float roomR = h21(id * 1.31 + seed * 53.0 + 4.7), roomC = h21(id.yx * 2.17 + seed * 29.0 + 1.3);
         vec3 wc = roomC < 0.55 ? vec3(1.0, 0.7, 0.36) : (roomC < 0.85 ? vec3(0.95, 0.88, 0.7) : vec3(0.55, 0.65, 1.0));   // warm bulbs, white, and the odd TV blue
-        wEm += wc * win * (1.0 - rim) * step(grd > 0.5 ? 0.12 : 0.5, roomR) * mix(0.6, 1.5, roomR) * (grd > 0.5 ? 1.4 : 1.0);
+        float farR = smoothstep(1.0, 4.0, max(fwidth(vFac.x), fwidth(vFac.y)));
+        wEm += wc * win * (1.0 - rim) * mix(step(grd > 0.5 ? 0.12 : 0.5, roomR), grd > 0.5 ? 0.88 : 0.5, farR) * mix(0.6, 1.5, roomR) * (grd > 0.5 ? 1.4 : 1.0);
         if (grd > 0.5 && style < 2.5) {
           float bw = bay * 2.0, sid = floor(vFac.x / bw);
           vec2 q = (vec2(fract(vFac.x / bw), cell.y) - vec2(0.5, 0.9)) / vec2(0.42, 0.075);
@@ -347,8 +349,8 @@ function roadPatch(T) {
       float wear = smoothstep(0.35, 0.8, texture2D(rAsphR, tuv * 0.071 + 0.6).g); diffuseColor.rgb *= 1.0 - 0.1 * wear;
       roughnessFactor = mix(roughnessFactor, 0.16, uWet);`);
     // wet roads at night: the lit city's glow in the water, strongest at grazing angles (a cheap stand-in for the lamp and sign reflections; steady)
-    f = rep(f, '#include <emissivemap_fragment>', `{ float gl = pow(1.0 - clamp(abs(dot(normalize(vViewPosition), normal)), 0.0, 1.0), 3.0);
-      totalEmissiveRadiance += uWet * uLit * gl * (0.2 + 0.5 * texture2D(rAsphR, tuv * 0.5).g) * vec3(1.0, 0.62, 0.34) * 0.45; }`);
+    f = rep(f, '#include <emissivemap_fragment>', `{ float gl = pow(1.0 - clamp(abs(dot(normalize(vViewPosition), normal)), 0.0, 1.0), 5.0);
+      totalEmissiveRadiance += uWet * uLit * gl * (0.2 + 0.5 * texture2D(rAsphR, tuv * 0.5).g) * vec3(1.0, 0.62, 0.34) * 0.1; }`);
     sh.fragmentShader = f;
   };
 }
