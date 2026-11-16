@@ -26,5 +26,5 @@ export async function loadCityNode() {
   const SPOT = { x: 0, y: 9.0 };
   const heroWalls = heroSegments(hero.scene, ground(SPOT.x, SPOT.y));
   const walk = roam.walkWorldFor({ city: C, heroWalls, W });
-  return { THREE, W, ground, route, city: C, heroWalls, walk, roam, SPOT };
+  return { THREE, W, ground, route, city: C, heroWalls, walk, roam, SPOT, hero, props, trees };
 }

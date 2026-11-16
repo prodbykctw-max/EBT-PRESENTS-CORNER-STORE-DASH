@@ -5,6 +5,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { LEVEL } from './levels.js';
 import { buildStreetsSteps } from './roads.js';
+import { widenSidewalks } from './setback.js';
 import { buildTerrain, buildCoverSteps, buildContactShadows, buildStreetscapeSteps, buildGrass, pointInPoly } from './landscape.js';
 import { drain, slicer } from './steps.js';
 export { pointInPoly };
@@ -243,6 +244,9 @@ export function buildCity(W, tex, ground, route, props, trees) {
 /** The same build as a generator that yields between its parts (name of the part just finished), so a caller that wants to keep the page responsive (the drive's
  *  background prepare, drive.js) can give the browser a turn between them. The order of every call, and so of every Math.random draw and every object id, is the one buildCity always had. */
 export function* buildCitySteps(W, tex, ground, route, props, trees) {
+  // wide sidewalks (setback.js): every drawn building is set back from the curbs BEFORE anything reads W.buildings (the walls and roofs below, the walls and footprints the
+  // runner and the crowd are kept out of, the contact shadows, the "is this spot free" grid): the street is not touched. (Idempotent: a second build finds nothing left to move.)
+  const sidewalks = widenSidewalks(W, route, { skip: (b) => { let cx = 0, cy = 0; for (const [x, y] of b.pts) { cx += x; cy += y; } return inHero(cx / b.pts.length, cy / b.pts.length); } });
   const b = buildBuildings(W, tex, ground); yield 'buildings';
   const streets = yield* buildStreetsSteps(W, ground, route, tex); yield 'streets';
   const outside = footprintIndex(W);
@@ -277,7 +281,7 @@ export function* buildCitySteps(W, tex, ground, route, props, trees) {
     const far = fog.far / Math.max(0.2, minCos) + 5, far2 = far * far, p = camera.position;
     for (const o of flatOnly) o.visible = o.userData.wbox.distanceToPoint(p) ** 2 < far2;
   };
-  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces, isFree, walls: wallSegments(W), footprints: solidFootprints(W), furniture: streetscape.userData.placed, signals: streetscape.userData.signals, cull };
+  return { group, ground, streets, freeway: streets.freeway, surfaces: streets.surfaces, isFree, sidewalks, walls: wallSegments(W), footprints: solidFootprints(W), furniture: streetscape.userData.placed, signals: streetscape.userData.signals, cull };
 }
 const FLAT = /^(cover_.*|roads|roads_tile|route_road|route_road_tile|curbs|curbs_tile|junctions|junctions_tile|crosswalks|crosswalks_tile|contact_shadows|contact_shadows_tile)$/;
 

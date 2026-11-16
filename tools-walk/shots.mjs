@@ -8,8 +8,9 @@ fs.mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const seeded = () => { let a = 0x12345678; Math.random = () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
 const save = (name, url) => fs.writeFileSync(`${OUT}/${TAG}_${name}.jpg`, Buffer.from(url.split(',')[1], 'base64'));
+const log = (m) => console.log(new Date().toISOString().slice(11, 19), m);
 const want = new Set(SCENES.split(','));
-const open = async (qs, w = 960, h = 540) => {
+const open = async (qs, w = 800, h = 450) => {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
   await ctx.addInitScript(seeded); await ctx.route(/open-meteo/, (r) => r.abort());
   const page = await ctx.newPage(); const errs = []; page.on('pageerror', (e) => errs.push(e.message));
@@ -29,15 +30,16 @@ if (want.has('fly') || want.has('foot') || want.has('store')) {
   const { page, errs } = await open('qa&fly');
   await page.evaluate(() => { window.__drive.manual = true; });
   if (want.has('fly')) {
-    for (const t of [0.5, 1.6, 2.8, 3.9]) {
-      const u = await page.evaluate((t) => { const d = window.__drive; while (d.fly && d.fly.t < t) d.tick(1 / 30); return d.snapshot(0.9); }, t); save(`fly_${t}`, u);
+    for (const t of [0.5, 1.6, 2.8, 3.9]) {   // (big steps: nobody moves during the flyover and every tick draws a frame, which is slow in software GL)
+      const u = await page.evaluate((t) => { const d = window.__drive; const f = d.fly; if (f && f.t < t) d.tick(t - f.t); return d.snapshot(0.9); }, t); save(`fly_${t}`, u); log('fly ' + t);
     }
   }
-  await page.evaluate(() => { const d = window.__drive; d.endFly(); for (let i = 0; i < 90; i++) d.tick(1 / 30); });
+  await page.evaluate(() => { const d = window.__drive; d.endFly(); for (let i = 0; i < 6; i++) d.tick(0.25); }); log('on foot');
   if (want.has('foot')) save('foot_open', await page.evaluate(() => window.__drive.snapshot(0.9)));
   if (want.has('store')) {
     const S = await st(page); const s = S.spotS, hw = S.hw;
     // street level on the walk in front of the store, looking along it; across the road at the store front; overhead oblique
+    log('store shots');
     await lookShot(page, 'store_street', [s - 18, -(hw + 1.4), 1.7], [s + 8, -(hw + 1.4), 1.2], 70);
     await lookShot(page, 'store_across', [s + 2, hw - 1.2, 1.7], [s + 2, -(hw + 2), 1.8], 62);
     await lookShot(page, 'store_over', [s - 14, 1, 24], [s + 2, -(hw + 1), 0], 55);
@@ -51,9 +53,9 @@ if (want.has('drive')) {
   await page.evaluate(() => { window.__drive.manual = true; });
   const S = await st(page);
   for (const [name, at] of [['chase_mid', 520], ['chase_pre', S.spotS - 90]]) {
-    const u = await page.evaluate((at) => { const d = window.__drive; Object.assign(d.car, { s: at, v: 14, d: d.route.lane(at, 0), targetD: d.route.lane(at, 0) }); d.keys.add('gas'); for (let i = 0; i < 40; i++) d.tick(1 / 30); return d.snapshot(0.9); }, at); save(name, u);
+    const u = await page.evaluate((at) => { const d = window.__drive; Object.assign(d.car, { s: at, v: 14, d: d.route.lane(at, 0), targetD: d.route.lane(at, 0) }); d.keys.add('gas'); for (let i = 0; i < 8; i++) d.tick(0.1); return d.snapshot(0.9); }, at); save(name, u); log(name);
   }
-  const u = await page.evaluate(() => { const d = window.__drive; d.keys.clear(); Object.assign(d.car, { s: d.spot.s - 1.5, d: d.spot.d, targetD: d.spot.d, v: 0 }); for (let i = 0; i < 60; i++) d.tick(1 / 30); return d.snapshot(0.9); }); save('arrive', u);
+  const u = await page.evaluate(() => { const d = window.__drive; d.keys.clear(); Object.assign(d.car, { s: d.spot.s - 1.5, d: d.spot.d, targetD: d.spot.d, v: 0 }); for (let i = 0; i < 6; i++) d.tick(0.25); return d.snapshot(0.9); }); save('arrive', u); log('arrive');
   console.log(JSON.stringify({ scene: 'drive', errs: errs.slice(0, 4), S }));
   await page.context().close();
 }
