@@ -127,7 +127,7 @@ export function buildCorral({ route, old, walls, hero, roads, spot }) {
       const x0 = route.X[j] + (route.X[j + 1] - route.X[j]) * t, y0 = route.Y[j] + (route.Y[j + 1] - route.Y[j]) * t;
       const a = route.A[j] + Math.atan2(Math.sin(route.A[j + 1] - route.A[j]), Math.cos(route.A[j + 1] - route.A[j])) * t;
       const ux = -Math.sin(a) * side, uy = Math.cos(a) * side, hw = route.hw(s);
-      const dA = hw - 0.5, dMax = hw + 6;
+      const dA = hw - 0.5, dMax = hw + 7;   // (7: the walls the sidewalks are set back to, setback.js, stand 5.8 m from the road's centre line past its half-width)
       stampId++;
       let hiW = Infinity, hero_ = false;
       for (const dq of [dA, (dA + dMax) / 2, dMax]) {
@@ -142,7 +142,7 @@ export function buildCorral({ route, old, walls, hero, roads, spot }) {
       HIW[i] = hiW;
       const lo2 = (() => { const q = Math.min(old[side][0].length - 1.0001, s / 2), k = q | 0; return old[side][0][k] + (old[side][0][k + 1] - old[side][0][k]) * (q - k); })();
       const ds = hw + MIN_FROM_CURB; dS[i] = ds;
-      let hi = Math.min(hiW, hw + 4.65), lo = Math.max(ds, Math.min(lo2, hi)), fl = 0;
+      let hi = Math.min(hiW, Number.isFinite(hiW) ? hw + 6.5 : hw + 4.65), lo = Math.max(ds, Math.min(lo2, hi)), fl = 0;   // (a wall: all the way to its clearance, the walk is that wide now; open ground: the old 4.65 m)
       if (hero_ && hiW < ds + 1e-3) {                         // the hand-built row: a facade right at the curb; the strip in front of it, on the road's edge, is the standing room
         // (measured: the hero row's SIDEWALK_hero slab lies UNDER the route's road up to d = hw, the curb is hw..hw+0.3 and the slab shows only from
         // there to the facade, so the standing room starts at the curb's inner edge, hw + 0.05, like anywhere else: never in the road)
