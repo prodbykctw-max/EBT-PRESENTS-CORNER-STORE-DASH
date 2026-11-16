@@ -5,7 +5,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { LEVEL } from './levels.js';
 import { buildStreetsSteps } from './roads.js';
-import { widenSidewalks } from './setback.js';
+import { widenSidewalksSteps, SIDEWALK } from './setback.js';
 import { buildTerrain, buildCoverSteps, buildContactShadows, buildStreetscapeSteps, buildGrass, pointInPoly } from './landscape.js';
 import { drain, slicer } from './steps.js';
 export { pointInPoly };
@@ -64,6 +64,48 @@ const hash = (n) => { n = (n ^ 61) ^ (n >>> 16); n = Math.imul(n, 9); n ^= n >>>
 // Hero row footprint in world coords (row frame x∈[-35,21], y∈[-4,12], rotated 180° → world).
 export const HERO_BOX = { x0: -21, x1: 35, y0: -12, y1: 4 };
 const inHero = (x, y) => x > HERO_BOX.x0 - 4 && x < HERO_BOX.x1 + 4 && y > HERO_BOX.y0 - 6 && y < HERO_BOX.y1 + 2;
+
+/** Wide sidewalks at the corner store (setback.js is the same job for the OSM buildings): the hand-built row (hero.glb) stood with its front wall (y = HERO_BOX.y1) 0.7 m from the
+ *  curb, a facade on the curb: it is moved straight back (along -y) until the narrowest part of the walk, curb back to front wall, is `T` metres. Everything of the row moves
+ *  with it: the three shops, their roof, parapet and rooftop units (`HERO_` `ROOF_` `PARAPET_` `RTU_`; the doors line up with the parking space as before, only the depth changes).
+ *  The row's own sidewalk slab (`SIDEWALK_hero`, 0.15 m above the ground) grows back to the new front wall, its texture running on at the same scale, so the walk is slab all the way
+ *  to the curb. The street-name sign and its pole (`SIGN_`), which stood in the parking lane (y 7.1, 2.4 m into the road: the slab it was made for ended at a curb that is no
+ *  longer there), is put back on the walk, T-independent, 0.6 m behind the back of the curb, and returned as a pole for the crowd and the runner to walk round.
+ *  Moves nodes and rewrites the slab's vertices in place; makes no three.js object (no Math.random). Returns { dy (m, negative: how far back), front (the new front wall's y), poles: [[x, y]] }. */
+export function setBackHero(root, route, T = SIDEWALK.W) {
+  const curbBack = (x) => {   // y of the back of the right-hand curb at world x, along the route
+    let best = null;
+    for (let s = 0; s < route.length; s += 0.5) { const p = route.at(s, -(route.hw(s) + SIDEWALK.CURB)); if (best === null || Math.abs(p.x - x) < Math.abs(best.x - x)) best = p; }
+    return best.y;
+  };
+  let narrowest = Infinity;
+  for (let x = HERO_BOX.x0; x <= HERO_BOX.x1 + 0.01; x += 1) narrowest = Math.min(narrowest, curbBack(x));
+  const dy = Math.min(0, narrowest - T - HERO_BOX.y1), front = HERO_BOX.y1 + dy;
+  root.updateMatrixWorld(true);
+  const POLE_BACK = 0.6, poles = [], pole0 = root.children.find((o) => /^SIGN_pole/.test(o.name)), SIGN_Y = pole0 ? -pole0.position.z : 7.1;   // (the pole's own y: the blade and its text sit on it)
+  for (const o of root.children) {
+    if (/^SIDEWALK_/.test(o.name)) {
+      // the slab's back face (world y 3.9, under the old front wall) goes back to just under the new one; its end faces and top and bottom run on, their UV in metres (u = -x, v = y + 1 on the top and bottom)
+      const g = o.geometry, P = g.attributes.position, U = g.attributes.uv, Nn = g.attributes.normal, inv = new THREE.Matrix4().copy(o.matrixWorld).invert(), v = new THREE.Vector3();
+      const back = Math.min(...Array.from({ length: P.count }, (_, i) => -v.fromBufferAttribute(P, i).applyMatrix4(o.matrixWorld).z));
+      const to = front - 0.1;
+      for (let i = 0; i < P.count; i++) {
+        v.fromBufferAttribute(P, i).applyMatrix4(o.matrixWorld);
+        if (Math.abs(-v.z - back) > 0.01) continue;
+        v.z = -to; v.applyMatrix4(inv); P.setXYZ(i, v.x, v.y, v.z);
+        if (Math.abs(Nn.getY(i)) > 0.5) U.setY(i, to + 1.0);        // top and bottom
+        else if (Math.abs(Nn.getX(i)) > 0.5) U.setX(i, -to);          // the end faces
+      }
+      P.needsUpdate = U.needsUpdate = true; g.computeBoundingBox(); g.computeBoundingSphere();
+    } else if (/^SIGN/.test(o.name)) {
+      const x = o.position.x, y = curbBack(x) - POLE_BACK;
+      o.position.z -= y - SIGN_Y;
+      if (/^SIGN_pole/.test(o.name)) poles.push([x, y]);
+    } else if (/^(HERO|ROOF|PARAPET|RTU)_/.test(o.name)) o.position.z -= dy;
+  }
+  root.updateMatrixWorld(true);
+  return { dy, front, poles };
+}
 
 // ---------------- buildings: merged walls with a procedural facade shader + textured roofs ----------------
 // GTA Chinatown Wars palette: comic, sunny and saturated rather than photographic
@@ -246,7 +288,7 @@ export function buildCity(W, tex, ground, route, props, trees) {
 export function* buildCitySteps(W, tex, ground, route, props, trees) {
   // wide sidewalks (setback.js): every drawn building is set back from the curbs BEFORE anything reads W.buildings (the walls and roofs below, the walls and footprints the
   // runner and the crowd are kept out of, the contact shadows, the "is this spot free" grid): the street is not touched. (Idempotent: a second build finds nothing left to move.)
-  const sidewalks = widenSidewalks(W, route, { skip: (b) => { let cx = 0, cy = 0; for (const [x, y] of b.pts) { cx += x; cy += y; } return inHero(cx / b.pts.length, cy / b.pts.length); } });
+  const sidewalks = yield* widenSidewalksSteps(W, route, { skip: (b) => { let cx = 0, cy = 0; for (const [x, y] of b.pts) { cx += x; cy += y; } return inHero(cx / b.pts.length, cy / b.pts.length); } });
   const b = buildBuildings(W, tex, ground); yield 'buildings';
   const streets = yield* buildStreetsSteps(W, ground, route, tex); yield 'streets';
   const outside = footprintIndex(W);

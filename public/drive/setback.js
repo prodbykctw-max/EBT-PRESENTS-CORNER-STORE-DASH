@@ -16,10 +16,11 @@
 // that is not possible either it keeps what the cut left. The hand-built row at the corner store is not in W.buildings: city.js `setBackHero` moves that.
 //
 // Pure numbers: no three.js, no Math.random, no DOM (the same rule as roam.js): the node tests (tools-walk/) run it on world.json directly.
+import { slicer } from './steps.js';
 import './vendor/polygon-clipping.umd.min.js';   // (UMD: sets globalThis.polygonClipping)
 const pc = globalThis.polygonClipping;
 
-export const SIDEWALK = { W: 5.5, CURB: 0.3, MIN_KEEP: 0.18, MIN_AREA: 20, PIECE_MIN: 6, CAP: 12, ROUTE_STEP: 3 };
+export const SIDEWALK = { W: 5.5, CURB: 0.3, MIN_KEEP: 0.18, MIN_AREA: 20, PIECE_MIN: 6, CAP: 8, ROUTE_STEP: 6 };
 const CELL = 24;
 const CURBED = /^(primary|secondary|tertiary|residential|unclassified|living_street)(_link)?$/;   // roads.js CURBED: the streets that get a curb
 const key = (gx, gy) => gx * 65536 + gy;
@@ -126,13 +127,17 @@ function moveWhole(pts, C) {
 /** Set every drawn building back (changes W.buildings: b.pts, and a piece that was cut in two becomes two buildings). Returns what it did, for the tests.
  *  Skips canopies, raised floors (you drive under those) and skyline silhouettes. `skip(b)` (optional): more to leave alone (the hero lots: the hand-built row replaces
  *  them, and city.js `setBackHero` moves that). */
-export function widenSidewalks(W, route, { T = SIDEWALK.W, skip = null } = {}) {
+export function widenSidewalks(W, route, o = {}) { let it = widenSidewalksSteps(W, route, o), r = it.next(); while (!r.done) r = it.next(); return r.value; }
+
+/** the same, as a generator that yields now and then (the prepared drive's build gives the page a turn: about 0.7 s of work in all) */
+export function* widenSidewalksSteps(W, route, { T = SIDEWALK.W, skip = null } = {}) {
+  const due = slicer(8);
   if (!pc) throw new Error('polygon-clipping did not load');
   const C = makeCorridors(W, route, T), stats = { corridors: C.list.length, buildings: 0, cut: 0, whole: 0, kept: 0, split: 0, dropped: 0, holes: 0, errors: 0, areaBefore: 0, areaAfter: 0 };
   const extra = [], drop = new Set();
   for (const b of W.buildings) {
     if (b.canopy || b.pts.length < 3 || b.minH > 2.5 || b.kind === 'skyline' || (skip && skip(b))) continue;
-    stats.buildings++;
+    stats.buildings++; if (due()) yield 'sidewalks';
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, cx = 0, cy = 0;
     for (const [x, y] of b.pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); cx += x; cy += y; }
     cx /= b.pts.length; cy /= b.pts.length;
@@ -140,8 +145,7 @@ export function widenSidewalks(W, route, { T = SIDEWALK.W, skip = null } = {}) {
     const A0 = Math.abs(signedArea(b.pts)), caps = C.near(x0, y0, x1, y1), ox = Math.round(cx), oy = Math.round(cy);
     let pieces;
     try {
-      const U = pc.union(...caps.map((c) => [capsuleRing(c, ox, oy)]));
-      pieces = pc.difference([b.pts.map(([x, y]) => [x - ox, y - oy])], U);
+      pieces = pc.difference([b.pts.map(([x, y]) => [x - ox, y - oy])], ...caps.map((c) => [capsuleRing(c, ox, oy)]));   // (no union first: the difference takes them all, about 3x faster)
     } catch (e) { stats.errors++; continue; }
     const polys = [];
     for (const p of pieces) {

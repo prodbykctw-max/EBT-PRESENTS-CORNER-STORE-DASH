@@ -346,7 +346,7 @@ export function chaseTarget(world, trail, him, me, st, dt) {
 // ------------------------------------------------------------------ putting the world together (drive.js and the node test build it the same way)
 // street furniture at body height (radius of the actual models between knee and shoulder, measured off the meshes; the crowd's own radii are bigger, they keep a polite distance):
 // tree trunks 0.24 m x the tree's scale, poles ~0.2
-export const PROP_R = { tree_round: 0.24, tree_upright: 0.17, lamp: 0.2, signal: 0.17, bench: 0.9, bin: 0.33, hydrant: 0.21, shelter: 1.8 };
+export const PROP_R = { tree_round: 0.24, tree_upright: 0.17, lamp: 0.2, signal: 0.17, bench: 0.9, bin: 0.33, hydrant: 0.21, shelter: 1.8, pole: 0.1 };   // (pole: the street-name sign at the corner store, city.js setBackHero)
 /** furniture: city.furniture ({ type: [[x, y, yaw, color, scale]...] }), with the streetcar platforms' shelters ([x, y]) added to `shelter` by the caller */
 export function furnitureCircles(furniture) {
   const out = [];
@@ -357,10 +357,10 @@ export function furnitureCircles(furniture) {
   return out;
 }
 /** The one collision world: the buildings (their edges and footprints), the hand-built row, the freeway's barriers and piers, every post and tree, and the edge of the map.
- *  city: buildCity()'s result · heroWalls: heroSegments() · shelters: [[x, y]] streetcar platforms · W: world.json */
-export function walkWorldFor({ city, heroWalls, shelters = [], W }) {
+ *  city: buildCity()'s result · heroWalls: heroSegments() · shelters: [[x, y]] streetcar platforms · poles: [[x, y]] the corner store's street-name sign (setBackHero) · W: world.json */
+export function walkWorldFor({ city, heroWalls, shelters = [], poles = [], W }) {
   const fw = freewayColliders(city.freeway.pieces || [], city.ground, city.freeway.piers || []);
-  const furniture = { ...city.furniture, shelter: [...(city.furniture.shelter || []), ...shelters] };
+  const furniture = { ...city.furniture, shelter: [...(city.furniture.shelter || []), ...shelters], pole: poles };
   const E = W.elevation, PAD = 150;   // 150 m of (flat, empty) ground past the data's edge to run on...
   // ...but never past what is drawn: the terrain mesh covers the elevation grid plus makeGround's PAD (400 m) all round (city.ground.grid), and the edge stays 10 m inside that
   const G = city.ground.grid, inset = 10;
