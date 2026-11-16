@@ -28,7 +28,7 @@ export function lampPools(city, scene) {
       uniforms: { uLamp: GLOW.uLamp, uPoolK: GLOW.uPoolK, uCol: { value: new THREE.Color(1.0, 0.7, 0.4) } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }',
       fragmentShader: `uniform float uLamp, uPoolK; uniform vec3 uCol; varying vec2 vUv;
-        void main() { float r = length(vUv - 0.5) * 2.0, a = max(0.0, 1.0 - r * r); a *= a; gl_FragColor = vec4(uCol * a * uLamp * uPoolK * 1.5, 1.0); }`,
+        void main() { float r = length(vUv - 0.5) * 2.0, a = max(0.0, 1.0 - r * r); a *= a; gl_FragColor = vec4(uCol * a * uLamp * uPoolK * 0.7, 1.0); }`,
       blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false, toneMapped: false,
     });
     const im = new THREE.InstancedMesh(geo, mat, lamps.length), m4 = new THREE.Matrix4(), v = new THREE.Vector3(), q = new THREE.Quaternion();
