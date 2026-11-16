@@ -14,7 +14,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { hooks } from './mode.js';
 import { GLOW } from './daylight.js';
-import { lampPools, lightHero } from './streetlight.js';
+import { lampPools, lightHero, shopSpill } from './streetlight.js';
 export { RealLook } from './real-post.js';
 export { carLights } from './streetlight.js';
 
@@ -350,7 +350,7 @@ function roadPatch(T) {
       roughnessFactor = mix(roughnessFactor, 0.16, uWet);`);
     // wet roads at night: the lit city's glow in the water, strongest at grazing angles (a cheap stand-in for the lamp and sign reflections; steady)
     f = rep(f, '#include <emissivemap_fragment>', `{ float gl = pow(1.0 - clamp(abs(dot(normalize(vViewPosition), normal)), 0.0, 1.0), 5.0);
-      totalEmissiveRadiance += uWet * uLit * gl * (0.2 + 0.5 * texture2D(rAsphR, tuv * 0.5).g) * vec3(1.0, 0.62, 0.34) * 0.1; }`);
+      totalEmissiveRadiance += uWet * uLit * gl * (0.2 + 0.5 * texture2D(rAsphR, tuv * 0.5).g) * vec3(0.62, 0.74, 1.0) * 0.12; }`);
     sh.fragmentShader = f;
   };
 }
@@ -392,7 +392,8 @@ function faceTerrainUp(city) {
 export function upgradeCity({ city, T, scene, hero = null }) {
   faceTerrainUp(city);
   if (hero) lightHero(hero, chain);   // the hand-built storefronts: their painted signs and shop windows light up at night
-  const pools = lampPools(city, scene); if (pools) scene.add(pools);   // soft light pools under the street lamps (streetlight.js)
+  const pools = lampPools(city, scene); if (pools) scene.add(pools);
+  if (hero) { const spill = shopSpill(hero, city); if (spill) scene.add(spill); }   // soft light pools under the street lamps (streetlight.js)
   const seen = new Set(), once = (m, tag, fn) => { if (seen.has(m)) return; seen.add(m); (tag === 'walls' ? swap : chain)(m, fn, tag); };
   city.group.traverse((o) => {
     if (!o.isMesh) return;

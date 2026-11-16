@@ -96,14 +96,15 @@ export const atlantaClock = (t) => new Intl.DateTimeFormat('en-US', { timeZone: 
 // magenta 0xd81ea6 at the top, pink 0xfb4a7d, coral 0xfc8753, orange 0xfc9f48, gold 0xfece28 at the horizon).
 //   sun: colour, strength (the day's was 6.0 at the old fixed sun); hemi: sky / ground colour and strength; env: the sky's reflected light;
 //   envSat: how much of the sky's colour the ambient keeps; ex: exposure; sat / con / tint: the final pass's grade
+const DAWN = [0x6f93d0, 0x93aede, 0xbdb8e0, 0xf0c4bc, 0xffdcb4];   // zenith to horizon
 const KEYS = [
-  { el: -18, sky: [0x040818, 0x060c20, 0x0a1230, 0x101a3a, 0x1a2646], sun: 0x000000, sunI: 0, hemi: 0x2c3c74, hemiG: 0x16161f, hemiI: 0.24, env: 0.22, envSat: 0.4, ex: 1.3, sat: 0.95, con: 0.1, tint: 0x9aa8d0, cloud: 0x10141f },
-  { el: -10, sky: [0x0b1236, 0x131b48, 0x1f2658, 0x40306a, 0x6a3a6c], sun: 0x000000, sunI: 0, hemi: 0x3a4a80, hemiG: 0x1c1a24, hemiI: 0.3, env: 0.28, envSat: 0.4, ex: 1.28, sat: 1.02, con: 0.1, tint: 0xb4b0d6, cloud: 0x2a2a46 },
-  { el: -6.5, sky: [0x1a1446, 0x2d2468, 0x5a3584, 0xa24a86, 0xe0607a], sun: 0x000000, sunI: 0, hemi: 0x7a729c, hemiG: 0x2e2a34, hemiI: 0.5, env: 0.4, envSat: 0.3, ex: 1.25, sat: 1.1, con: 0.12, tint: 0xe0b8c8, cloud: 0x7a4a80 },
-  { el: -3, sky: [0xd81ea6, 0xf83a88, 0xfb6070, 0xfc9f48, 0xfece28], sun: 0xff7a40, sunI: 0.0, hemi: 0x9a90a8, hemiG: 0x4c4450, hemiI: 0.85, env: 0.6, envSat: 0.22, ex: 1.22, sat: 1.04, con: 0.12, tint: 0xffe2cc, cloud: 0xff6a8a },
+  { el: -18, sky: [0x040818, 0x060c20, 0x0a1230, 0x101a3a, 0x1a2646], sun: 0x000000, sunI: 0, hemi: 0x2c3c74, hemiG: 0x16161f, hemiI: 0.4, env: 0.36, envSat: 0.4, ex: 1.34, sat: 0.95, con: 0.1, tint: 0x9aa8d0, cloud: 0x10141f },
+  { el: -10, sky: [0x0b1236, 0x131b48, 0x1f2658, 0x40306a, 0x6a3a6c], sun: 0x000000, sunI: 0, hemi: 0x3a4a80, hemiG: 0x1c1a24, hemiI: 0.5, env: 0.45, envSat: 0.4, ex: 1.32, sat: 1.02, con: 0.1, tint: 0xb4b0d6, cloud: 0x2a2a46 },
+  { el: -6.5, sky: [0x1a1446, 0x2d2468, 0x5a3584, 0xa24a86, 0xe0607a], sun: 0x000000, sunI: 0, hemi: 0x7a729c, hemiG: 0x2e2a34, hemiI: 0.7, env: 0.55, envSat: 0.3, ex: 1.28, sat: 1.1, con: 0.12, tint: 0xe0b8c8, cloud: 0x7a4a80 },
+  { el: -3, sky: [0xd81ea6, 0xf83a88, 0xfb6070, 0xfc9f48, 0xfece28], sun: 0xff7a40, sunI: 0.0, hemi: 0xb09cb4, hemiG: 0x8a6a6c, hemiI: 1.2, env: 0.85, envSat: 0.22, ex: 1.28, sat: 1.04, con: 0.12, tint: 0xffe2cc, cloud: 0xff6a8a },
   { el: 0, sky: [0x5a3aa6, 0xc03a8c, 0xf0586c, 0xff8a40, 0xffb23c], sun: 0xff6a30, sunI: 3.0, hemi: 0xb0a0a8, hemiG: 0x5a4c4c, hemiI: 0.9, env: 0.7, envSat: 0.25, ex: 1.14, sat: 1.12, con: 0.12, tint: 0xffc89a, cloud: 0xff7a5a },
-  { el: 4, sky: [0x3a5aa4, 0x6a80b8, 0xc89aa0, 0xf4aa74, 0xffbc72], sun: 0xffa55c, sunI: 5.0, hemi: 0xc7b8c9, hemiG: 0x8a6a50, hemiI: 1.0, env: 1.0, envSat: 0.4, ex: 1.1, sat: 1.2, con: 0.13, tint: 0xffd29a, cloud: 0xffc89a },
-  { el: 10, sky: [0x2c68c2, 0x4a86cd, 0x86a9d4, 0xdcc0a8, 0xf4d2a4], sun: 0xffcc8c, sunI: 5.6, hemi: 0xdde0ea, hemiG: 0x8a7a64, hemiI: 1.0, env: 1.0, envSat: 0.28, ex: 1.06, sat: 1.14, con: 0.12, tint: 0xffe6c0, cloud: 0xfff0e0 },
+  { el: 4, sky: [0x3a5aa4, 0x6a80b8, 0xc89aa0, 0xf4aa74, 0xffbc72], sun: 0xff9640, sunI: 5.4, hemi: 0xd0b8b0, hemiG: 0xa86c3e, hemiI: 1.0, env: 1.0, envSat: 0.4, ex: 1.1, sat: 1.32, con: 0.13, tint: 0xffc486, cloud: 0xffc89a },
+  { el: 10, sky: [0x2c68c2, 0x4a86cd, 0x86a9d4, 0xdcc0a8, 0xf4d2a4], sun: 0xffbc72, sunI: 5.8, hemi: 0xe0d8d8, hemiG: 0x9a7448, hemiI: 1.0, env: 1.0, envSat: 0.28, ex: 1.06, sat: 1.22, con: 0.12, tint: 0xffe6c0, cloud: 0xfff0e0 },
   { el: 24, sky: [0x2468c8, 0x3f86dc, 0x6aa6e8, 0x9cc6ee, 0xcadef0], sun: 0xffe6c4, sunI: 5.8, hemi: 0xe4e8ee, hemiG: 0x8a7a64, hemiI: 0.9, env: 0.9, envSat: 0.2, ex: 1.0, sat: 1.0, con: 0.12, tint: 0xfff5e6, cloud: 0xffffff },
   { el: 40, sky: [0x2166c8, 0x3a84dc, 0x66a4e8, 0x9ac6ee, 0xc8def0], sun: 0xffeed6, sunI: 6.2, hemi: 0xe4e8ee, hemiG: 0x8a7a64, hemiI: 0.9, env: 0.9, envSat: 0.2, ex: 1.0, sat: 1.0, con: 0.12, tint: 0xfff5e6, cloud: 0xffffff },
 ];
@@ -141,8 +142,11 @@ export function lightFor(t, w = { cloud: 10, rain: 0, code: 0 }) {
   }
   const sunI = num.sunI * THREE.MathUtils.lerp(1, 2 / 6, grey);
   const sunColor = c.sun.clone().lerp(PALE, smooth(0.5, 0.9, cloud) * 0.6 * dayW);
-  const night = smooth(-6, -14, el);                  // 0 until the end of civil twilight, 1 at night
-  const moonI = 0.6 * night * (1 - grey * 0.5);
+  const night = smooth(-6, -14, el);
+  // dawn is not dusk run backwards: the sun is in the east and the sky is cool and pale, a peach / lavender horizon under a pale blue zenith, not the dusk's magenta
+  const dawnW = (az < 180 ? 1 : 0) * smooth(-9, -4, el) * (1 - smooth(3, 11, el));
+  if (dawnW > 0) { DAWN.forEach((h, k) => sky[k].lerp(col(h), dawnW * 0.88)); }                  // 0 until the end of civil twilight, 1 at night
+  const moonI = 0.9 * night * (1 - grey * 0.5);
   const sunDir = sunVector(el, az);
   const useSun = el > -2.5;
   const lightDir = useSun ? sunVector(Math.max(el, 7), az) : MOON.clone();
@@ -155,6 +159,6 @@ export function lightFor(t, w = { cloud: 10, rain: 0, code: 0 }) {
     hemiSky: c.hemi.clone(), hemiGround: c.hemiG.clone(), hemiI: num.hemiI * (1 + 0.11 * cloud),
     env: num.env * (1 + 0.11 * grey), envSat: num.envSat, exposure: num.ex + cloud * 0.15 * dayW,
     sky, zenith, horizon, haze: horizon.clone().lerp(zenith, 0.3).multiplyScalar(0.8),
-    sat: num.sat, con: num.con, tint: raw(A.tint).lerp(raw(B.tint), f), cloudTint: c.cloud, lit, lamp,
+    sat: num.sat - 0.12 * dawnW, con: num.con, tint: raw(A.tint).lerp(raw(B.tint), f), cloudTint: c.cloud, lit, lamp,
   };
 }

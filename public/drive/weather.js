@@ -49,7 +49,7 @@ export function applyWeather(w, { scene, renderer, sun, hemi, roads, real = fals
 function applyRealLight(w, { scene, renderer, sun, hemi, roads, fog, when, prev = null }) {
   const L = lightFor(when ?? moment(), w), cloud = w.cloud / 100;
   scene.userData.light = L; scene.userData.weather = w;
-  GLOW.uLit.value = L.lit; GLOW.uLamp.value = L.lamp; GLOW.uPoolK.value = w.rain ? 1.7 : 1;
+  GLOW.uLit.value = L.lit; GLOW.uLamp.value = L.lamp; GLOW.uPoolK.value = w.rain ? 0.7 : 1;
   const fogNear = fog ? 90 : 320, fogFar = fog ? 420 : 1600;
   if (scene.fog) { scene.fog.color.copy(L.horizon); scene.fog.near = fogNear; scene.fog.far = fogFar; } else scene.fog = new THREE.Fog(L.horizon, fogNear, fogFar);
   sun.shadow.radius = 2 + cloud * 8;   // soft-edged shadows under cloud cover
