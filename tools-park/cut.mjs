@@ -32,7 +32,7 @@ try {
     while (n < 20000) {
       if (MODE === 'hold') { d.keys.add('gas'); d.car.targetD = d.car.s > d.spot.s - 70 ? d.spot.d : d.route.lane(d.car.s, 0); }
       d.tick(DT); clockMs += DT * 1000; n++; if (rep && n % 2 === 0) rep.tick();
-      if (d.car.s > d.spot.s - 12 || d.state !== 'driving') {
+      if ((d.state === 'driving' && d.car.s > d.spot.s - 12) || ['parked', 'late', 'busted'].includes(d.state)) {
         const r = await shot();
         const row = { k: k++, state: d.state, s: +d.car.s.toFixed(2), dOff: +(d.car.d - d.spot.d).toFixed(2), v: +d.car.v.toFixed(2), op: +r.op.toFixed(3), lum: +r.lum.toFixed(1) };
         rows.push(row); await window.__keep({ row, url: r.url });
