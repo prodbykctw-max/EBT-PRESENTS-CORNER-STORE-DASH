@@ -26,7 +26,7 @@ const SIM = [-130, 380];   // route-space window around the car that is always s
 // a stretch of pavement with less than this much band (m, see bandAt) is too narrow for a runner and someone in his way to pass
 // each other, so on the stretch the chase runs along nobody stands in it and nobody walks into it while he's coming (clearNarrow, update)
 const ROOM = 1.7;
-const FURNITURE = { tree_round: 0.45, tree_upright: 0.35, lamp: 0.2, signal: 0.25, bench: 0.85, bin: 0.3, hydrant: 0.25, shelter: 1.6 };
+const FURNITURE = { tree_round: 0.45, tree_upright: 0.35, lamp: 0.2, signal: 0.25, bench: 0.85, bin: 0.3, hydrant: 0.25, shelter: 1.6, pole: 0.2 };   // (pole: the corner store's street-name sign, city.js setBackHero)
 
 // ------------------------------------------------------------------ the person (faces +Z, feet at y = 0)
 function personGeometry() {

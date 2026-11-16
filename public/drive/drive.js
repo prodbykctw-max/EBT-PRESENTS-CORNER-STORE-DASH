@@ -6,7 +6,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { GLTFLoader } from './vendor/GLTFLoader.js';
 import { MeshoptDecoder } from './vendor/meshopt_decoder.module.js';
-import { buildCitySteps, makeGround, toV3, rayTargets } from './city.js';
+import { buildCitySteps, makeGround, toV3, rayTargets, setBackHero } from './city.js';
 import { pace } from './steps.js';
 import { LEVEL, standOn } from './levels.js';
 import { CUT } from './roads.js';
@@ -265,6 +265,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   for (const t of Object.values(tex)) if (t) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; }
   const ground = makeGround(W);
   const route = new RouteFrame(W, ground, 200); // road continues 200 m past the store: traffic drives on out of view
+  const heroMove = setBackHero(hero.scene, route);   // wide sidewalks: the corner store's row moves back from the curb, with its sidewalk slab and street sign (city.js; the other buildings: setback.js, from buildCity)
   mk('assets-ready');
   // (the same build as buildCity(), a part at a time: a prepared drive gives the page a turn between the parts)
   const cityBuild = buildCitySteps(W, tex, ground, route, props.scene, trees.scene);
@@ -361,7 +362,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const crowd = world.crowd = new Crowd({
     route, ground, surfAt, heightAt: footAt, scene, camera, spot, mobile: MOBILE, isFree: city.isFree, alt: altPeople, blob: ContactBlobs,
     walls: city.walls, heroWalls, roads: city.streets.index,
-    furniture: { ...city.furniture, shelter: [...(city.furniture.shelter || []), ...trams.shelters] },   // riders wait at streetcar platforms too
+    furniture: { ...city.furniture, shelter: [...(city.furniture.shelter || []), ...trams.shelters], pole: heroMove.poles },   // riders wait at streetcar platforms too; the corner store's street sign is a pole on the walk
     onRoute: (x, y) => onRouteRoad(x, y),
     visible: (x, y, z, r) => world.visible(x, y, z, r),
   });
@@ -958,7 +959,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   // bin, hydrant and shelter, and the edge of the map; here are the moving things (cars, people, the bully) and how the person is driven. s and d (along and across the route)
   // are worked out from the position every step, because the traffic and the crowd read them.
   if (frozen()) await macrotask();
-  const walk = walkWorldFor({ city, heroWalls, shelters: trams.shelters, W });
+  const walk = walkWorldFor({ city, heroWalls, shelters: trams.shelters, poles: heroMove.poles, W });
   if (frozen()) await macrotask();
   const doorP = route.at(doorS, doorD), DOOR = { x: doorP.x, y: doorP.y };   // the driver's door, in the world plane
   const DOOR_REACH = 1.2;   // m from the door at which you are in

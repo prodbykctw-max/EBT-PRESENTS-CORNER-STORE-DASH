@@ -24,7 +24,7 @@ const cartPB64 = readFileSync(here('cartp.b64'), 'utf8').trim();   // the ending
 const cartSB64 = readFileSync(here('carts.b64'), 'utf8').trim();
 // GSAP (motion): one vendored copy, shared with the drive (public/drive/vendor/gsap.min.js)
 const titleScene = readFileSync(here('titlescene.js'), 'utf8');   // the title screen's painted street (its own script, before the game)
-const titleArt = Object.fromEntries(['sky', 'skyline', 'sides', 'store', 'street', 'signtap'].map((k) => [k, readFileSync(here(`title_${k}.b64`), 'utf8').trim()]));   // the title's painted layers (WebP, alpha)
+const titleArt = Object.fromEntries(['sky', 'clouds', 'skyline', 'sides', 'store', 'street', 'signtap'].map((k) => [k, readFileSync(here(`title_${k}.b64`), 'utf8').trim()]));   // the title's painted layers (WebP, alpha)
 const fontSedgwick = readFileSync(here('font_sedgwick.b64'), 'utf8').trim();   // the painted title's font (Sedgwick Ave Display, SIL OFL 1.1; licence in font_sedgwick_OFL.txt)
 const gsapSrc = readFileSync(here('../public/drive/vendor/gsap.min.js'), 'utf8');
 
@@ -37,7 +37,7 @@ const out = shell
   .replace('%%CARTP%%', cartPB64)
   .replace('%%CARTS%%', cartSB64)
   .replace('%%TITLESCENE%%', () => titleScene)
-  .replace('%%TA_SKY%%', titleArt.sky).replace('%%TA_SKYLINE%%', titleArt.skyline).replace('%%TA_SIDES%%', titleArt.sides)
+  .replace('%%TA_SKY%%', titleArt.sky).replace('%%TA_CLOUDS%%', titleArt.clouds).replace('%%TA_SKYLINE%%', titleArt.skyline).replace('%%TA_SIDES%%', titleArt.sides)
   .replace('%%TA_SIGNTAP%%', titleArt.signtap).replace('%%TA_STORE%%', titleArt.store).replace('%%TA_STREET%%', titleArt.street)
   .replace('%%FONT_SEDGWICK%%', fontSedgwick)
   .replace('%%GAME%%', game)
