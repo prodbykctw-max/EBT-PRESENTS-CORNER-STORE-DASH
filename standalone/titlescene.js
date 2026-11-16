@@ -3,7 +3,7 @@
    brush blobs, grain, rim light; no image files) and baked ONCE per size into a few offscreen layers, back to front:
    sky, drifting clouds, far skyline, near skyline, left building, right building, the store front, sidewalk + street,
    the lamp post. Every frame is then only drawImage calls. Like Will Hill's title the layers FLY IN (staggered, about
-   1.5 s) while the title card assembles on top, then idle: the buildings stay still (no sway, Nov 15 2026), the sign flickering,
+   1.5 s) while the title card assembles on top, then idle: the buildings stay still (no sway, Nov 15 2026), the sign swapping words by crossfade,
    the lamp glowing. A little gag plays on the street every ~10 s: the guy sprints across, the bully chases a beat
    later, the guy skids, an E.B.T card flips out of his pocket and spins down to the sidewalk, they run off the far side.
    The guy and the bully are the store's own sprite sheets (player.b64 / bully.b64) drawn the way drawSheet draws them.
@@ -13,7 +13,7 @@
    = everything placed, one still frame, no loop at all, no gag; no GSAP needed (its own easing). A tap on the title
    during the intro calls settle() (csd.js), which puts every layer in place and cancels a running gag.
    With the painted street it also lays out the boxless title lettering (layoutTitle) and runs the store sign as the start button
-   (CORNER STORE / TAP TO START with a neon flicker, signMode); see docs/GAME_DESIGN.md "The painted title". */
+   (CORNER STORE / TAP TO START with a slow crossfade, signK); see docs/GAME_DESIGN.md "The painted title". */
 var TitleScene=(function(){
 "use strict";
 var C={pink:"#E85D9E",mag:"#C2255C",gold:"#F5C518",cream:"#FFF3E0",coral:"#F08C4B",navy:"#1E2340",ink:"#0A0A0C"};
@@ -21,12 +21,13 @@ var SETTLED=1.75, GAG_FIRST=3.2, GAG_EVERY=9.5;           // seconds: layers all
 var cv=null, g=null, host=null, L=null, raf=0, running=false, frames=0, seen=false, hold=false, rsz=0;
 var VW=0, VH=0, Q=1, U=1, T=0, last=0, acc=0, sprites=null, reduced=false, noisePat=null, MG=14;
 var gag={t:-1, next:0, dir:1, n:0, seg:null};
-/* the store sign as the start button: CORNER STORE (the painted original) and TAP TO START (title_signtap) swap with a neon flicker.
-   at: the clock time the cycle starts (1e9 = not yet: csd.js calls signGo() when the title has assembled); cv: the four sign pictures
-   (null if title_signtap did not decode: no flashing, the sign is still the button); ph: the plain 0/1 swap used under reduced motion;
-   test: forces a state for the tests ("orig"|"dO"|"tap"|"dT"); noGlow: the tests switch the glow off to compare pixels. */
+/* the store sign as the start button: CORNER STORE (the painted original) and TAP TO START (title_signtap) swap with a slow crossfade
+   (no flicker, no dimming: WCAG 2.3.1, the owner has epilepsy).
+   at: the clock time the cycle starts (1e9 = not yet: csd.js calls signGo() when the title has assembled); cv: {tap}, the TAP TO START picture
+   (null if title_signtap did not decode: no swap, the sign is still the button); ph: the plain 0/1 swap used under reduced motion;
+   test: forces a state for the tests ("orig"|"tap", or a number 0..1 = how much TAP TO START shows); noGlow: the tests switch the glow off to compare pixels. */
 var SG={at:1e9, cv:null, ph:0, tm:0, test:null, noGlow:false};
-var SG_HOLD=1.4, SG_FLK=[0.07,0.07,0.06], SG_CYC=2*(SG_HOLD+0.2);   // seconds: each word holds 1.4 s, the flicker is dim / other word / dim
+var SG_HOLD=1.4, SG_FADE=0.6, SG_CYC=2*(SG_HOLD+SG_FADE);   // seconds: each word holds 1.4 s, then a 0.6 s eased crossfade to the other (a cycle is 4 s: two changes, one every 2 s)
 
 /* ---- little helpers ---- */
 function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
@@ -71,7 +72,7 @@ function loadArt(cb){
   artCbs.push(cb); if(artState==="loading") return;
   var src=(typeof TITLE_ART_SRC!=="undefined")?TITLE_ART_SRC:null;
   if(!src){ artState="fail"; var c0=artCbs; artCbs=[]; c0.forEach(function(f){ f(); }); return; }
-  artState="loading"; var keys=ARTK.concat(["signtap"]), left=keys.length, bad=false;   // signtap (the flashing sign word) is optional: if it fails the sign just does not flash
+  artState="loading"; var keys=ARTK.concat(["signtap"]), left=keys.length, bad=false;   // signtap (the swapping sign word) is optional: if it fails the sign just does not swap
   keys.forEach(function(k){ var im=new Image();
     im.onload=function(){ artImg[k]=im; if(--left===0) done(); };
     im.onerror=function(){ if(k!=="signtap") bad=true; if(--left===0) done(); };
@@ -265,34 +266,28 @@ function bakeArt(){
   if(!tall){ L.bw=[0,184]; L.bandR=mkBand(FR.w-184,FR.w); }
   SG.cv=mkSign(); layoutTitle(); sgTimer();
 }
-/* ---- the sign pictures: the original sign crop and the TAP TO START one, each also dimmed to ~55% (the flicker) ---- */
+/* ---- the sign picture: the TAP TO START crop (the original word is the store layer's own pixels underneath) ---- */
 function mkSign(){
-  var st=artImg.store, tp=artImg.signtap, S=FR.signtap;
+  var tp=artImg.signtap, st=artImg.store, S=FR.signtap;
   if(!tp||!st||tp.naturalWidth!==S.w||tp.naturalHeight!==S.h) return null;
-  var c2=function(){ var c=document.createElement("canvas"); c.width=S.w; c.height=S.h; return c; }, kk=st.naturalWidth/FR.w;
-  var o=c2(); o.getContext("2d").drawImage(st,S.x*kk,S.y*kk,S.w*kk,S.h*kk,0,0,S.w,S.h);
-  var t=c2(); t.getContext("2d").drawImage(tp,0,0);
-  var dim=function(src){ var d=c2(), x=d.getContext("2d"); x.drawImage(src,0,0); x.globalCompositeOperation="source-atop"; x.fillStyle="rgba(0,0,0,0.45)"; x.fillRect(0,0,S.w,S.h); return d; };
-  return {dO:dim(o), tap:t, dT:dim(t)};
+  var t=document.createElement("canvas"); t.width=S.w; t.height=S.h; t.getContext("2d").drawImage(tp,0,0);
+  return {tap:t};
 }
-function signMode(){        // which sign picture shows now: "orig" (nothing drawn over the store), "dO", "tap" or "dT"
-  if(!SG.cv) return "orig";
-  if(SG.test) return SG.test;
-  if(reduced) return SG.ph?"tap":"orig";
-  var t=T-SG.at; if(t<0) return "orig";
-  var u=t%SG_CYC, tapSide=u>=SG_HOLD+0.2&&u<SG_CYC-0.2;     // 0..1.4 original, flicker, 1.6..3.0 TAP TO START, flicker
-  if(u<SG_HOLD) return "orig";
-  if(u<SG_HOLD+0.2||u>=SG_CYC-0.2){                           // a flicker: dim the word that was showing, the new word, dim it again
-    var a=u<SG_HOLD+0.2? u-SG_HOLD : u-(SG_CYC-0.2), toTap=u<SG_HOLD+0.2, f=SG_FLK;
-    if(a<f[0]) return toTap?"dO":"dT";
-    if(a<f[0]+f[1]) return toTap?"tap":"orig";
-    return toTap?"dT":"dO";
-  }
-  return tapSide?"tap":"orig";
+function signK(){           // how much TAP TO START shows now, 0..1: 0 = CORNER STORE (nothing drawn over the store), 1 = TAP TO START
+  if(!SG.cv) return 0;
+  if(SG.test!==null&&SG.test!==undefined) return typeof SG.test==="number"? SG.test : (SG.test==="tap"?1:0);
+  if(reduced) return SG.ph?1:0;
+  var t=T-SG.at; if(t<0) return 0;
+  var u=t%SG_CYC, f=SG_HOLD+SG_FADE;                          // 0..1.4 CORNER STORE, fade to TAP TO START, hold 1.4, fade back
+  if(u<SG_HOLD) return 0;
+  if(u<f){ var a=(u-SG_HOLD)/SG_FADE; return a*a*(3-2*a); }  // smoothstep: eased at both ends
+  if(u<f+SG_HOLD) return 1;
+  var b=(u-f-SG_HOLD)/SG_FADE; return 1-b*b*(3-2*b);
 }
-function signBusy(){        // true while a flicker runs: the loop draws at full rate so the 60-70 ms steps show
-  if(!SG.cv||reduced||SG.test) return false;
-  var t=T-SG.at; if(t<0) return false; var u=t%SG_CYC; return (u>=SG_HOLD&&u<SG_HOLD+0.2)||u>=SG_CYC-0.2;
+function signMode(){ var k=signK(); return k<=0?"orig":(k>=1?"tap":"mix"); }   // for the tests: "orig", "tap", or "mix" while it fades
+function signBusy(){        // true while a fade runs: the loop draws at full rate so it is smooth
+  if(!SG.cv||reduced||SG.test!==null&&SG.test!==undefined) return false;
+  var t=T-SG.at; if(t<0) return false; var u=t%SG_CYC, f=SG_HOLD+SG_FADE; return (u>=SG_HOLD&&u<f)||u>=f+SG_HOLD;
 }
 function sgTimer(){         // reduced motion has no loop: a plain swap every 2 s
   clearTimeout(SG.tm); SG.tm=0;
@@ -370,19 +365,19 @@ function drawArt(){
   if(wd){ if(oL) bands(oL,false); if(oR) bands(oR,true); }
   if(oL) put("sides",F.sideL,0,FR.w/2,oL); if(oR) put("sides",F.sideR,FR.w/2,FR.w,oR);
   var oS=artOff(F.store); if(oS) put("store",F.store,0,FR.w,oS);
-  if(oS&&SG.cv){                                                               // the sign's other word / its flicker: over the store layer, same transform and offset, so it lines up pixel for pixel and flies in with the store
-    var sm=signMode(); if(sm!=="orig"){ var sp=FR.signtap, cl=sp.clip;   // TAP TO START is clipped to the box the new letters can change, so every other pixel of the store stays the store's own, byte for byte
-      g.save(); if(sm==="tap"){ g.beginPath(); g.rect(fx(cl.x,oS),fy(cl.y,oS),cl.w*L.s,cl.h*L.s); g.clip(); }   // (the dimmed pictures darken the whole sign board, so they are not clipped)
-      g.drawImage(SG.cv[sm],fx(sp.x,oS),fy(sp.y,oS),sp.w*L.s,sp.h*L.s); g.restore(); } }
+  if(oS&&SG.cv){                                                               // the sign's other word, faded in over the store layer, same transform and offset, so it lines up pixel for pixel and flies in with the store
+    var sk=signK(); if(sk>0){ var sp=FR.signtap, cl=sp.clip;   // TAP TO START is clipped to the box the new letters can change, so every other pixel of the store stays the store's own, byte for byte
+      g.save(); g.beginPath(); g.rect(fx(cl.x,oS),fy(cl.y,oS),cl.w*L.s,cl.h*L.s); g.clip(); g.globalAlpha=sk;   // the crossfade: TAP TO START at sk over CORNER STORE
+      g.drawImage(SG.cv.tap,fx(sp.x,oS),fy(sp.y,oS),sp.w*L.s,sp.h*L.s); g.restore(); } }
   var oT=artOff(F.street); if(oT) { if(wd) tile("street",oT); else put("street",F.street,0,FR.w,oT); }
   // light pulses over the painted sign, the OPEN neon and the lamp (frame coordinates, riding their layer's offset)
   var up=oS?clamp((T-1.5)/0.3,0,1):0;
   if(up>0&&!SG.noGlow){
-    var fl= reduced? 0.10 : 0.09+0.04*Math.sin(T*9.3)*Math.sin(T*2.1)+(((T*0.43)%1)<0.025?-0.09:0); if(T<1.9&&!reduced) fl*=(Math.sin(T*70)>0?1:0.3); fl=Math.max(0,fl)*up;
+    var fl= reduced? 0.10 : 0.09+0.025*Math.sin(T*2.8); fl=Math.max(0,fl)*up;   // the sign's light: one slow swell (0.45 a second, +-28%), no flicker, no drop-outs
     var sg=FR.sign, op=FR.open, sx0=fx(sg.x,oS), sy0=fy(sg.y,oS), sw0=sg.w*L.s, sh0=sg.h*L.s;
     g.globalCompositeOperation="lighter"; g.fillStyle=rgba(C.gold,fl); g.fillRect(sx0,sy0,sw0,sh0); glowAt(sx0+sw0/2,sy0+sh0/2,sw0*0.62,C.gold,fl*1.1);
     var pl=reduced?0.5:0.5+0.5*Math.sin(T*3.1); glowAt(fx(op.x+op.w/2,oS),fy(op.y+op.h/2,oS),op.w*L.s*0.8,C.pink,0.10+0.14*pl*up);
-    var lf=reduced?0.4:0.4+0.07*Math.sin(T*4.1)+0.04*Math.sin(T*13); if(oL) glowAt(fx(FR.lamp.x,oL),fy(FR.lamp.y,oL),70*L.s,C.gold,lf*0.5*up);
+    var lf=reduced?0.4:0.4+0.07*Math.sin(T*4.1); if(oL) glowAt(fx(FR.lamp.x,oL),fy(FR.lamp.y,oL),70*L.s,C.gold,lf*0.5*up);
     g.globalCompositeOperation="source-over";
   }
   g.fillStyle=vgrad(g,VH*0.84,VH,[[0,"rgba(8,6,24,0)"],[1,"rgba(8,6,24,0.55)"]]); g.fillRect(0,VH*0.84,VW,VH*0.16);   // keeps the credits line readable over the crosswalk
@@ -410,8 +405,8 @@ function draw(){
   if(cu>0){ var off=reduced?0:(T*5*U)%c.Wc; g.globalAlpha=clamp(cu*1.5,0,1); for(var k=-1;k<=1;k++){ var px=off+k*c.Wc; if(px>VW||px+c.Wc<0) continue; g.drawImage(c.s.c,px,c.y,c.s.w,c.s.h); } g.globalAlpha=1; }
   lay(L.far); lay(L.near); lay(L.lb); if(L.rb) lay(L.rb);
   var so=lay(L.store);
-  if(so){ var st=L.store, up=clamp((T-1.5)/0.3,0,1), fl=0;                       // the sign lights up after the store lands, then flickers a little
-    if(up>0){ fl= reduced? 0.14 : 0.13+0.05*Math.sin(T*9.3)*Math.sin(T*2.1)+(((T*0.43)%1)<0.025?-0.13:0); if(T<1.9&&!reduced) fl*= (Math.sin(T*70)>0?1:0.3); fl=Math.max(0,fl)*up; }
+  if(so){ var st=L.store, up=clamp((T-1.5)/0.3,0,1), fl=0;                       // the sign lights up after the store lands, then swells slowly
+    if(up>0){ fl= reduced? 0.14 : 0.13+0.035*Math.sin(T*2.8); fl=Math.max(0,fl)*up; }
     var sg=st.sign; if(!sg) fl=0;
     var gx=L.store.x+so.x, gy2=L.store.y+so.y;
     if(fl>0&&sg){ g.globalCompositeOperation="lighter"; g.fillStyle=rgba(C.gold,fl); g.fillRect(gx+sg.x,gy2+sg.y,sg.w,sg.h); glowAt(gx+sg.x+sg.w/2,gy2+sg.y+sg.h/2,sg.w*0.7,C.gold,fl*1.2);
@@ -419,7 +414,7 @@ function draw(){
   }
   lay(L.st);
   var lo=lay(L.lamp);
-  if(lo&&lo.u>0.95){ var lg=L.lamp.glow, lf=reduced?0.5:0.5+0.08*Math.sin(T*4.1)+0.04*Math.sin(T*13); g.globalCompositeOperation="lighter"; glowAt(lg.x+lo.x,lg.y+lo.y,74*U,C.gold,lf); g.globalCompositeOperation="source-over"; }
+  if(lo&&lo.u>0.95){ var lg=L.lamp.glow, lf=reduced?0.5:0.5+0.08*Math.sin(T*4.1); g.globalCompositeOperation="lighter"; glowAt(lg.x+lo.x,lg.y+lo.y,74*U,C.gold,lf); g.globalCompositeOperation="source-over"; }
   drawGag();
   lay(L.vig);
 }
@@ -543,7 +538,7 @@ function start(o){
   var intro=!!(o&&o.intro)&&!reduced&&!seen;
   seen=true;
   running=!reduced; L=null; T= intro? 0 : SETTLED+0.8; gag.t=-1; gag.next= T+(intro? GAG_FIRST : 2.2); acc=0; last=0; hold=false;
-  SG.at= (o&&o.assemble&&!reduced)? 1e9 : T+0.2; SG.ph=0;               // the title assembly calls signGo() when it ends; any other start flashes at once
+  SG.at= (o&&o.assemble&&!reduced)? 1e9 : T+0.2; SG.ph=0;               // the title assembly calls signGo() when it ends; any other start swaps at once
   loadArt(function(){                                                    // the painted layers decode first (a few ms: they are in the page); fails -> the procedural street
     if(!host.classList.contains("on")||L) return;
     measure(); bake(); g=cv.getContext("2d");
@@ -559,8 +554,9 @@ function signGo(){ if(SG.at>T) SG.at=T; }      // the title has assembled (or wa
 return {
   start:start, settle:settle, stop:halt, signGo:signGo,
   get frames(){ return frames; }, get running(){ return running; }, get T(){ return T; },
-  _sign:function(m,noGlow){ SG.test=m||null; SG.noGlow=!!noGlow; if(L) render(); },     // test hook: force a sign picture ("orig"|"dO"|"tap"|"dT"), glow off; _sign() releases it
-  _signAt:function(t){ var T0=T, a=SG.at, h=SG.test; T=t; SG.at=0; SG.test=null; var m=signMode(); T=T0; SG.at=a; SG.test=h; return m; },   // test hook: the sign picture t seconds into the cycle
+  _sign:function(m,noGlow){ SG.test=(m===0||m)? m : null; SG.noGlow=!!noGlow; if(L) render(); },     // test hook: force a sign picture ("orig"|"tap"|0..1), glow off; _sign() releases it
+  _signAt:function(t){ var T0=T, a=SG.at, h=SG.test; T=t; SG.at=0; SG.test=null; var m=signMode(); T=T0; SG.at=a; SG.test=h; return m; },
+  _signK:function(t){ var T0=T, a=SG.at, h=SG.test; T=t; SG.at=0; SG.test=null; var k=signK(); T=T0; SG.at=a; SG.test=h; return k; },   // test hook: how much TAP TO START shows t seconds into the cycle (0..1)   // test hook: the sign picture t seconds into the cycle
   get _art(){ return !!(L&&L.art); }, get _signOk(){ return !!SG.cv; },
   _seek:function(t,gt){ hold=true; T=t; gag.t=-1; if(gt!=null){ gag.next=1e9; if(gag.t<0) startGag(); gag.t=gt; } render(); }   // test hook
 };

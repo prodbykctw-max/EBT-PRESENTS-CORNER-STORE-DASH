@@ -945,13 +945,13 @@ function titleAssemble(){
 }
 function titleIdleOff(){ TITLE.idle.forEach(function(t){ t.kill(); }); TITLE.idle=[]; var o=el("ovTitle"); GS&&GS.set([o.querySelector(".card"),el("btnTitle")],{clearProps:"transform,boxShadow"}); }
 /* ---------- the ending (you win the store run): victory -> Hall of Fame -> credits ----------
-   1. winSeq: the screen freezes and flashes white (Pokemon's flash), the fanfare plays, YOU WIN! slams in, you pop up
+   1. winSeq: the screen freezes and the dark victory screen fades in softly (no flash: nothing in the game flashes), the fanfare plays, YOU WIN! slams in, you pop up
       standing behind a shopping cart, hands on the handle (hopping), then the score fills in part by part like an EXP bar.
    2. hofIn: the Hall of Fame card (you pushing the cart, in a frame with a shine); the initials entry, SAVE SCORE and the
       leaderboard live on this screen (ovEnd, as before).
    3. creditsIn: the credits roll while you push the cart across the bottom; it ends on RUN IT BACK / MAIN MENU.
    A tap on the victory screen skips to its next beat; a tap on the credits skips to their end. With reduced motion (or no
-   GSAP) there are no flashes or rolls: the victory screen is one still page and the credits are a static list.
+   GSAP) there are no rolls or counting: the victory screen is one still page and the credits are a static list.
    The cart art (cartp.b64 / carts.b64) comes from standalone/tools/bake_cart_ride.py: 3 portrait frames (3/4 front view: lean,
    hop, settle: the bounce) and 8 side-view frames (a calm walk, hands on the handle; the wheels turn 3/8 of a turn per frame
    so the 4-spoke cross closes the loop). He stands BEHIND the cart and pushes it. */
@@ -1003,7 +1003,6 @@ function fillExp(){
   var run=0; END.rows.forEach(function(r){ r.el.style.opacity="1"; r.el.style.transform=""; r.vEl.textContent="+"+commas(r.v); r.fill.style.width=(r.frac*100)+"%"; run+=r.v; });
   END.totRow.style.opacity="1"; setTot(S.score);
 }
-function flashNow(op){ var f=el("flash"); f.style.display=op>0?"block":"none"; f.style.opacity=String(op); }
 function winSeq(){
   endingKill(true);
   S.ending=true;
@@ -1011,7 +1010,7 @@ function winSeq(){
   el("winSkip").textContent="TAP TO SKIP";
   var cart=el("winCart"); cart.style.height="";
   if(announceEl){ if(GS) GS.killTweensOf(announceEl); announceEl.style.opacity="0"; }
-  if(!MOTION){                                   // reduced motion: one still page, no flashes, no counting
+  if(!MOTION){                                   // reduced motion: one still page, no fade, no counting
     o.classList.add("on","ready"); END.stage="done";
     END.rows.forEach(function(r){ r.el.style.opacity="1"; }); END.totRow.style.opacity="1"; fillExp();
     cart.style.height="min(150px,20vh)"; el("winSkip").textContent="TAP TO CONTINUE"; return;
@@ -1021,12 +1020,9 @@ function winSeq(){
   GS.set(title,{opacity:0}); GS.set(cart,{opacity:0}); GS.set(el("winSkip"),{opacity:0});
   END.rows.forEach(function(r){ GS.set(r.el,{opacity:0}); }); GS.set(END.totRow,{opacity:0});
   o.classList.add("on","ready"); GS.set(o,{opacity:0,pointerEvents:"auto"});
-  var fl=el("flash"); fl.style.display="block";
   var tl=GS.timeline();
-  // three white flashes; the dark victory screen is switched in under the first one
-  tl.set(fl,{opacity:1},0).set(o,{opacity:1},0.05).to(fl,{opacity:0,duration:0.14,ease:"power1.out"},0.05)
-    .set(fl,{opacity:1},0.26).to(fl,{opacity:0,duration:0.14,ease:"power1.out"},0.3)
-    .set(fl,{opacity:1},0.52).to(fl,{opacity:0,duration:0.22,ease:"power1.out",onComplete:function(){ fl.style.display="none"; }},0.56);
+  // no flashing (WCAG 2.3.1, the owner has epilepsy): the dark victory screen simply fades in over the frozen store, once, 0.7 s, eased
+  tl.to(o,{opacity:1,duration:0.7,ease:"sine.inOut"},0.05);
   tl.fromTo(title,{opacity:0,scale:2.4},{opacity:1,scale:1,duration:0.3,ease:"back.out(2)"},0.82)
     .call(function(){ winShake(10); haptic(HAP.win); },null,0.84)
     .fromTo(cart,{opacity:0,scale:0,y:60},{opacity:1,scale:1,y:0,duration:0.6,ease:"back.out(1.9)"},1.25)
@@ -1035,13 +1031,11 @@ function winSeq(){
     .call(function(){ expStart(); },null,2.7);        // the fanfare is done: the score fills
   END.tl=tl;
 }
-function winShake(px){
-  var o=el("ovWin"); GS.killTweensOf(o,"x,y"); var tl=GS.timeline();
-  for(var i=0;i<6;i++) tl.to(o,{x:(i%2?-1:1)*px*(1-i/7),y:(i%3?-1:1)*px*0.5*(1-i/7),duration:0.04});
-  tl.to(o,{x:0,y:0,duration:0.05});
+function winShake(px){   // one soft thump (down and back, 0.6 s), not a 20 Hz jitter of the whole screen (WCAG 2.3.1)
+  var o=el("ovWin"); GS.killTweensOf(o,"x,y"); GS.timeline().to(o,{y:px*0.6,duration:0.2,ease:"sine.out"}).to(o,{y:0,duration:0.4,ease:"sine.inOut"});
 }
 function winBounce(){   // the cart hops while it waits
-  GS.killTweensOf(el("winCart"),"y"); GS.to(el("winCart"),{y:-10,duration:0.28,ease:"power1.out",yoyo:true,repeat:-1});
+  GS.killTweensOf(el("winCart"),"y"); GS.to(el("winCart"),{y:-10,duration:0.6,ease:"sine.inOut",yoyo:true,repeat:-1});
 }
 function expStart(){
   if(END.stage!=="victory") return; END.stage="exp"; if(END.tl) END.tl.kill();
@@ -1071,7 +1065,7 @@ function expStart(){
 }
 // tap on the victory screen: skip to the next beat
 function winTap(){
-  if(END.stage==="victory"){ if(END.tl) END.tl.kill(); flashNow(0); var o=el("ovWin"); GS.set(o,{opacity:1,x:0,y:0}); GS.set(el("winTitle"),{opacity:1,scale:1}); GS.set(el("winCart"),{opacity:1,scale:1,y:0}); GS.set(el("winSkip"),{opacity:0.55}); END.stage="victory"; expStart(); }
+  if(END.stage==="victory"){ if(END.tl) END.tl.kill(); var o=el("ovWin"); GS.set(o,{opacity:1,x:0,y:0}); GS.set(el("winTitle"),{opacity:1,scale:1}); GS.set(el("winCart"),{opacity:1,scale:1,y:0}); GS.set(el("winSkip"),{opacity:0.55}); END.stage="victory"; expStart(); }
   else if(END.stage==="exp"){ if(END.tl) END.tl.kill(); fillExp(); GS.set(el("winCart"),{height:Math.min(150,innerHeight*0.2)}); END.stage="done"; hofIn(); }
   else if(END.stage==="done") hofIn();
 }
@@ -1098,7 +1092,7 @@ function hofShine(){
   for(var i=0;i<5;i++){
     var sp=fr.querySelector(".spk"+i); if(!sp){ sp=document.createElement("i"); sp.className="spk spk"+i; fr.appendChild(sp); }
     sp.style.left=(10+Math.random()*78)+"%"; sp.style.top=(8+Math.random()*70)+"%";
-    tl.fromTo(sp,{opacity:0,scale:0.2,rotation:0},{opacity:1,scale:1.15,rotation:45,duration:0.22,yoyo:true,repeat:1,ease:"power1.out"},0.7+i*0.18);
+    tl.fromTo(sp,{opacity:0,scale:0.2,rotation:0},{opacity:0.8,scale:1.15,rotation:45,duration:0.6,yoyo:true,repeat:1,ease:"sine.inOut"},0.7+i*0.5);   // one slow twinkle (1.2 s) per sparkle, one after another: never more than one cycle a second
   }
   END.sparkTl=tl;
 }
@@ -1131,7 +1125,7 @@ function creditsIn(){
   var f=0; END.ride=setInterval(function(){ f=(f+1)%CART_SN; drawS(f); },100);
   GS.killTweensOf(cv); GS.set(cv,{x:-cw-20,scaleX:-1,y:0});
   GS.to(cv,{x:W+20,duration:Math.max(5,W/60),ease:"none",repeat:-1,repeatDelay:0.4});
-  GS.to(cv,{y:-2,duration:0.18,ease:"sine.inOut",yoyo:true,repeat:-1});
+  GS.to(cv,{y:-2,duration:0.6,ease:"sine.inOut",yoyo:true,repeat:-1});
   var Hv=el("crView").clientHeight, Hr=roll.offsetHeight;
   GS.set(roll,{y:Hv});
   END.tl=GS.to(roll,{y:-Hr-20,duration:(Hv+Hr)/52,ease:"none",delay:0.4,onComplete:creditsEnd});
@@ -1144,8 +1138,7 @@ function creditsTap(){ if(END.stage==="credits" && END.tl && END.tl.progress()<1
 function endingKill(quiet){
   stopBounce(); if(END.ride){ clearInterval(END.ride); END.ride=null; }
   if(END.tl){ END.tl.kill(); END.tl=null; } if(END.sparkTl){ END.sparkTl.kill(); END.sparkTl=null; }
-  if(GS){ GS.killTweensOf([el("winCart"),el("ovWin"),el("flash"),el("crCart"),el("crRoll"),el("crEnd"),el("hofCard")]); }
-  flashNow(0);
+  if(GS){ GS.killTweensOf([el("winCart"),el("ovWin"),el("crCart"),el("crRoll"),el("crEnd"),el("hofCard")]); }
   ["ovWin","ovCredits"].forEach(function(id){ var o=el(id); o.classList.remove("on","ready"); o.style.opacity=""; o.style.pointerEvents=""; o.style.transform=""; });
   el("winCart").style.height=""; el("crEnd").style.opacity="0"; el("crEnd").classList.remove("on");
   END.stage=""; S.ending=false;
@@ -1542,11 +1535,11 @@ var ICONS={
 };
 var ICON_PAL={r:"#D0342C",g:"#2F9E44",y:"#F5C518",b:"#B4763B",w:"#F5F2EA",o:"#C98235",m:"#8A2A2A"};
 
-// One shared strobe for the active pickup and its shelf: a sharp 0..1 blink
-// (~3 flashes a second, squared so it snaps bright then falls off) so the
-// floating item and the products it came from flash in step and read as one
-// signal — "that item, that shelf".
-function strobe(t){ var v=0.5+0.5*Math.sin(t*7.5); return v*v; }
+// One shared glow for the active pickup and its shelf: a slow, smooth 0..1 swell
+// (0.7 a second, a plain sine: no flashing, WCAG 2.3.1, the owner has epilepsy) so the
+// floating item and the products it came from brighten in step and read as one
+// signal — "that item, that shelf". Reduced motion: held halfway, no pulse.
+function strobe(t){ return MOTION? 0.5+0.5*Math.sin(t*4.4) : 0.5; }
 // Lights up the active pickup's real product art on the shelf — e.g. while
 // CHIPS is live, the chip bags themselves strobe with a gold glow — so the
 // floating item below reads as "that shelf spot" rather than a disconnected
@@ -1558,14 +1551,14 @@ function drawShelfHighlight(g,t){
   // brighten the products themselves: an additive gold wash over the art
   g.save();
   g.globalCompositeOperation="lighter";
-  g.fillStyle="rgba(255,225,120,"+(0.08+0.40*s).toFixed(2)+")";
+  g.fillStyle="rgba(255,225,120,"+(0.06+0.16*s).toFixed(2)+")";
   g.fillRect(b.x,b.y,b.w,b.h);
   g.restore();
   // and a glowing frame that flares with the same strobe
   g.save();
-  g.shadowColor="rgba(245,197,24,"+(0.5+0.5*s).toFixed(2)+")";
-  g.shadowBlur=10+18*s;
-  g.strokeStyle="rgba(245,197,24,"+(0.35+0.65*s).toFixed(2)+")";
+  g.shadowColor="rgba(245,197,24,"+(0.5+0.3*s).toFixed(2)+")";
+  g.shadowBlur=10+10*s;
+  g.strokeStyle="rgba(245,197,24,"+(0.5+0.4*s).toFixed(2)+")";
   g.lineWidth=4;
   g.strokeRect(b.x-5,b.y-5,b.w+10,b.h+10);
   g.restore();
@@ -1616,8 +1609,8 @@ function draw(){
   // EBT list, in this run's pickup order, with checkmarks
   drawList(g);
   if(S.mode==="play"||S.mode==="end"){
-    // the one active pickup: a real floating 3D item that bobs and strobes —
-    // a soft ground shadow sells "floating", and a gold glow that flares in
+    // the one active pickup: a real floating 3D item that bobs and glows —
+    // a soft ground shadow sells "floating", and a gold glow that swells in
     // step with its shelf (see strobe()) sells "this is the one".
     var t=S.t;
     var it2=currentItem();
@@ -1625,29 +1618,29 @@ function draw(){
       var reg=ITEM_ATLAS[it2.icon];
       var bob=Math.sin(t*2.2)*3, s=strobe(t);
       var cx=S.curPos.x, baseY=S.curPos.y+bob, midY=baseY-reg.h/2;
-      // a newly live item pops into place (growing from its spot on the floor), then bobs and strobes as before
+      // a newly live item pops into place (growing from its spot on the floor), then bobs and glows as before
       if(S.activeIdx!==REVEAL.idx){ REVEAL.idx=S.activeIdx; if(MOTION){ REVEAL.k=0; GS.killTweensOf(REVEAL); GS.to(REVEAL,{k:1,duration:0.5,ease:"back.out(2.2)"}); } else REVEAL.k=1; }
       var rk=REVEAL.k; if(rk!==1){ g.save(); g.translate(cx,S.curPos.y); g.scale(rk,rk); g.translate(-cx,-S.curPos.y); }
       g.fillStyle="rgba(10,10,14,0.30)";
       g.beginPath(); g.ellipse(cx,S.curPos.y+reg.h*0.42,reg.w*0.42,reg.w*0.16,0,0,6.2832); g.fill();
-      var glowR=Math.max(reg.w,reg.h)*(0.8+0.5*s);
+      var glowR=Math.max(reg.w,reg.h)*(0.9+0.2*s);
       var glow=g.createRadialGradient(cx,midY,0,cx,midY,glowR);
-      glow.addColorStop(0,"rgba(255,225,120,"+(0.20+0.45*s).toFixed(2)+")");
-      glow.addColorStop(0.6,"rgba(255,225,120,"+(0.06+0.18*s).toFixed(2)+")");
+      glow.addColorStop(0,"rgba(255,225,120,"+(0.20+0.25*s).toFixed(2)+")");
+      glow.addColorStop(0.6,"rgba(255,225,120,"+(0.06+0.10*s).toFixed(2)+")");
       glow.addColorStop(1,"rgba(255,225,120,0)");
       g.fillStyle=glow;
       g.beginPath(); g.arc(cx,midY,glowR,0,6.2832); g.fill();
       var ix=Math.round(cx-reg.w/2), iy=Math.round(baseY-reg.h);
-      // the item itself: a gold rim glow that flares with the strobe...
+      // the item itself: a gold rim glow that swells with the glow...
       g.save();
-      g.shadowColor="rgba(245,197,24,"+(0.4+0.6*s).toFixed(2)+")";
-      g.shadowBlur=6+22*s;
+      g.shadowColor="rgba(245,197,24,"+(0.5+0.3*s).toFixed(2)+")";
+      g.shadowBlur=10+10*s;
       g.drawImage(itemsImg, reg.x,reg.y,reg.w,reg.h, ix, iy, reg.w, reg.h);
       g.restore();
-      // ...and an additive flash of the sprite so the item brightens, not just its halo
+      // ...and a faint additive swell of the sprite so the item brightens a little, not just its halo
       g.save();
       g.globalCompositeOperation="lighter";
-      g.globalAlpha=0.45*s;
+      g.globalAlpha=0.15*s;
       g.drawImage(itemsImg, reg.x,reg.y,reg.w,reg.h, ix, iy, reg.w, reg.h);
       g.restore();
       g.font="bold 17px ui-monospace,monospace";
@@ -1659,13 +1652,13 @@ function draw(){
     }
     // checkout pads
     if(S.nGot===ITEMS.length){
-      // the moment the list is done the PAY spots pop in at their registers, then blink as before
+      // the moment the list is done the PAY spots pop in at their registers, then glow slowly
       if(!PAYIN.on){ PAYIN.on=true; if(MOTION){ PAYIN.k=0; GS.killTweensOf(PAYIN); GS.to(PAYIN,{k:1,duration:0.55,ease:"back.out(2)"}); } else PAYIN.k=1; }
       var pk=PAYIN.k;
       for(var p3=0;p3<PADS.length;p3++){
-        var pd=PADS[p3], on=Math.floor(S.t*3)%2===0, pcx=(pd[0]+pd[2])/2, pcy=(pd[1]+pd[3])/2;
+        var pd=PADS[p3], pv=MOTION? 0.5+0.5*Math.sin(S.t*4.4) : 0.5, pcx=(pd[0]+pd[2])/2, pcy=(pd[1]+pd[3])/2;
         if(pk!==1){ g.save(); g.translate(pcx,pcy); g.scale(pk,pk); g.translate(-pcx,-pcy); g.globalAlpha=Math.max(0,Math.min(1,pk)); }
-        g.fillStyle=on?"rgba(58,219,118,0.5)":"rgba(58,219,118,0.28)";
+        g.fillStyle="rgba(58,219,118,"+(0.28+0.16*pv).toFixed(2)+")";   // a slow swell (0.7 a second), not a blink
         g.fillRect(pd[0],pd[1],pd[2]-pd[0],pd[3]-pd[1]);
         g.strokeStyle="#3ADB76"; g.lineWidth=3;
         g.strokeRect(pd[0],pd[1],pd[2]-pd[0],pd[3]-pd[1]);
@@ -1973,7 +1966,7 @@ function drawThreat(dt){
     if(bully.lunge) k=1;
   }
   threatK+=(k-threatK)*(1-Math.exp(-6*dt));
-  var top=threatK<0.002? "0" : (threatK*(0.75+0.25*Math.sin(S.t*9))).toFixed(3);
+  var top=threatK<0.002? "0" : (threatK*(MOTION? 0.88+0.12*Math.sin(S.t*4.4) : 0.94)).toFixed(3);
   if(top!==threatEl._op){ threatEl._op=top; threatEl.style.opacity=top; }   // (no style write while it stays clear)
   // off screen while he's hunting you: a red arrow with his head on the edge of the screen, pointing at him
   var arrowOn=false;
@@ -1994,7 +1987,8 @@ function drawThreat(dt){
   if(out){
     var left=Math.max(0,S.bullyIn-S.runT), txt=left>0? "HE’S COMING  "+Math.ceil(left)+"s" : "HE’S HERE!";
     var sp=outsideEl.lastElementChild; if(sp.textContent!==txt) sp.textContent=txt;
-    outsideEl.style.borderColor = left<4 ? (Math.floor(S.t*4)%2?"#ff4d4d":"#d62634") : "#d62634";
+    if(left<4){ var bk=MOTION? 0.5+0.5*Math.sin(S.t*4.4) : 0.5; outsideEl.style.borderColor="rgb("+Math.round(214+41*bk)+","+Math.round(38+39*bk)+","+Math.round(52+25*bk)+")"; }   // a slow colour swell (0.7 a second), not a blink
+    else outsideEl.style.borderColor="#d62634";
   }
 }
 var listHud=null;
