@@ -17,7 +17,7 @@ const quiet = (fn) => { const real = Math.random; Math.random = isoRandom; try {
 
 // the lamp head on prop_lamp (props.glb, after the node transform): 8.6 m up, 2.3 m out along the arm (local -Z), measured from the model's vertices
 const HEAD = new THREE.Vector3(0, 8.6, -2.3), UP = new THREE.Vector3(0, 1, 0);
-const POOL_R = 8.5;   // metres: a cobra-head lamp at 9 m lights the road out to about this
+const POOL_R = 9;   // metres: a cobra-head lamp at 9 m lights the road out to about this
 
 export function lampPools(city, scene) {
   const lamps = city.furniture?.lamp || [];
@@ -25,10 +25,10 @@ export function lampPools(city, scene) {
   return quiet(() => {
     const geo = new THREE.PlaneGeometry(1, 1); geo.rotateX(-Math.PI / 2);
     const mat = new THREE.ShaderMaterial({
-      uniforms: { uLamp: GLOW.uLamp, uCol: { value: new THREE.Color(1.0, 0.66, 0.34) } },
+      uniforms: { uLamp: GLOW.uLamp, uPoolK: GLOW.uPoolK, uCol: { value: new THREE.Color(1.0, 0.66, 0.34) } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }',
-      fragmentShader: `uniform float uLamp; uniform vec3 uCol; varying vec2 vUv;
-        void main() { float r = length(vUv - 0.5) * 2.0, a = max(0.0, 1.0 - r * r); a *= a; gl_FragColor = vec4(uCol * a * uLamp * 0.3, 1.0); }`,
+      fragmentShader: `uniform float uLamp, uPoolK; uniform vec3 uCol; varying vec2 vUv;
+        void main() { float r = length(vUv - 0.5) * 2.0, a = max(0.0, 1.0 - r * r); a *= a; gl_FragColor = vec4(uCol * a * uLamp * uPoolK * 0.55, 1.0); }`,
       blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false, toneMapped: false,
     });
     const im = new THREE.InstancedMesh(geo, mat, lamps.length), m4 = new THREE.Matrix4(), v = new THREE.Vector3(), q = new THREE.Quaternion();
@@ -71,9 +71,9 @@ export function carLights(carRig) {
     carRig.traverse((o) => { if (o.userData?.headlamp) { tmp.setFromObject(o); box.union(tmp); } });
     const c = box.isEmpty() ? new THREE.Vector3(0, 0.7, -2.2) : box.getCenter(new THREE.Vector3()).applyMatrix4(inv);
     const fz = Math.sign(c.z) || -1;   // the headlamps are at the front: which way along the rig's Z that is
-    const spot = new THREE.SpotLight(0xfff0d8, 0, 62, 0.52, 0.85, 1.5);
+    const spot = new THREE.SpotLight(0xfff0d8, 0, 48, 0.4, 0.9, 1.6);
     spot.position.set(0, c.y + 0.05, c.z); spot.target.position.set(0, c.y - 0.5, c.z + fz * 26);
-    spot.castShadow = false; spot.name = 'car_headlights'; spot.userData.base = 900;
+    spot.castShadow = false; spot.name = 'car_headlights'; spot.userData.base = 380;
     carRig.add(spot, spot.target);
     const set = () => { spot.intensity = spot.userData.base * GLOW.uLamp.value; spot.visible = GLOW.uLamp.value > 0.04; };
     set(); spot.userData.refresh = set;

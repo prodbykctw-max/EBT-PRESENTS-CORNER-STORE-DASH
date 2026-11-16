@@ -1,0 +1,12 @@
+import fs from 'fs'; import { chromium } from 'playwright-core';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] });
+const p = await b.newPage({ viewport: { width: 480, height: 854 } });
+await p.route(/open-meteo/, (r) => r.abort());
+await p.goto('http://localhost:5487/drive/index.html?qa&time=21:00');
+await p.waitForFunction(() => window.__drive && window.__drive.foot, null, { timeout: 900000 });
+await p.evaluate(() => { window.__drive.manual = true; });
+const s = await p.evaluate(() => { const d = window.__drive, T = d.three.THREE, R = d.route, s = 300, dd = R.lane(s, 0);
+  d.car.s = s + 2; d.car.d = d.car.targetD = dd; const a = R.at(s - 11, dd), l = R.at(s + 30, dd);
+  d.camOverride = { pos: new T.Vector3(a.x, a.z + 3.2, -a.y), look: new T.Vector3(l.x, l.z + 1.6, -l.y) }; d.tick(1/60); d.tick(1/60); return d.snapshot(0.9); });
+fs.writeFileSync('/tmp/dbg2.jpg', Buffer.from(s.split(',')[1], 'base64'));
+await b.close();

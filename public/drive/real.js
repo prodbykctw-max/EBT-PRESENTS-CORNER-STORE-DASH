@@ -232,8 +232,8 @@ function wallPatch(T) {
         wRough = mix(0.5, clamp(nr.b * 0.5 + 0.03, 0.03, 0.4), pm * (1.0 - band)); wMetal = pm * (1.0 - band) * 0.25;
         wAO *= 1.0 - 0.15 * band;
         // night: whole floors of the tower are lit, with the odd dark panel (steady, hashed from the panel's place)
-        vec2 tid = floor(vFac / vec2(1.55, 3.9)); float tfl = h21(vec2(tid.y, seed * 13.0 + 1.0)), tpc = h21(tid + seed * 91.0);
-        wEm += mix(vec3(1.0, 0.8, 0.52), vec3(0.78, 0.88, 1.0), step(0.6, h21(tid + 9.0 + seed))) * step(0.36, tfl) * step(0.14, tpc) * pm * (1.0 - band) * 0.8;
+        vec2 tid = floor(vFac / vec2(3.1, 3.9)); float tfl = h21(vec2(tid.y, seed * 13.0 + 1.0)), tpc = h21(tid + seed * 91.0);
+        wEm += mix(vec3(1.0, 0.8, 0.52), vec3(0.78, 0.88, 1.0), step(0.6, h21(tid + 9.0 + seed))) * step(0.36, tfl) * step(0.14, tpc) * pm * (1.0 - band) * 0.7;
       } else {
         float bay = isTower ? 1.55 : (style > 1.5 ? 2.4 : 3.0), floorH = style > 2.5 ? 3.9 : 3.6;
         vec2 cell = vec2(fract(vFac.x / bay), fract(vFac.y / floorH)), id = vec2(floor(vFac.x / bay), floor(vFac.y / floorH));
@@ -332,8 +332,8 @@ function roofPatch(T) {
 /** worn asphalt: roughness from the scan with patchy wear, darker polished tyre tracks down each lane */
 function roadPatch(T) {
   return (sh) => {
-    sh.uniforms.rAsphR = { value: T.asphR };
-    let f = rep(sh.fragmentShader, '#include <common>', 'uniform sampler2D rAsphR;');
+    sh.uniforms.rAsphR = { value: T.asphR }; sh.uniforms.uLit = GLOW.uLit;
+    let f = rep(sh.fragmentShader, '#include <common>', 'uniform sampler2D rAsphR; uniform float uLit;');
     f = f.replace('roughnessFactor = mix(roughnessFactor, 0.16, uWet);', `
       float rr = texture2D(rAsphR, tuv).r, rr2 = texture2D(rAsphR, tuv * 0.23 + 0.37).r;
       roughnessFactor = clamp(mix(rr, rr2, 0.4) * 1.05, 0.5, 1.0);
@@ -346,6 +346,9 @@ function roadPatch(T) {
       diffuseColor.rgb *= 1.0 - 0.2 * track; roughnessFactor *= 1.0 - 0.18 * track;
       float wear = smoothstep(0.35, 0.8, texture2D(rAsphR, tuv * 0.071 + 0.6).g); diffuseColor.rgb *= 1.0 - 0.1 * wear;
       roughnessFactor = mix(roughnessFactor, 0.16, uWet);`);
+    // wet roads at night: the lit city's glow in the water, strongest at grazing angles (a cheap stand-in for the lamp and sign reflections; steady)
+    f = rep(f, '#include <emissivemap_fragment>', `{ float gl = pow(1.0 - clamp(abs(dot(normalize(vViewPosition), normal)), 0.0, 1.0), 3.0);
+      totalEmissiveRadiance += uWet * uLit * gl * (0.2 + 0.5 * texture2D(rAsphR, tuv * 0.5).g) * vec3(1.0, 0.62, 0.34) * 0.45; }`);
     sh.fragmentShader = f;
   };
 }

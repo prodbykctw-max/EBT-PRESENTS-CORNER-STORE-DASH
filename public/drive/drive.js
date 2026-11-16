@@ -1759,7 +1759,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     ui: { flash, pop, bump, setHint, showBusted, gsap: G },   // the HUD's motion, for tests
     tick: (dt) => { tickDt = dt; try { frame(); } finally { tickDt = null; } },
     // QA / previews: light the drive for another instant (ms) and weather without reloading; returns the phase name
-    relight: RL ? (when, wx) => { if (wx) Object.assign(weather, wx); const s2 = relight(weather, { scene, renderer, sun, hemi, roads: city.surfaces }, when); sky.dome = s2.dome; sky.env = s2.env; RL.tuneWeather(weather, { scene, renderer, sun, hemi, look: comic }); carSpot?.userData.refresh?.(); return scene.userData.light.phase; } : null,
+    relight: RL ? (when, wx) => { if (wx) Object.assign(weather, wx); const s2 = relight(weather, { scene, renderer, sun, hemi, roads: city.surfaces }, when); sky.dome = s2.dome; sky.env = s2.env; RL.tuneWeather(weather, { scene, renderer, sun, hemi, look: comic }); carSpot?.userData.refresh?.(); scene.traverse((o) => { if (o.material) for (const m of [].concat(o.material)) m.needsUpdate = true; }); return scene.userData.light.phase; } : null,
     snapshot: (q = 0.85) => { city.cull(camera, scene.fog); comic.render(); return renderer.domElement.toDataURL('image/jpeg', q); } });
   // live getters (Object.assign would have frozen their values at assignment time)
   Object.defineProperties(api, { state: { get: () => state }, time: { get: () => t }, race: { get: () => race }, fly: { get: () => (fly ? { t: fly.t, dur: FLY.dur } : null) } });   // (fly: the opening flyover, null once it is over or if there is none)

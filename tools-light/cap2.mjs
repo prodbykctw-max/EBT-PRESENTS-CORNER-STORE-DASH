@@ -20,7 +20,7 @@ const save = (n, s) => fs.writeFileSync(`${out}/${n}.jpg`, Buffer.from(s.split('
 const when = (m) => { const [y, mo, d] = (m.date || '2026-11-16').split('-').map(Number), [h, mi] = m.time.split(':').map(Number); return atlantaInstant(y, mo, d, h, mi); };
 const WX = { rain: { code: 63, cloud: 90, rain: 1 }, clear: { code: 0, cloud: 10, rain: 0 }, overcast: { code: 3, cloud: 95, rain: 0 } };
 const shot = async (n, m) => {
-  const ph = await p.evaluate(([w, wx]) => { const d = window.__drive; const ph = d.relight(w, wx); d.tick(0.0001); return ph + ' el=' + d.three.scene.userData.light.el.toFixed(1); }, [when(m), WX[m.wx || 'clear']]);
+  const ph = await p.evaluate(([w, wx]) => { const d = window.__drive; const ph = d.relight ? d.relight(w, wx) + ' el=' + d.three.scene.userData.light.el.toFixed(1) : 'no relight (origin/main)'; d.tick(0.0001); return ph; }, [when(m), WX[m.wx || 'clear']]);
   save(n, await p.evaluate(() => window.__drive.snapshot(0.9))); console.log(n, ph, ((Date.now() - t0) / 1000).toFixed(0) + 's');
 };
 let t = 0;
