@@ -22,11 +22,12 @@ a cloud over B(y) at any horizontal offset is the same picture as the original.
 import argparse, base64, io, os, sys
 import numpy as np
 from PIL import Image
-from scipy.ndimage import gaussian_filter, gaussian_filter1d
+from scipy.ndimage import gaussian_filter, gaussian_filter1d, label
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SA = os.path.normpath(os.path.join(HERE, '..'))
 T0, T1 = 5.0, 26.0      # RGB distance from the background where a cloud starts (alpha 0) / is solid (alpha 1)
+SOLID_D = 45            # a patch is a cloud only if some pixel is at least this far from the gradient
 CLOUD_H = 272           # rows kept in the cloud layer (the lowest cloud pixel is at y ~255)
 
 def load(p):
@@ -66,6 +67,13 @@ def main():
     al[CLOUD_H:] = 0                                           # the clouds are all in the top rows; below, differences are only compression noise
     al[:CLOUD_H] = np.where(gaussian_filter(al[:CLOUD_H], 1.5) > 0.02, al[:CLOUD_H], 0)   # drop isolated noise specks (no cloud pixel has no neighbours)
     # colour: exact where alpha is solid enough, else the alpha-weighted neighbourhood of the solid colour
+    # the original's compression leaves a few faint smudges in the open sky (distance 5..15 from the gradient, no solid core):
+    # they are not clouds and would drift as dirt, so any connected patch whose strongest pixel is not clearly a cloud is dropped
+    lab, nl = label(al > 0, structure=np.ones((3, 3)))
+    peak = np.zeros(nl + 1); np.maximum.at(peak, lab.ravel(), d.ravel())
+    dropped = [i for i in range(1, nl + 1) if peak[i] < SOLID_D]
+    print('patches: %d kept, %d faint smudges dropped (peak distance < %d)' % (nl - len(dropped), len(dropped), SOLID_D))
+    al = np.where(np.isin(lab, dropped), 0, al)
     A = np.maximum(al, 1e-3)[..., None]
     Cx = np.clip(Bf + (im - Bf) / A, 0, 255)
     w = (al >= 0.6).astype(np.float64)
