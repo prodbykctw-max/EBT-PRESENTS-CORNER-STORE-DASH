@@ -735,6 +735,23 @@ parapet cap and rooftop units (the original overhead camera mostly saw roofs), a
 board UV-projected from the same facade image, so paint and depth line up.
 **To fix before shipping:** the EBT facade shows real chip brands in the window. Paint them out.
 
+## Wide sidewalks (`setback.js`)
+
+The owner found the walk between the curb and the shops too skinny. There is no sidewalk mesh: the terrain (sidewalk texture) fills what the roads, curbs and lawns do not, so the walk is whatever lies
+between a curb and the first wall. The streets are unchanged; the buildings move back.
+
+- **Measured** (`tools-walk/widths.mjs`, ray from the curb's outer edge to the first wall): route median 3.37 m, min 0.2 m; the corner store's side about 0.4 m; side streets median 4.2 m. After:
+  route median 5.6 m, min 5.5 m; store about 5.7 m; side streets median 5.6 m. `SIDEWALK.W` (5.5 m, `setback.js`) is the clear walk from the back of the curb; one number.
+- **How.** `widenSidewalksSteps` (called first in `buildCitySteps`, before anything reads `W.buildings`) takes each drawn building's footprint minus the corridor of every curbed street (a capsule along the
+  street's centre line out to half-width + 0.3 curb + W; the route's own road from `route.HW`, every curbed non-elevated OSM road from world.json). Polygon difference (vendored `polygon-clipping`), so a
+  footprint is only ever cut: it cannot overlap a neighbour or poke into a cross street, and fronts line up. A sliver (under 18% or 20 m2 left) is moved back whole; a footprint under 60 m2 with nothing left is
+  dropped. Canopies, raised floors, skyline silhouettes and the hero lots are skipped. No `Math.random`, no three.js: pure numbers, so the walls, roofs, contact shadows, the free-spot grid, `roam.js` walls and
+  the crowd's walls all follow with no other edit (about 0.6 s of work, sliced by `steps.js` in the prepared build).
+- **The hero row at the corner store** is hand-built, not in `W.buildings`: `setBackHero` (`city.js`) moves its nodes (`HERO_`, `ROOF_`, `PARAPET_`, `RTU_`) back by the same distance and stretches the slab
+  `SIDEWALK_*` to the new front, and moves the street sign pole onto the walk (now a collision pole, `pole` in `roam.js` `PROP_R` and `crowd.js` `FURNITURE`). The door's x, the parking spot and the route are unchanged.
+- **People** (`corral.js`): the walk band is capped at `hw + 6.5` (was `hw + 4.65`) where a wall is that far away.
+- Comic and realistic looks share the geometry. Lamps and trees stay where `landscape.js` puts them (curb side). Tests: `node tools-walk/setback.test.mjs`, `node tools-roam/collide.test.mjs`, stills `tools-walk/shots.mjs`.
+
 ## World integrity (nothing sinks, floats or pokes through)
 
 Everything that can stand on something follows one set of rules:

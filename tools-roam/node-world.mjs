@@ -22,9 +22,10 @@ export async function loadCityNode() {
   const route = new RouteFrame(W, ground, 200);
   const mk = () => new THREE.Texture();
   const tex = { brick: mk(), roof: mk(), concrete: mk(), sidewalk: mk(), map: mk(), normal: mk(), asphalt: mk(), grass: mk(), grassNor: mk(), bark: mk(), barkNor: mk(), leaves: mk(), tuft: mk() };
+  const hm = city.setBackHero(hero.scene, route);   // (drive.js does this right after the route is made)
   const C = city.buildCity(W, tex, ground, route, props.scene, trees.scene);
   const SPOT = { x: 0, y: 9.0 };
   const heroWalls = heroSegments(hero.scene, ground(SPOT.x, SPOT.y));
-  const walk = roam.walkWorldFor({ city: C, heroWalls, W });
-  return { THREE, W, ground, route, city: C, heroWalls, walk, roam, SPOT };
+  const walk = roam.walkWorldFor({ city: C, heroWalls, W, poles: hm.poles });
+  return { THREE, W, ground, route, city: C, heroWalls, walk, roam, SPOT, hero, props, trees, heroMove: hm };
 }

@@ -3,7 +3,7 @@
    brush blobs, grain, rim light; no image files) and baked ONCE per size into a few offscreen layers, back to front:
    sky, drifting clouds, far skyline, near skyline, left building, right building, the store front, sidewalk + street,
    the lamp post. Every frame is then only drawImage calls. Like Will Hill's title the layers FLY IN (staggered, about
-   1.5 s) while the title card assembles on top, then idle: the buildings stay still (no sway, Nov 15 2026), the sign swapping words by crossfade,
+   1.5 s) while the title card assembles on top, then idle: the buildings stay still (no sway, Nov 15 2026) while the painted clouds drift slowly sideways (CLOUD_SPEED), the sign swapping words by crossfade,
    the lamp glowing. A little gag plays on the street every ~10 s: the guy sprints across, the bully chases a beat
    later, the guy skids, an E.B.T card flips out of his pocket and spins down to the sidewalk, they run off the far side.
    The guy and the bully are the store's own sprite sheets (player.b64 / bully.b64) drawn the way drawSheet draws them.
@@ -56,7 +56,8 @@ function vgrad(x,y0,y1,stops){ var gr=x.createLinearGradient(0,y0,0,y1); stops.f
 
 
 /* ---- ART: the painted layers. Five WebP files (title_*.b64, inlined by build.mjs into TITLE_ART_SRC in shell2.html):
-   sky (512x768, opaque, drawn 2x) and skyline / sides / store / street (1024x1536 RGBA). The four alpha layers share ONE frame
+   sky (512x768, opaque, drawn 2x, NO clouds: a pure vertical gradient), clouds (512x272 RGBA, the painted clouds split out of the old sky by
+   standalone/tools/split_title_clouds.py; drawn 2x at the sky's top, drifting sideways: see mkClouds / drawCloudsArt) and skyline / sides / store / street (1024x1536 RGBA). The four alpha layers share ONE frame
    (FR, frame px): stacked at the same place and scale they rebuild the reference picture, so they are drawn with a single
    transform (scale s, offset ox,oy) and the fly-in / sway are offsets on top of it. All the numbers that tie the code to
    the picture are in FR (measured from the pixels): where the store sits, the sign, the OPEN neon, the lamp, the walking
@@ -66,16 +67,17 @@ var FR={w:1024,h:1536,cx:530,foot:1338,doorH:200,
   sign:{x:308,y:850,w:437,h:80}, open:{x:322,y:1040,w:104,h:56}, lamp:{x:225,y:575},
   signtap:{x:300,y:850,w:444,h:88, clip:{x:305,y:867,w:424,h:65}},   // the store layer's rect that title_signtap replaces: the sign with CORNER STORE rebuilt as TAP TO START (exact 1:1 crop, same pixels outside the letters; clip: the box the letters changed (frame x 307..726, y 869..929, plus a pixel or two))
   roof:511};                          // frame y of the rooftop line: the title lettering sits centred in the sky above it
+var CLOUD_SPEED=8;                // css px a second: the painted clouds drift left to right (title_clouds, drawCloudsArt). Slow, steady, never a flash.
 var ARTK=["sky","skyline","sides","store","street"], artImg={}, artState="none", artCbs=[];
 function loadArt(cb){
   if(artState==="ok"||artState==="fail"){ cb(); return; }
   artCbs.push(cb); if(artState==="loading") return;
   var src=(typeof TITLE_ART_SRC!=="undefined")?TITLE_ART_SRC:null;
   if(!src){ artState="fail"; var c0=artCbs; artCbs=[]; c0.forEach(function(f){ f(); }); return; }
-  artState="loading"; var keys=ARTK.concat(["signtap"]), left=keys.length, bad=false;   // signtap (the swapping sign word) is optional: if it fails the sign just does not swap
+  artState="loading"; var keys=ARTK.concat(["signtap","clouds"]), left=keys.length, bad=false;   // signtap (the swapping sign word) and clouds (the drifting cloud layer) are optional: if signtap fails the sign just does not swap, if clouds fails the sky is just without clouds
   keys.forEach(function(k){ var im=new Image();
     im.onload=function(){ artImg[k]=im; if(--left===0) done(); };
-    im.onerror=function(){ if(k!=="signtap") bad=true; if(--left===0) done(); };
+    im.onerror=function(){ if(k!=="signtap"&&k!=="clouds") bad=true; if(--left===0) done(); };
     im.src=src[k]||""; });
   function done(){ artState=bad?"fail":"ok"; if(bad) artImg={}; var c=artCbs; artCbs=[]; c.forEach(function(f){ f(); }); }
 }
@@ -260,11 +262,23 @@ function bakeArt(){
   L={art:true, wide:!tall, s:sc, ox:ox, oy:oy, top:"rgb("+px[0]+","+px[1]+","+px[2]+")", foot:Math.round(oy+FR.foot*sc), disp:Math.round(clamp(170*sc,48,230)),
     G:{gy:oy+FR.foot*sc, walk:0},
     // once landed, the buildings, store and street stay put (no idle sway: the owner saw the buildings moving, Nov 15 2026); only the light pulses and the gag move
-    f:{ sky:ft(0,0.55,{fade:1,ease:eOut}), skyline:ft(0.15,0.8,{dy:VH*0.22,fade:1,ease:eOut}),
+    f:{ sky:ft(0,0.55,{fade:1,ease:eOut}), clouds:ft(0,0.55,{fade:1,ease:eOut}), skyline:ft(0.15,0.8,{dy:VH*0.22,fade:1,ease:eOut}),
         sideL:ft(0.35,0.95,{dx:-VW*0.6,ease:eOut}), sideR:ft(0.45,1.05,{dx:VW*0.6,ease:eOut}),
         store:ft(0.8,1.45,{dy:VH*0.55,ease:eBack}), street:ft(0.55,1.15,{dy:VH*0.25,ease:eOut}) }};
   if(!tall){ L.bw=[0,184]; L.bandR=mkBand(FR.w-184,FR.w); }
-  SG.cv=mkSign(); layoutTitle(); sgTimer();
+  L.cl=mkClouds(); SG.cv=mkSign(); layoutTitle(); sgTimer();
+}
+/* ---- the drifting clouds: title_clouds (RGBA, 512 wide = the sky's pixel scale, the top rows only) is the clouds that used to be baked into the sky.
+   One strip is baked per size: the layer and its mirror side by side (period 2 frame widths; mirrored, so the cloud cut by the frame edge
+   joins its own reflection and there is no seam), at device pixels. It is drawn as a repeat-x canvas pattern moved by a fractional offset, so
+   the wrap has no seam or doubled edge at any position and the motion is sub-pixel smooth. At offset 0 it is exactly the old sky's clouds. ---- */
+function mkClouds(){
+  var im=artImg.clouds; if(!im||!im.naturalWidth) return null;
+  var W=FR.w*L.s, h=im.naturalHeight*(FR.w/im.naturalWidth)*L.s, hw=Math.max(1,Math.round(W*Q)), ph=Math.max(1,Math.ceil(h*Q));
+  var c=document.createElement("canvas"); c.width=2*hw; c.height=ph; var x=c.getContext("2d"); x.imageSmoothingEnabled=true; x.imageSmoothingQuality="high";
+  x.drawImage(im,0,0,hw,ph);
+  x.save(); x.translate(2*hw,0); x.scale(-1,1); x.drawImage(im,0,0,hw,ph); x.restore();
+  return {c:c, P:2*hw/Q, h:ph/Q, pat:null};
 }
 /* ---- the sign picture: the TAP TO START crop (the original word is the store layer's own pixels underneath) ---- */
 function mkSign(){
@@ -342,6 +356,13 @@ function bands(o,right){
     gr.addColorStop(0,"rgba(10,6,24,0)"); gr.addColorStop(0.55,"rgba(10,6,24,0.75)"); gr.addColorStop(1,"rgba(10,6,24,0)"); g.fillStyle=gr; g.fillRect(ex-14*s,y0,24*s,hh); }
   g.globalAlpha=1;
 }
+function drawCloudsArt(o){   // the cloud strip at its fly-in offset plus the drift (time-based: CLOUD_SPEED css px a second; reduced motion holds still)
+  var cl=L.cl; if(!cl||cl.off) return;
+  if(!cl.pat) cl.pat=g.createPattern(cl.c,"repeat-x"); if(!cl.pat) return;
+  var dr=reduced?0:(T*CLOUD_SPEED)%cl.P;
+  g.save(); g.globalAlpha=o.a; g.translate(L.ox+o.x+dr,L.oy+o.y); g.scale(1/Q,1/Q); g.fillStyle=cl.pat;
+  g.fillRect(Math.floor((-(L.ox+o.x+dr))*Q)-2,0,Math.ceil(VW*Q)+4,Math.ceil(cl.h*Q)); g.restore();
+}
 function artOff(f){          // a layer's fly-in + sway offset at time T (null until it starts)
   var u=clamp((T-f.t0)/(f.t1-f.t0),0,1); if(u<=0) return null;
   var e=f.ease(u), sw=reduced?0:clamp((T-SETTLED+0.3)/1.2,0,1);
@@ -360,6 +381,7 @@ function drawArt(){
   g.fillStyle=L.top; g.fillRect(0,0,VW,VH);                                   // above a low-anchored frame: the sky's own top colour
   var wd=L.wide;
   if((o=artOff(F.sky))) { if(wd) tile("sky",o); else put("sky",F.sky,0,FR.w,o); }
+  if(L.cl&&(o=artOff(F.clouds))) drawCloudsArt(o);                            // the clouds drift over the (cloud-free) sky, under everything else
   if((o=artOff(F.skyline))) { if(wd) tile("skyline",o); else put("skyline",F.skyline,0,FR.w,o); }
   var oL=artOff(F.sideL), oR=artOff(F.sideR);
   if(wd){ if(oL) bands(oL,false); if(oR) bands(oR,true); }
@@ -557,6 +579,7 @@ return {
   _sign:function(m,noGlow){ SG.test=(m===0||m)? m : null; SG.noGlow=!!noGlow; if(L) render(); },     // test hook: force a sign picture ("orig"|"tap"|0..1), glow off; _sign() releases it
   _signAt:function(t){ var T0=T, a=SG.at, h=SG.test; T=t; SG.at=0; SG.test=null; var m=signMode(); T=T0; SG.at=a; SG.test=h; return m; },
   _signK:function(t){ var T0=T, a=SG.at, h=SG.test; T=t; SG.at=0; SG.test=null; var k=signK(); T=T0; SG.at=a; SG.test=h; return k; },   // test hook: how much TAP TO START shows t seconds into the cycle (0..1)   // test hook: the sign picture t seconds into the cycle
+  _clouds:function(on){ if(L&&L.cl){ L.cl.off=!on; render(); } },       // test hook: false hides the drifting clouds (everything else is untouched), true shows them
   get _art(){ return !!(L&&L.art); }, get _signOk(){ return !!SG.cv; },
   _seek:function(t,gt){ hold=true; T=t; gag.t=-1; if(gt!=null){ gag.next=1e9; if(gag.t<0) startGag(); gag.t=gt; } render(); }   // test hook
 };
