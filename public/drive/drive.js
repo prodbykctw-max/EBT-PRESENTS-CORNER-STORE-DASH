@@ -1173,7 +1173,23 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (go && tauntK <= 0 && me.stun <= 0 && gap < 9) { tauntK = 2.6; pop(TAUNTS[(Math.random() * TAUNTS.length) | 0]); }
     // the crowd watches you and the bully (route-space s, d, speed; t = when) and steps out of the way (crowd.js react). Only along the route's street: that is where the crowd is.
     crowd.runner = onStreet(me) ? { s: me.s, d: me.d, v: me.v, t: footT } : null; crowd.chaser = onStreet(him) ? { s: him.s, d: him.d, v: him.v, t: footT } : null;
+    footCards();
     if (doorDist(me) < DOOR_REACH && me.stun <= 0) getIn();
+  }
+  // E.B.T cards are collectible on foot too: running through one (it is within CARD_FOOT_R metres of you in the world plane) takes it, with the same +25, sound, buzz and HUD bump
+  // as in the car. Each card's world position is read from the route once (the cards never move), so the per-step cost is a distance test per live card. The bully does not collect.
+  const CARD_FOOT_R = 1.3;   // metres: a step is 6.4 m/s / 120 = 0.053 m, so no pass can skip a card; the nearest card in the next lane is a lane (3 m or more) away
+  let cardXY = null;
+  function footCards() {
+    const tk = world.tokens;
+    if (!cardXY || cardXY.length !== tk.length) cardXY = tk.map((c) => { const p = route.at(c.s, c.d); return { c, x: p.x, y: p.y }; });
+    let got = 0;
+    for (const k of cardXY) {
+      if (!k.c.alive) continue;
+      const dx = k.x - me.x; if (dx > CARD_FOOT_R || dx < -CARD_FOOT_R) continue;
+      const dy = k.y - me.y; if (dx * dx + dy * dy < CARD_FOOT_R * CARD_FOOT_R) { k.c.alive = false; got++; }
+    }
+    if (got) { tokens += got; pop('+' + got * 25); audio.token(); haptic(HAP.token, 60); bump(tokBox); }
   }
   // after you drive off he's still out there for a moment, running for his ride, until he's behind the camera
   function updateHimLeft(dt) {
@@ -1399,6 +1415,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         if (state === 'driving' && inSpot(car.s, car.d)) { park(true); break; }
       }
     }
+    world.cardsOn = state === 'driving';   // (runner.js: the car's pickup box only counts while you drive it; parked, or standing still in the countdown, it used to swallow a card next to it with no credit)
     if (state === 'driving') {
       if (!api.freezeClock) t -= dt; drove += dt;   // QA: freezeClock holds the timer for look-dev
       trams.update(dt, car);

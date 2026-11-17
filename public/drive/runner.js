@@ -699,7 +699,7 @@ export class World {
     }
     this.ents = this.ents.filter((e) => e.alive);
     for (const tk of this.tokens) {
-      if (tk.alive && Math.abs(tk.s - car.s) < 2.6 && Math.abs(tk.d - car.d) < 1.5) { tk.alive = false; out.tokens++; }
+      if (tk.alive && this.cardsOn !== false && Math.abs(tk.s - car.s) < 2.6 && Math.abs(tk.d - car.d) < 1.5) { tk.alive = false; out.tokens++; }
     }
     // cross traffic
     for (const a of this.ambient) {
