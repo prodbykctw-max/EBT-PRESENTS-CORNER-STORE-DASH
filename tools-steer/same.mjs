@@ -15,6 +15,8 @@ try {
   const r = await page.evaluate(() => {
     const d = window.__drive; d.manual = true; d.freezeClock = true; const DT = 1 / 60;
     for (let i = 0; i < 400 && d.state !== 'driving'; i++) d.tick(DT);
+    // (the old steering pulled the car to the middle of its lane by itself; the new one leaves it wherever it is, so both start in the middle of the lane)
+    d.car.d = d.car.targetD = d.route.lane(d.car.s, 0);
     d.keys.add('gas'); for (let i = 0; i < 360; i++) d.tick(DT);
     return { look: document.querySelector('.drive-root').classList.contains('real') ? 'real' : 'comic', s: +d.car.s.toFixed(2), d: +d.car.d.toFixed(3), v: +d.car.v.toFixed(2), shot: d.snapshot(0.95) };
   });
