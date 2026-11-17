@@ -43,9 +43,17 @@ try {
         else { if (f >= 1 && !window.__strip.released && car.d < left - 1.3) { if (!d.keys.has('left')) key('ArrowLeft', true); inp = 1; } else if (d.keys.has('left')) { key('ArrowLeft', false); window.__strip.released = true; } }
         car.v = 20; d.tick(DT);
       }
-      return { t: +((f + 1) * 0.1).toFixed(1), d: +car.d.toFixed(2), yaw: +(car.yaw || 0).toFixed(3), steer: +(car.steer || 0).toFixed(2), holding: d.keys.has('left') ? 1 : 0, shot: d.snapshot(0.85) };
+      const row = { t: +((f + 1) * 0.1).toFixed(1), d: +car.d.toFixed(2), yaw: +(car.yaw || 0).toFixed(3), steer: +(car.steer || 0).toFixed(2), holding: d.keys.has('left') ? 1 : 0, shot: d.snapshot(0.85) };
+      if (f === 4) {   // t = 0.5 s: the same moment seen from in front of the car (three-quarter and head-on), to see the front wheels and the lean
+        const { camera, carRig, THREE } = d.three, keep = camera.position.clone(), keepQ = camera.quaternion.clone();
+        const look = carRig.localToWorld(new THREE.Vector3(0, 0.7, -1.2));
+        for (const [name, off] of [['front34', [-3.6, 1.3, -6.2]], ['headon', [0, 1.2, -8.5]]]) { camera.position.copy(carRig.localToWorld(new THREE.Vector3(...off))); camera.lookAt(look); camera.updateMatrixWorld(true); row[name] = d.snapshot(0.88); }
+        camera.position.copy(keep); camera.quaternion.copy(keepQ);
+      }
+      return row;
     }, { f, MODE });
-    const { shot, ...rest } = info;
+    const { shot, front34, headon, ...rest } = info;
+    if (front34) { fs.writeFileSync(`${OUT}/${MODE}_front34.jpg`, Buffer.from(front34.split(',')[1], 'base64')); fs.writeFileSync(`${OUT}/${MODE}_headon.jpg`, Buffer.from(headon.split(',')[1], 'base64')); }
     fs.writeFileSync(`${OUT}/${MODE}_${String(f).padStart(2, '0')}.jpg`, Buffer.from(shot.split(',')[1], 'base64'));
     log.push(rest);
   }

@@ -24,7 +24,7 @@ A standalone game presented by EBT (Everything But Trapped), the Atlanta brand r
 - Grab EBT tokens on the way.
 - Bonus (carried into the store run): 50 per second left on the clock, 25 per EBT token, 50 per near miss, +500 for a clean park, +300 for a drive with no hits.
 - Run out of time and you walk the rest of the way in (no bonus).
-- Touch controls: ◀ ▶ change lanes, one lane per tap; GAS to go; BRAKE to stop (hold to reverse); HORN clears the way.
+- Touch controls: hold ◀ ▶ to steer (the car turns into the move and straightens when you let go); GAS to go; BRAKE to stop (hold to reverse); HORN clears the way.
 - Keyboard: arrows or WASD, SPACE = horn, P = pause.
 
 ### 2. The store

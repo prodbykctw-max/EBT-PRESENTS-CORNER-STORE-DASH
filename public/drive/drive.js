@@ -39,7 +39,7 @@ const TIME_LIMIT = 70;   // the traffic (TRAFFIC = 0.25 of what it was: see traf
 // (2.45 m behind its centre, 0.3 m up) lands on screen (0 top .. 1 bottom; the tyres and bumper hang a little lower, so the car's
 // lowest edge is about 0.06 below it), rear = how far that edge is behind the car's centre.
 // the body leans out of a turn with the side acceleration (k rad per m/s^2, at most max rad); the front wheels turn `lock` rad at full lock
-const CAR_LEAN = { k: 0.0025, max: 0.05, lock: 0.5 }, LEAN_SIGN = 1, WHEEL_SIGN = 1;
+const CAR_LEAN = { k: 0.0025, max: 0.05, lock: 0.5 }, LEAN_SIGN = -1, WHEEL_SIGN = 1;   // (rotation.z > 0 lifts the car's right side: a left turn leans the body out, to the right, so the sign is -1)
 const CAM_R = { back: 6.8, backV: 0.03, h: 2.8, ahead: 10, aimD: 1, yCar: 0.77, rear: 2.45 };
 const REAR_AXLE = 1.45; // car.glb origin sits on the rear axle; the runner tracks the car's centre
 // Curbside parking space in front of the EBT Corner Store (world frame; the row faces north onto Auburn).
