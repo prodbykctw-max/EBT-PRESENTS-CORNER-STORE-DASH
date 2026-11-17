@@ -28,7 +28,7 @@ async function run(job) {
     await p.goto(`http://localhost:${PORT}/store3d/index.html?loop=0&${job.query || ''}`);
     await p.waitForFunction(() => window.__s3dReady, null, { timeout: 600000 });
     const res = await p.evaluate(async (n) => { const t = []; let st; for (let i = 0; i < n; i++) { const a = performance.now(); st = window.__renderOnce(0.016); const gl = window.__s3d.renderer.getContext(); gl.finish(); t.push(performance.now() - a); } return { st, t }; }, job.frames || 4);
-    if (job.out) { fs.mkdirSync(path.dirname(job.out), { recursive: true }); await p.screenshot({ path: job.out, type: job.out.endsWith('.jpg') ? 'jpeg' : 'png', quality: 92 }); }
+    if (job.out) { fs.mkdirSync(path.dirname(job.out), { recursive: true }); await p.screenshot({ path: job.out, ...(job.out.endsWith('.jpg') ? { type: 'jpeg', quality: 92 } : { type: 'png' }) }); }
     if (job.js) res.js = await p.evaluate(job.js);
     res.errs = p.errs; await p.close(); return res;
   }

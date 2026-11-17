@@ -112,9 +112,20 @@ export function buildStructure(layout, mats, opts = {}) {
   for (let cy = 0; cy < mh; cy++) for (let cx = 0; cx < mw; cx++) if (fieldAt(cx, cy)) for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) { const x = cx + dx, y = cy + dy; if (x >= 0 && y >= 0 && x < mw && y < mh && Math.abs(dx) + Math.abs(dy) <= R + 6) near[y * mw + x] = 1; }
   // thin solid slivers of the mask (the painted banners' dark top edges: 4 px high lines inside open lanes) are low floor strips, not walls
   const rails = layout.blobs.filter((b) => b.cells < 100 && b.fill > 0.99), inRail = (cx, cy) => rails.some((b) => cx * cell >= b.x0 && cx * cell < b.x1 && cy * cell >= b.y0 && cy * cell < b.y1);
-  const wallCells = (cx, cy) => !fieldAt(cx, cy) && near[cy * mw + cx] && !inFix(cx, cy) && !inCorral(cx, cy) && !inRail(cx, cy) && cy * cell >= 96 - 4 && cy * cell < 1640;
+  const wallCells = (cx, cy) => !fieldAt(cx, cy) && near[cy * mw + cx] && !inFix(cx, cy) && !inCorral(cx, cy) && !inRail(cx, cy) && cy * cell >= 96 - 4 && cy * cell < 1600;
+  const sillCells = (cx, cy) => !fieldAt(cx, cy) && near[cy * mw + cx] && !inFix(cx, cy) && !inCorral(cx, cy) && cy * cell >= 1600 && cy * cell < 1640;   // the storefront is open: a door sill, not a wall (a wall would hide the entrance from the camera)
+  for (const [x0, y0, x1, y1] of cover(mw, mh, sillCells)) B.box('rail', m(x0 * cell), 0, m(y0 * cell), m(x1 * cell), 0.14, m(y1 * cell), { solid: true, id: 'sill' });
   for (const b of rails) B.box('rail', m(b.x0), 0, m(b.y0), m(b.x1), 0.12, m(b.y1), { solid: true, id: 'rail' });
-  for (const [x0, y0, x1, y1] of cover(mw, mh, wallCells)) B.box('wall', m(x0 * cell), 0, m(y0 * cell), m(x1 * cell), W_H, m(y1 * cell), { solid: true, id: 'wall', uv: 1.6 });
+  // small isolated wall pieces (a 4 px banner edge between two checkouts) are low strips like the rails, not 3.4 m slabs hiding the counters
+  const wmask = new Uint8Array(mw * mh), comp = new Int32Array(mw * mh), small = new Uint8Array(mw * mh);
+  for (let cy = 0; cy < mh; cy++) for (let cx = 0; cx < mw; cx++) wmask[cy * mw + cx] = wallCells(cx, cy) ? 1 : 0;
+  for (let i0 = 0; i0 < mw * mh; i0++) if (wmask[i0] && !comp[i0]) {
+    const st = [i0], seen = [i0]; comp[i0] = 1;
+    while (st.length) { const i = st.pop(), cx = i % mw, cy = (i / mw) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = cx + dx, ny = cy + dy; if (nx < 0 || ny < 0 || nx >= mw || ny >= mh) continue; const j = ny * mw + nx; if (wmask[j] && !comp[j]) { comp[j] = 1; st.push(j); seen.push(j); } } }
+    if (seen.length < 200) for (const j of seen) small[j] = 1;
+  }
+  for (const [x0, y0, x1, y1] of cover(mw, mh, (cx, cy) => small[cy * mw + cx] === 1)) B.box('rail', m(x0 * cell), 0, m(y0 * cell), m(x1 * cell), 0.12, m(y1 * cell), { solid: true, id: 'rail' });
+  for (const [x0, y0, x1, y1] of cover(mw, mh, (cx, cy) => wmask[cy * mw + cx] === 1 && !small[cy * mw + cx])) B.box('wall', m(x0 * cell), 0, m(y0 * cell), m(x1 * cell), W_H, m(y1 * cell), { solid: true, id: 'wall', uv: 1.6 });
   // a skirting board in front of the wall (not solid: it sits inside the wall's own cells' edge) is skipped on purpose: the wall's own face carries the base colour.
 
   // ---- the floor: one quad per rectangle of walkable cells
@@ -129,9 +140,10 @@ export function buildStructure(layout, mats, opts = {}) {
   const floor = new THREE.Mesh(mergeGeometries(floorG, false), mats.floor || mats.default); floor.receiveShadow = true; floor.name = 'floor'; floor.frustumCulled = false; root.add(floor);
 
   // ---- fixtures
-  const stock = new Stock(mats.products || mats.default); B.stock = stock;
+  const stocks = []; let stock = null;
   for (const f of fixtures) {
     const fc = fixtureCells(layout, f.rect), [bx0, by0, bx1, by1] = fc.core, x0 = m(bx0), z0 = m(by0), x1 = m(bx1), z1 = m(by1);
+    stock = new Stock(mats.products || mats.default); stocks.push(stock); B.stock = stock;
     const rec = { id: f.id, kind: f.kind, rect: f.rect, core: fc.core, sign: f.sign };
     // the plinth under the whole blocked region, cell for cell (solid), dark
     for (const [a, b, c, d] of fc.exact) B.box('base', m(a * cell), 0, m(b * cell), m(c * cell), 0.16, m(d * cell), { solid: true, id: f.id });
@@ -148,15 +160,14 @@ export function buildStructure(layout, mats, opts = {}) {
     info.corrals = (info.corrals || []).concat([[x0, z0, x1, z1]]);
   }
   // ---- the exit door in the north pier (south face of the solid block between the dairy and the rice units)
-  { const zf = m(224), cxd = m(435); info.exit = { x: cxd, z: zf };
+  { const zf = m(232), cxd = m(435); info.exit = { x: cxd, z: zf };
     B.box('doorframe', cxd - 0.85, 0, zf, cxd + 0.85, 2.35, zf + 0.09, { id: 'exit' });
     B.box('door', cxd - 0.72, 0, zf + 0.09, cxd + 0.72, 2.2, zf + 0.12, { id: 'exit' });
     B.box('glass', cxd - 0.5, 0.9, zf + 0.12, cxd + 0.5, 2.05, zf + 0.135, { id: 'exit' });
     B.box('bar', cxd - 0.6, 1.0, zf + 0.14, cxd + 0.6, 1.07, zf + 0.2, { id: 'exit' }); }
 
   root.add(B.finish());
-  for (const im of stock.build(false)) root.add(im);
-  info.stockCount = stock.n; info.solids = B.solids;
+  info.stockCount = 0; for (const st of stocks) { for (const im of st.build(false)) root.add(im); info.stockCount += st.n; } info.solids = B.solids;
   return { root, info, builder: B };
 }
 
@@ -167,9 +178,9 @@ function gondola(B, f, x0, z0, x1, z1, stock, info) {
   // end caps, back panel, top, plank shelves with a lip
   B.box(body, x0, 0.16, zb, x0 + side, H, z1, { solid: true, id: f.id }); B.box(body, x1 - side, 0.16, zb, x1, H, z1, { solid: true, id: f.id });
   B.box('back', x0 + side, 0.16, zb, x1 - side, H, zb + 0.05, { solid: true, id: f.id });
-  B.box(body, x0, H, zb, x1, H + 0.06, z1, { solid: true, id: f.id });
+  B.box('cap', x0, H, zb, x1, H + 0.06, z1, { solid: true, id: f.id });
   B.box(cooler ? 'coolerbase' : 'base', x0, 0.16, z1 - 0.34, x1, 0.2, z1, { solid: true, id: f.id });   // the kick plate
-  const levels = [0.5, 0.9, 1.3, 1.7];
+  const levels = [0.72, 1.24];
   for (const y of levels) {
     B.box(produce ? 'wood' : 'plank', x0 + side, y - 0.03, zb + 0.05, x1 - side, y, z1 - 0.02, { solid: true, id: f.id });
     if (produce) { B.box('wood', x0 + side, y, z1 - 0.06, x1 - side, y + 0.07, z1 - 0.02, { id: f.id }); B.box('wood', x0 + side, y, zb + 0.05, x1 - side, y + 0.09, zb + 0.09, { id: f.id, cast: false }); const n = Math.round(Wd / 1.2); for (let i = 1; i < n; i++) B.box('wood', x0 + Wd * i / n - 0.02, y, zb + 0.05, x0 + Wd * i / n + 0.02, y + 0.08, z1 - 0.02, { id: f.id, cast: false }); }
@@ -187,71 +198,41 @@ function gondola(B, f, x0, z0, x1, z1, stock, info) {
   B.box('chrome', sx + sw / 2 - 0.26, H + 0.06, z1 - 0.5, sx + sw / 2 - 0.2, H + 0.15, z1 - 0.44, { id: f.id, cast: false });
   info.signs.push({ text: f.sign, x: sx, y: H + 0.15 + 0.26, z: z1 - 0.47, w: sw, h: 0.52 });
   // stock
-  fillShelves(stock, f, x0 + side + 0.06, x1 - side - 0.06, z1, levels, zb);
+  fillShelves(stock, f, x0 + side + 0.08, x1 - side - 0.08, z1, [0.2, ...levels]);
   // (the north part of the blocked region is the plinth, already placed)
 }
 
-function fillShelves(S, f, xa, xb, zf, levels, zb) {
-  const rows = (y, n, fn) => { for (let r = 0; r < n; r++) fn(zf - 0.17 - r * 0.28, y, r); };
-  const ys = [0.2, ...levels.slice(0, 3).map((y) => y + 0.0)];   // product bases: the kick plate top, then each plank
-  const lvl = [0.2, 0.5, 0.9, 1.3];
-  const span = (step, fn) => { let i = 0; for (let x = xa + step / 2; x < xb - step / 2 + 1e-6; x += step, i++) fn(x, i); };
+// products are drawn about 1.6 to 2.3 times life size: from this height a real can is a speck and the game must read at a glance (the painted board does the same)
+const SC = { jug: 1.6, carton: 1.9, sack: 1.5, can: 2.6, loaf: 1.9, bottle: 2.2, soda: 1.3, chips: 1.7, box: 1.9, jugL: 1.7, apple: 2.3, orange: 2.2, pepper: 2.0, banana: 2.0, cabbage: 1.4, broccoli: 1.6, carrot: 2.0, potato: 2.0, onion: 2.0, tray: 2.0, drumsticks: 2.0, tissue: 1.6 };
+const NAT = { jug: 0.15, carton: 0.075, sack: 0.2, can: 0.075, loaf: 0.3, bottle: 0.066, soda: 0.105, chips: 0.2, box: 0.17, jugL: 0.14, apple: 0.082, orange: 0.088, pepper: 0.07, banana: 0.1, cabbage: 0.17, broccoli: 0.13, carrot: 0.07, potato: 0.11, onion: 0.1, tray: 0.2, drumsticks: 0.2, tissue: 0.22 };
+const GAP = 1.12;
+function fillShelves(S, f, xa, xb, zf, bases) {
   const jit = (i, k) => (((i * 37 + k * 101) % 17) / 17 - 0.5);
-  const put = (kind, o, x, y, z, i) => S.add(kind, o, x + jit(i, 1) * 0.01, y, z + jit(i, 2) * 0.01, jit(i, 3) * 0.12);
+  // a row along x of one kind per call; seq(i) picks [kind, opts] for the i-th slot; rows: 2 deep
+  const row = (y, z, seq, i0 = 0) => {
+    let x = xa, i = i0;
+    for (;;) { const [k, o] = seq(i), w = NAT[k] * SC[k] * GAP; if (x + w > xb + 1e-6) break; S.add(k, o, x + w / 2 + jit(i, 1) * 0.012, y, z + jit(i, 2) * 0.012, jit(i, 3) * 0.14, SC[k]); x += w; i++; }
+  };
+  const fill = (seqOf, rows = 2) => bases.forEach((y, L) => { for (let r = 0; r < rows; r++) row(y, zf - 0.2 - r * 0.4, seqOf(L, r), L * 5 + r * 3); });
   switch (f.stock) {
-    case 'dairy': {
-      const seq = [['jug', { label: 'milk', cap: '#2f6fd6' }], ['jug', { label: 'milk2', cap: '#d6402f' }], ['carton', { label: 'carton' }], ['jug', { label: 'milk', cap: '#2f6fd6' }], ['carton', { label: 'carton', body: '#fff7c8' }]];
-      lvl.forEach((y, L) => rows(y + 0.0, 2, (z, yy, r) => span(L % 2 ? 0.2 : 0.17, (x, i) => { const s = seq[(i + L + r) % seq.length]; put(s[0], s[1], x, yy, z, i + L * 50 + r * 9); })));
-      break; }
-    case 'rice': {
-      lvl.forEach((y, L) => rows(y, 2, (z, yy, r) => { const sec = (xb - xa) / 3; span(0.24, (x, i) => { const t = Math.floor((x - xa) / sec);
-        if (t === 0) put('sack', { label: L % 2 ? 'rice2' : 'rice', body: L % 2 ? '#e8e2cc' : '#f4d27a' }, x, yy, z, i + L * 40 + r * 7);
-        else { const cs = i % 2 ? 'beans' : 'beans2'; put('can', { label: cs, body: cs === 'beans' ? '#b3322b' : '#3d8c4f' }, x, yy, z, i); put('can', { label: cs, body: cs === 'beans' ? '#b3322b' : '#3d8c4f' }, x + 0.09, yy, z, i + 3); } }); }));
-      break; }
-    case 'bread': {
-      lvl.forEach((y, L) => rows(y, 2, (z, yy, r) => span(0.32, (x, i) => put('loaf', i % 3 === 0 ? { label: 'bread2', body: '#ecd9a8' } : { label: 'bread', body: '#c98a3c' }, x, yy, z, i + L * 31 + r * 5))));
-      break; }
-    case 'juice': {
-      const set = [['juice', '#e8892a'], ['juice3', '#4f9f45'], ['juice2', '#7b4aa8'], ['lemonade', '#f0d23a'], ['juice', '#e8892a']];
-      lvl.forEach((y, L) => rows(y, 2, (z, yy, r) => span(0.085, (x, i) => { const s = set[Math.floor(i / 4 + L) % set.length]; put('bottle', { label: s[0], body: s[1] }, x, yy, z, i + L * 13 + r * 3); })));
-      break; }
-    case 'snack': {
-      const set = [['chips', '#e8a42b'], ['chips2', '#6d3aa6'], ['chips3', '#cf3b36']];
-      lvl.forEach((y, L) => rows(y, 2, (z, yy, r) => span(0.23, (x, i) => { const s = set[(i + L + r) % 3]; put('chips', { label: s[0], body: s[1] }, x, yy, z, i + L * 17 + r * 3); })));
-      break; }
+    case 'dairy': { const q = [['jug', { label: 'milk', cap: '#2f6fd6' }], ['jug', { label: 'milk2', cap: '#d6402f' }], ['carton', { label: 'carton' }], ['jug', { label: 'milk', cap: '#2f6fd6' }], ['carton', { label: 'carton', body: '#fff7c8' }], ['jug', { label: 'milk2', cap: '#d6402f' }]]; fill((L, r) => (i) => q[(i + L) % q.length]); break; }
+    case 'rice': { const sack = (L) => (i) => ['sack', L % 2 ? { label: 'rice2', body: '#e8e2cc' } : { label: 'rice', body: '#f4d27a' }], can = (i) => (i % 2 ? ['can', { label: 'beans', body: '#b3322b' }] : ['can', { label: 'beans2', body: '#3d8c4f' }]);
+      bases.forEach((y, L) => { for (let r = 0; r < 2; r++) { const z = zf - 0.2 - r * 0.4, mid = xa + (xb - xa) * 0.4; let x = xa, i = L * 5 + r;
+        while (x + 0.3 < mid) { const o = sack(L)(i)[1]; S.add('sack', o, x + 0.15, y, z, jit(i, 3) * 0.1, SC.sack); x += 0.3; i++; }
+        while (x + 0.2 < xb) { const c = can(i); S.add('can', c[1], x + 0.1, y, z, jit(i, 3) * 0.2, SC.can); x += 0.2; i++; } } }); break; }
+    case 'bread': { fill((L, r) => (i) => (i % 3 === 0 ? ['loaf', { label: 'bread2', body: '#ecd9a8' }] : ['loaf', { label: 'bread', body: '#c98a3c' }])); break; }
+    case 'juice': { const set = [['bottle', { label: 'juice', body: '#e8892a' }], ['bottle', { label: 'juice3', body: '#4f9f45' }], ['bottle', { label: 'juice2', body: '#7b4aa8' }], ['bottle', { label: 'lemonade', body: '#f0d23a' }], ['bottle', { label: 'juice', body: '#c8282b' }]]; fill((L) => (i) => set[Math.floor(i / 3 + L) % set.length]); break; }
+    case 'snack': { const set = [['chips', { label: 'chips', body: '#e8a42b' }], ['chips', { label: 'chips2', body: '#6d3aa6' }], ['chips', { label: 'chips3', body: '#cf3b36' }]]; fill((L, r) => (i) => set[(i + L + r) % 3]); break; }
     case 'fruit': case 'veg': {
-      const fr = f.stock === 'fruit', secs = fr ? [['banana', {}, 0.15], ['apple', { body: '#6fb23a' }, 0.085], ['apple', { body: '#c8282b' }, 0.085], ['orange', {}, 0.09], ['pepper', { body: '#d9382b' }, 0.07]] : [['cabbage', {}, 0.19], ['broccoli', {}, 0.13], ['carrot', {}, 0.07], ['potato', {}, 0.11], ['onion', {}, 0.105]];
+      const fr = f.stock === 'fruit', secs = fr ? [['banana', {}], ['apple', { body: '#6fb23a' }], ['apple', { body: '#c8282b' }], ['orange', {}], ['pepper', { body: '#d9382b' }]] : [['cabbage', {}], ['broccoli', {}], ['carrot', {}], ['potato', {}], ['onion', {}]];
       const sw = (xb - xa) / secs.length;
-      lvl.forEach((y, L) => {
-        // a wooden crate tray under each section
-        secs.forEach(([k, o, st], s) => {
-          const a = xa + s * sw, b = a + sw - 0.03;
-          const rowsN = 3;
-          for (let r = 0; r < rowsN; r++) for (let x = a + st / 2 + 0.03, i = 0; x < b - st / 2; x += st, i++) {
-            const z = zf - 0.2 - r * (st > 0.1 ? 0.24 : 0.2) , tilt = 0.02 + (r * 0.03);
-            if (k === 'carrot') { S.add(k, o, x, y + 0.03 + r * 0.01, z, 0, 1.0); S.add(k, o, x + 0.02, y + 0.07 + r * 0.01, z + 0.02, 0.2, 1.0); }
-            else S.add(k, o, x + (((i * 7 + r * 3 + L) % 5) - 2) * 0.004, y + 0.02 + r * 0.025 + (k === 'banana' ? 0.0 : 0.0), z, ((i + r + L) % 7) * 0.8, 1);
-            if (st >= 0.085 && k !== 'banana' && k !== 'carrot') S.add(k, o, x + 0.02, y + 0.02 + r * 0.025 + st * 0.8, z - 0.04, ((i + L) % 5), 0.98);   // a second layer
-          }
-        });
-      });
+      bases.forEach((y, L) => secs.forEach(([k, o], si) => { const a = xa + si * sw + 0.04, b = a + sw - 0.1, st = NAT[k] * SC[k] * 0.98;
+        for (let r = 0; r < 3; r++) for (let x = a + st / 2, i = 0; x < b - st / 2; x += st, i++) { const z = zf - 0.17 - r * 0.28; S.add(k, o, x + jit(i + r, 1) * 0.02, y + 0.04 + r * 0.06, z, (i + r + L) * 0.9, SC[k]); } }));
       break; }
-    case 'meat': {
-      const set = [['tray', { label: 'meat', meat: '#b3262f' }], ['tray', { label: 'meat', meat: '#d9737a' }], ['drumsticks', {}], ['tray', { label: 'meat', meat: '#9c2430' }]];
-      lvl.forEach((y, L) => rows(y, 3, (z, yy, r) => span(0.25, (x, i) => { const s = set[(i + L + r) % set.length]; put(s[0], s[1], x, yy + r * 0.0, z, i + L * 11 + r * 3); })));
-      break; }
-    case 'house': {
-      const set = [['jugL', { label: 'soap', body: '#3a9ee0' }], ['tissue', { label: 'tissue' }], ['jugL', { label: 'soap2', body: '#f08a2a' }], ['bottle', { label: 'soap', body: '#3a9ee0', cap: '#fff' }]];
-      lvl.forEach((y, L) => rows(y, 2, (z, yy, r) => span(0.25, (x, i) => { const s = set[(i + L * 2 + r) % set.length]; put(s[0], s[1], x, yy, z, i + L * 19 + r * 3); })));
-      break; }
-    case 'bev': {
-      const set = [['soda', { label: 'soda2', body: '#a8231f', cap: '#f4f4f0' }], ['soda', { label: 'soda', body: '#2f8f4a', cap: '#f4f4f0' }], ['soda', { label: 'soda3', body: '#3a6ed6', cap: '#f4f4f0' }], ['soda', { label: 'soda4', body: '#e8892a', cap: '#f4f4f0' }], ['soda', { label: 'soda5', body: '#7b4aa8', cap: '#f4f4f0' }]];
-      lvl.forEach((y, L) => rows(y, 2, (z, yy, r) => span(0.13, (x, i) => { const s = set[Math.floor(i / 3 + L) % set.length]; put(s[0], s[1], x, yy, z, i + L * 7 + r * 3); })));
-      break; }
-    case 'frozen': {
-      const set = [['box', { label: 'frozen', body: '#e9f1fa' }], ['box', { label: 'frozen2', body: '#fff0d6' }], ['box', { label: 'frozen3', body: '#e6f4e8' }]];
-      lvl.forEach((y, L) => rows(y, 3, (z, yy, r) => span(0.2, (x, i) => { const s = set[(i + L + r) % 3]; put(s[0], { ...s[1], w: 0.17, h: 0.24, d: 0.06 }, x, yy, z, i + L * 5 + r * 3); })));
-      break; }
+    case 'meat': { const set = [['tray', { label: 'meat', meat: '#b3262f' }], ['tray', { label: 'meat', meat: '#d9737a' }], ['drumsticks', {}], ['tray', { label: 'meat', meat: '#9c2430' }]]; fill((L, r) => (i) => set[(i + L + r) % set.length]); break; }
+    case 'house': { const set = [['jugL', { label: 'soap', body: '#3a9ee0' }], ['tissue', { label: 'tissue' }], ['jugL', { label: 'soap2', body: '#f08a2a' }], ['bottle', { label: 'soap', body: '#3a9ee0', cap: '#fff' }]]; fill((L, r) => (i) => set[(i + L * 2 + r) % set.length]); break; }
+    case 'bev': { const set = [['soda', { label: 'soda2', body: '#a8231f', cap: '#f4f4f0' }], ['soda', { label: 'soda', body: '#2f8f4a', cap: '#f4f4f0' }], ['soda', { label: 'soda3', body: '#3a6ed6', cap: '#f4f4f0' }], ['soda', { label: 'soda4', body: '#e8892a', cap: '#f4f4f0' }], ['soda', { label: 'soda5', body: '#7b4aa8', cap: '#f4f4f0' }]]; fill((L) => (i) => set[Math.floor(i / 3 + L) % set.length]); break; }
+    case 'frozen': { const set = [['box', { label: 'frozen', body: '#e9f1fa', w: 0.17, h: 0.24, d: 0.06 }], ['box', { label: 'frozen2', body: '#fff0d6', w: 0.17, h: 0.24, d: 0.06 }], ['box', { label: 'frozen3', body: '#e6f4e8', w: 0.17, h: 0.24, d: 0.06 }]]; fill((L, r) => (i) => set[(i + L + r) % 3]); break; }
   }
 }
 

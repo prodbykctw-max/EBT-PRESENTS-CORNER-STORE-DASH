@@ -11,15 +11,15 @@ import * as T from './textures.js';
 import { useAtlas, productGeometry } from './products.js';
 import { buildStructure, PX, m } from './structure.js';
 
-const ELEV = 45 * Math.PI / 180, DIST = 300, SCALE2D = 0.8;   // camera elevation, distance (a long lens: close to orthographic), 2D zoom (board px -> CSS px)
+const ELEV = 45 * Math.PI / 180, DIST = 800, SCALE2D = 0.8;   // camera elevation, distance (a long lens: close to orthographic), 2D zoom (board px -> CSS px)
 const FACE_YAW = { U: Math.PI, D: 0, L: -Math.PI / 2, R: Math.PI / 2 };   // character.glb faces +z (the camera) at yaw 0
 
 export class Store3D {
   constructor(canvas, { layout, base = new URL('../drive/', import.meta.url).href, mobile = false, pixelRatio } = {}) {
     this.layout = layout; this.base = base; this.mobile = mobile; this.canvas = canvas; this.t = 0;
     const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-    r.setPixelRatio(pixelRatio ?? Math.min(devicePixelRatio, mobile ? 1.5 : 2));
-    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap; r.toneMapping = THREE.NeutralToneMapping; r.toneMappingExposure = 1.0;
+    r.info.autoReset = false; r.setPixelRatio(pixelRatio ?? Math.min(devicePixelRatio, mobile ? 1.5 : 2));
+    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFShadowMap; r.toneMapping = THREE.NeutralToneMapping; r.toneMappingExposure = 1.0;
     this.scene = new THREE.Scene(); this.scene.background = new THREE.Color(0x0d1020);
     this.camera = new THREE.PerspectiveCamera(10, 1, 1, 1000);
     this.look = new RealLook(r, this.scene, this.camera, { mobile });
@@ -41,12 +41,13 @@ export class Store3D {
     const mats = this.mats = {
       default: std({ color: 0x888888 }),
       floor: std({ map: floorT.map, normalMap: floorT.normalMap, normalScale: new THREE.Vector2(0.9, 0.9), roughnessMap: floorT.roughnessMap, roughness: 1, metalness: 0, aoMap, aoMapIntensity: 1.0, lightMap, lightMapIntensity: 1.0, envMapIntensity: 0.55 }),
-      wall: std({ map: concD, normalMap: concN, normalScale: new THREE.Vector2(0.6, 0.6), color: new THREE.Color(0.28, 0.33, 0.62), roughness: 0.9, metalness: 0 }),
+      wall: std({ map: concD, normalMap: concN, normalScale: new THREE.Vector2(0.6, 0.6), color: new THREE.Color(0.52, 0.56, 0.82), roughness: 0.9, metalness: 0 }),
       rail: std({ color: 0x3a3d4a, roughness: 0.7, metalness: 0.2 }),
       base: std({ color: 0x1d2140, roughness: 0.55, metalness: 0.15 }),
       steel: std({ color: 0x353b61, roughness: 0.42, metalness: 0.55 }),
       cooler: std({ color: 0xe3e9ef, roughness: 0.34, metalness: 0.25 }),
       coolerbase: std({ color: 0x9fb0c2, roughness: 0.4, metalness: 0.2 }),
+      cap: std({ color: 0xdfe3ec, roughness: 0.35, metalness: 0.2 }),
       back: std({ color: 0x4a527d, roughness: 0.7, metalness: 0.1 }),
       plank: std({ color: 0xcfd4de, roughness: 0.38, metalness: 0.35 }),
       wood: std({ color: 0xb78a55, roughness: 0.78, metalness: 0 }),
@@ -66,16 +67,23 @@ export class Store3D {
     const S = this.structure = buildStructure(layout, mats); this.scene.add(S.root);
     this.root = S.root;
     // ---- lights: one soft key light with the only shadow map, and the sky/ground fill
-    const hemi = new THREE.HemisphereLight(0xeaf0ff, 0xb9a98c, 0.9); this.scene.add(hemi);
+    const hemi = this.hemi = new THREE.HemisphereLight(0xeaf0ff, 0xb9a98c, 0.5); this.scene.add(hemi);
     const key = this.key = new THREE.DirectionalLight(0xfff1dc, 2.6); key.castShadow = true; this.scene.add(key, key.target);
     const half = 15, sz = this.mobile ? 2048 : 4096; key.shadow.mapSize.set(sz, sz); Object.assign(key.shadow.camera, { left: -half, right: half, top: half, bottom: -half, near: 1, far: 120 });
     key.shadow.bias = -0.0004; key.shadow.normalBias = 0.035; key.shadow.radius = 3; key.userData.dir = new THREE.Vector3(-0.42, 1.0, -0.62).normalize();
+    { // the pavement outside the storefront (dark tile), below the door
+      const pv = new THREE.Mesh(new THREE.PlaneGeometry(m(layout.board.w), m(layout.board.h - 1640)), new THREE.MeshStandardMaterial({ map: floorT.map, color: 0x242b4d, roughness: 0.6, metalness: 0 })); pv.geometry.attributes.uv.array.forEach((v, i, a) => { a[i] = v * (i % 2 ? 4.4 : 7.4); });
+      pv.rotation.x = -Math.PI / 2; pv.position.set(m(layout.board.w) / 2, -0.002, m(1640 + (layout.board.h - 1640) / 2)); pv.receiveShadow = true; this.root.add(pv); }
     this.buildSigns(); this.buildDecals(); this.buildCarts(); this.buildItems();
     await this.loadPeople();
     this.resize(this.view.w, this.view.h);
     return this;
   }
 
+  applyTune(t) {
+    this.key.intensity = t.key; this.hemi.intensity = t.hemi; this.scene.environmentIntensity = t.env; this.renderer.toneMappingExposure = t.ex; this.mats.floor.lightMapIntensity = t.lm;
+    this.look.m.fin.uniforms.uBloom.value = t.bloom; this.look.m.pre.uniforms.uThreshold.value = t.bt; this.look.m.pre.uniforms.uKnee.value = 0.5;
+  }
   // the floor's baked light: ambient occlusion from the mask (a soft contact shadow where shelves, counters and walls meet the tile)
   // and the pools of the ceiling lights
   bakeFloorLight() {
@@ -161,7 +169,7 @@ export class Store3D {
     for (const it of L.items) {
       const g = new THREE.Group(), x = m(it.sx ?? it.x), z = m(it.sy ?? it.y); g.position.set(x, 0, z); g.userData.id = it.id;
       const inner = new THREE.Group(); g.add(inner);
-      (KINDS[it.id] || []).forEach(([k, o, s], i) => { const mesh = new THREE.Mesh(productGeometry(k, o), std); mesh.scale.setScalar(s); mesh.position.x = it.id === 'RICE & BEANS' ? (i ? 0.3 : -0.2) : 0; mesh.castShadow = true; inner.add(mesh); });
+      (KINDS[it.id] || []).forEach(([k, o, s], i) => { const geo = productGeometry(k, o); geo.computeBoundingBox(); const hgt = geo.boundingBox.max.y, tgt = { apple: 0.42, can: 0.45, sack: 0.62 }[k] || 0.66, mesh = new THREE.Mesh(geo, std); mesh.scale.setScalar(tgt / hgt); mesh.position.x = it.id === 'RICE & BEANS' ? (i ? 0.34 : -0.22) : 0; mesh.castShadow = true; inner.add(mesh); });
       const ringM = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.3), new THREE.MeshBasicMaterial({ map: this.ringTex, color: new THREE.Color(1.5, 1.2, 0.35), transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending }));
       ringM.rotation.x = -Math.PI / 2; ringM.position.y = 0.014; g.add(ringM);
       const shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), new THREE.MeshBasicMaterial({ map: this.glow, color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false, toneMapped: false })); shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.01; g.add(shadow);
@@ -178,6 +186,11 @@ export class Store3D {
       const o = SkeletonUtils.clone(gltf.scene), h = bully ? BULLY_H : PLAYER_H; o.scale.setScalar(h / MODEL_H);
       o.traverse((q) => { if (q.isMesh) { q.castShadow = true; q.receiveShadow = true; q.frustumCulled = false; if (bully) q.material = makeBullyMaterial(q.material); } });
       const mixer = new THREE.AnimationMixer(o), act = {}; for (const k of ['stand', 'walk', 'run']) { act[k] = mixer.clipAction(clips[k]); act[k].play(); }
+      // see-through: where a shelf stands between the camera and a person, a faint tinted shape of them shows through it (a plain gameplay aid: the player must never be lost behind a unit)
+      const xm = new THREE.MeshBasicMaterial({ color: bully ? 0xff5a4a : 0xffd34a, transparent: true, opacity: 0.4, depthTest: true, depthFunc: THREE.GreaterDepth, depthWrite: false, toneMapped: false }); const xr = [];
+      xm.onBeforeCompile = (sh) => { sh.vertexShader = sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n gl_Position.z -= 0.004 * gl_Position.w;'); }; xm.customProgramCacheKey = () => 'xray-nudge';
+      o.traverse((q) => { if (q.isSkinnedMesh) xr.push(q); });
+      for (const q of xr) { const x = new THREE.SkinnedMesh(q.geometry, xm); x.bind(q.skeleton, q.bindMatrix); x.frustumCulled = false; x.renderOrder = 20; x.name = 'xray'; q.parent.add(x); }
       const g = new THREE.Group(); g.add(o);
       const blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: this.glow, color: 0x000000, transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false })); blob.rotation.x = -Math.PI / 2; blob.position.y = 0.012; blob.scale.set(h * 0.62, h * 0.4, 1); g.add(blob);
       this.root.add(g); return { g, o, mixer, act, h, dur: walk0.duration };
@@ -191,6 +204,7 @@ export class Store3D {
     a.act.stand.setEffectiveWeight(1 - moving); a.act.walk.setEffectiveWeight(moving * 0.5); a.act.run.setEffectiveWeight(moving * 0.5);
     a.mixer.setTime(((phase % a.dur) + a.dur) % a.dur); a.o.updateMatrixWorld(true);
   }
+  setXray(on) { for (const a of Object.values(this.actors)) a.o.traverse((q) => { if (q.name === 'xray') q.visible = !!on; }); }
   hideActor(which) { if (this.actors[which]) this.actors[which].g.visible = false; }
   /** which pickups to show: 'all', an id, or null; pay: show the pay pads */
   setItems(which) { for (const g of this.items) g.visible = which === 'all' || g.userData.id === which; }
@@ -224,7 +238,7 @@ export class Store3D {
     const sw = 0.5 + 0.5 * Math.sin(this.t * Math.PI), s2 = 0.5 + 0.5 * Math.sin(this.t * Math.PI);
     for (const g of this.items) { g.userData.ring.material.opacity = 0.45 + 0.4 * sw; g.userData.inner.position.y = 0.32 + 0.05 * Math.sin(this.t * Math.PI * 0.9); }
     for (const p of this.pads) p.edge.material.opacity = 0.45 + 0.4 * s2;
-    this.look.render();
+    this.renderer.info.reset(); this.look.render();
   }
   stats() { const i = this.renderer.info; return { triangles: i.render.triangles, calls: i.render.calls, geometries: i.memory.geometries, textures: i.memory.textures, stock: this.structure.info.stockCount }; }
 }
