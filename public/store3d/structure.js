@@ -176,8 +176,10 @@ export function buildStructure(layout, mats, opts = {}) {
     B.box('doorglass', cxd - 0.5, 0.5, zf + 0.12, cxd + 0.5, 2.05, zf + 0.135, { id: 'exit' });
     B.box('doorframe', cxd - 0.03, 0.5, zf + 0.135, cxd + 0.03, 2.05, zf + 0.15, { id: 'exit' });
     B.box('bar', cxd - 0.6, 1.0, zf + 0.14, cxd + 0.6, 1.07, zf + 0.2, { id: 'exit' }); }
-  // ---- the welcome mat (a thick rubber mat; its lettered top is a decal, store3d.js) and the potted plants by the entrance
-  { const [x0, y0, x1, y1] = [335, 1562, 490, 1630]; B.box('mat', m(x0), 0, m(y0), m(x1), 0.025, m(y1)); info.welcome = [m(x0), m(y0), m(x1), m(y1), 0.026]; }
+  // ---- the two door mats, one per sliding door (thick rubber mats; their lettered tops are decals, store3d.js): you come in on the right
+  //      as you face the store from the street (the east mat, ENTRANCE) and leave on the left (the west mat, EXIT); and the potted plants
+  { info.mats = [['matExit', 335, 408], ['matEntrance', 417, 490]].map(([name, x0, x1]) => { const y0 = 1562, y1 = 1630;
+      B.box('mat', m(x0), 0, m(y0), m(x1), 0.025, m(y1)); return { name, rect: [m(x0), m(y0), m(x1), m(y1), 0.026] }; }); }
   for (const [bx, by] of [[262, 1588], [566, 1588]]) plant(B, m(bx), m(by));
   // ---- loose gold and pink accent tiles on the walkable cream floor (the painted floor has them too)
   { const TS = 0.6, nx = Math.floor(m(layout.board.w) / TS), nz = Math.floor(m(1640) / TS), w = B.white;
