@@ -542,7 +542,8 @@ least `TAP_MIN` (0.12 s). The physics is the same 120 Hz as before and the car (
 steps. **What you see:** the front wheels turn with the steering value (`CAR_LEAN.lock`, 0.5 rad at full lock, less at
 speed), the body leans out of the turn with the smoothed side acceleration (`CAR_LEAN`, at most 0.05 rad) and the tyres squeal
 in a hard turn at speed (`sideSlip` in `drive.js`, from `car.ay`). The hit boxes are still the car's footprint along the
-road (they do not turn with the nose). **Autopilot (`?bot`) and the opening:** with no `steerIn` the car steers itself toward
+road (they do not turn with the nose).
+**Measured response** (`tools-steer/steer.mjs`, 3.45 m lanes, software WebGL, same on main + PR #77): nose turning 0.03 s (10 m/s) / 0.05 s (25 m/s) after the press; peak nose angle 0.38 rad (21.7 deg) at 10 m/s, 0.22 rad (12.6 deg) at 25 m/s, reached in about 0.32 s; holding across one lane takes 1.1 s at 10 m/s and 0.8 s at 25 m/s; after letting go the nose is within 0.02 rad in 0.38-0.45 s and within 0.005 rad in 0.53-0.60 s, with no wrong-way overshoot; the car centre never went past the road edge (closest -0.046 m). **Autopilot (`?bot`) and the opening:** with no `steerIn` the car steers itself toward
 `car.targetD` (`STEER.seek`: it asks for a side speed of 2.2 x the distance left, through the same steering, nose and curb
 rules). The bot writes `targetD`; so does the pull-out after getting in (`pullOut` in `drive.js`: your car sits at the curb
 and swings out into the travel lane by itself until you steer, 4 s at most; the parked cars within `PULLOUT_CLEAR` 17 m ahead of
