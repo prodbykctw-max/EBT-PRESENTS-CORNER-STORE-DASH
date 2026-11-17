@@ -1,0 +1,97 @@
+{
+ "cells": 79615,
+ "agree": 79600,
+ "floorButSolid3d": 15,
+ "solidButFree3d": 0,
+ "byFixture": {
+  "co1:3D solid, game floor": 2,
+  "co2:3D solid, game floor": 2,
+  "juice:3D solid, game floor": 1,
+  "co3:3D solid, game floor": 3,
+  "fruit:3D solid, game floor": 4,
+  "house:3D solid, game floor": 1,
+  "frozen:3D solid, game floor": 2
+ },
+ "holeFixtures": {},
+ "examples": [
+  {
+   "x": 558,
+   "y": 366,
+   "game": "floor",
+   "t3": true
+  },
+  {
+   "x": 566,
+   "y": 366,
+   "game": "floor",
+   "t3": true
+  },
+  {
+   "x": 510,
+   "y": 550,
+   "game": "floor",
+   "t3": true
+  },
+  {
+   "x": 510,
+   "y": 554,
+   "game": "floor",
+   "t3": true
+  },
+  {
+   "x": 382,
+   "y": 686,
+   "game": "floor",
+   "t3": true
+  },
+  {
+   "x": 514,
+   "y": 722,
+   "game": "floor",
+   "t3": true
+  },
+  {
+   "x": 698,
+   "y": 722,
+   "game": "floor",
+   "t3": true
+  },
+  {
+   "x": 514,
+   "y": 726,
+   "game": "floor",
+   "t3": true
+  },
+  {
+   "x": 74,
+   "y": 1054,
+   "game": "floor",
+   "t3": true
+  },
+  {
+   "x": 382,
+   "y": 1054,
+   "game": "floor",
+   "t3": true
+  },
+  {
+   "x": 74,
+   "y": 1058,
+   "game": "floor",
+   "t3": true
+  },
+  {
+   "x": 382,
+   "y": 1058,
+   "game": "floor",
+   "t3": true
+  }
+ ],
+ "pct": 0.019,
+ "pctExcludingKnownHoles": 0.019,
+ "knownHoleCells": 0,
+ "walkableCells": 40323,
+ "walkableButSolid3d": 15,
+ "solidCells": 39180,
+ "solidButFree3d2": 0
+}
