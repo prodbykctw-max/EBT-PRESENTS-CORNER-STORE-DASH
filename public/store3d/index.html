@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Corner Store 3D preview</title>
+<style>html,body{margin:0;height:100%;background:#0d1020;overflow:hidden}canvas{display:block;position:fixed;left:0;top:0}#hud{position:fixed;left:6px;bottom:6px;color:#fff;font:11px ui-monospace,monospace;opacity:.7;pointer-events:none;white-space:pre}</style></head>
+<body><canvas id="c"></canvas><div id="hud"></div>
+<script type="module">
+// Phase-1 preview (not linked from the game). ?px=&py= player (board px), ?bx=&by= bully, ?face=U|D|L|R, ?items=all|MILK|none, ?pay=1, ?walk=1, ?mobile=1, ?dpr=3
+import { Store3D } from './store3d.js';
+const q = new URLSearchParams(location.search), num = (k, d) => (q.has(k) ? +q.get(k) : d);
+const layout = await (await fetch('layout.json')).json();
+const s = window.__s3d = new Store3D(document.getElementById('c'), { layout, mobile: q.get('mobile') === '1', pixelRatio: q.has('dpr') ? +q.get('dpr') : undefined });
+await s.init();
+const P = { x: num('px', layout.spawnPlayer.x), y: num('py', layout.spawnPlayer.y) }, Bu = { x: num('bx', 650), y: num('by', 320) };
+const face = q.get('face') || 'U', bface = q.get('bface') || 'D', mv = q.get('walk') === '1' ? 1 : 0;
+s.setActor('player', P.x, P.y, face, mv, 0.3); if (q.get('bully') !== '0') s.setActor('bully', Bu.x, Bu.y, bface, mv, 0.1); else s.hideActor('bully');
+s.setItems(q.get('items') || 'all'); s.setPay(q.get('pay') === '1');
+s.setCamera(P.x, P.y); s.resize(innerWidth, innerHeight);
+s.setCamera(P.x, P.y);
+window.__s3dReady = true;
+window.__renderOnce = (dt = 0.016) => { s.render(dt); return s.stats(); };
+if (q.get('loop') !== '0') { let last = performance.now(); const f = (t) => { s.render((t - last) / 1000); last = t; requestAnimationFrame(f); }; requestAnimationFrame(f); }
+</script></body></html>
