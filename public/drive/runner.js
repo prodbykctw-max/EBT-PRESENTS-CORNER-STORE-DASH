@@ -159,54 +159,57 @@ const lerpAngle = (a, b, t) => a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) 
 
 // ---------------------------------------------------------------- the player's car
 export const PLAYER = { halfL: 2.5, halfW: 0.98 };
+/** Real steering (replaces the old stiff one-lane-per-press): holding ◀ ▶ turns a steering value toward full lock (`ramp` s), letting go
+ *  returns it to centre (`release` s). The car's nose angle to the road follows that value (`tau` s lag) and the side speed is
+ *  speed x sin(nose angle), so it arcs across the road at an angle and stays wherever you leave it; letting go straightens the nose
+ *  by itself. How far the nose can turn shrinks with speed (`yawLo` rad at `vLo` m/s or less, `yawHi` at `vHi`), and it turns nothing
+ *  standing still (`gate` m/s to full effect). `slide`: the tail steps out by up to this many rad at speed under full lock.
+ *  `seek`: the autopilot's (and any tool's) steering aims at `targetD`: it asks for a side speed of seek x (distance still to go). */
+export const STEER = { ramp: 0.15, release: 0.2, tau: 0.11, yawLo: 0.4, yawHi: 0.2, vLo: 5, vHi: 30, gate: 3, slide: 0.07, slideTau: 0.12, seek: 2.2, ayTau: 0.12 };
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const smooth = (x) => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+/** the most the nose can turn from the road's heading at this speed (rad) */
+export const maxYaw = (sp) => STEER.yawLo + (STEER.yawHi - STEER.yawLo) * smooth((sp - STEER.vLo) / (STEER.vHi - STEER.vLo));
 export class RunnerCar {
   constructor(route, s0) {
-    Object.assign(this, { route, s: s0, d: -route.hw(s0) / 2, v: 0, dv: 0, targetD: -route.hw(s0) / 2, stun: 0, invuln: 0, brakeT: 0, offBrake: 1, accel: 0 });
+    Object.assign(this, { route, s: s0, d: -route.hw(s0) / 2, v: 0, dv: 0, targetD: -route.hw(s0) / 2, stun: 0, invuln: 0, brakeT: 0, offBrake: 1, accel: 0, steer: 0, yaw: 0, slide: 0, ay: 0, scrape: 0 });
   }
-  /** tight + snappy: the lateral position is a stiff critically-damped spring on the finger/keys */
-  step(dt, { targetD, brake, gas = 0, top = 30, cruise, steer, lanes, hold = false }) {
+  /** the nose's angle off the road's heading, drawn: the real yaw plus the tail stepping out */
+  get nose() { return (this.yaw || 0) + (this.slide || 0); }
+  /** `steerIn` (-1 right .. +1 left): what the player is holding. Left out: the car steers itself toward `targetD` (the QA autopilot, tools). */
+  step(dt, { targetD, steerIn, brake, gas = 0, top = 30, cruise, lanes, hold = false }) {
     const hw = this.route.hw(this.s), lim = hw - PLAYER.halfW - 0.05;
-    if (steer === undefined) {
-      // lateral path - the player's stiff lane steering (drive.js sets targetD to a lane centre) and the QA autopilot
-      // (sets targetD to any line): the lateral position is a stiff critically-damped spring on targetD.
-      // A tap has to feel instant: at w = 28 rad/s the car is half way into the next lane in ~60 ms and fully in it
-      // in ~0.2 s, with no overshoot, at ANY road speed. (Side speed used to be capped at 3 m/s + 0.6 x road speed,
-      // "a car can't glide sideways standing still", which made one lane take 0.7 s at 10 mph and over a second from
-      // a stop, sliding at a flat speed with a hard start and stop: delayed and jerky.)
-      this.targetD = Math.max(-lim, Math.min(lim, targetD));
-      const w = 28;
-      const acc = w * w * (this.targetD - this.d) - 2 * w * this.dv;
-      this.dv += acc * dt;
-      // Stiff lane steering: the whole car slides across as one rigid body and its nose never leaves the road's
-      // heading. (This line used to angle the nose into the move - the front-end steer the lane model replaces.)
-      this.yaw = 0;
-    } else {
-      // NOT CALLED any more: nothing passes `steer` since the player moved to stiff lane steering above. Kept so the
-      // old nose-steering can come back by passing `steer` from drive.js's car.step call.
-      // the player: GTA Chinatown Wars-style handling (its documented behaviour; Rockstar never published the
-      // numbers). ◀ ▶ turn the nose: no turning standing still, the sharpest turns at city speeds, wider as you go
-      // faster. The car's path lags its nose a little (it slides into a turn, then grips). Hands off the arrows,
-      // the steering assist straightens you parallel to the road, with a light pull toward the nearest of the four
-      // lanes (your parking lane, your lane, the oncoming lane, the far parking lane).
-      const sp = Math.abs(this.v), back = this.v < -0.1 ? -1 : 1;
-      this.yaw = this.yaw || 0; this.travel = this.travel ?? this.yaw;
-      const omega = 2.4 * Math.min(1, sp / 6) / (1 + sp * 0.04);                   // turn rate, rad/s
-      if (steer) this.yaw += steer * omega * dt * back;
-      else {
-        const ls = lanes && lanes.length ? lanes : [this.d], lane = ls.reduce((a, c) => Math.abs(c - this.d) < Math.abs(a - this.d) ? c : a, ls[0]);
-        const want = Math.max(-0.055, Math.min(0.055, (lane - this.d) * 0.04)) * back;  // light lane pull (quarter of the original)
-        this.yaw += (want - this.yaw) * Math.min(1, dt * 3.2);                      // assist: back parallel to the road
-      }
-      this.yaw = Math.max(-0.75, Math.min(0.75, this.yaw));
-      const grip = Math.max(4.5, 7 - sp * 0.1);                                     // path catches up with the nose
-      this.travel += (this.yaw - this.travel) * Math.min(1, dt * grip);
-      this.dv = this.v * Math.sin(this.travel);
-      this.targetD = this.d;
-    }
-    // the four lanes are the road: the outermost lane is as far as you go (a scrape straightens you out)
+    const sp = Math.abs(this.v), sgn = this.v < -0.1 ? -1 : 1, my = maxYaw(sp), gate = smooth(sp / STEER.gate);
+    // the four lanes are the road: the outermost lane is as far as you go
     const lo = lanes ? Math.max(-lim, Math.min(...lanes) - 0.4) : -lim, hi = lanes ? Math.min(lim, Math.max(...lanes) + 0.4) : lim;
+    // 1. the steering value: what is asked for, eased toward (never a jump)
+    let cmd;
+    if (steerIn !== undefined) cmd = clamp(steerIn, -1, 1);
+    else {
+      this.targetD = clamp(targetD, lo, hi);
+      const wantV = STEER.seek * (this.targetD - this.d);                          // side speed we would like
+      cmd = clamp(Math.asin(clamp(wantV / Math.max(sp, 0.5), -1, 1)) / my, -1, 1);   // the nose angle that gives it
+    }
+    if ((this.d <= lo + 1e-3 && cmd < 0) || (this.d >= hi - 1e-3 && cmd > 0)) cmd = 0;   // hard against the curb: the wheel does not push into it
+    const rate = Math.abs(cmd) < Math.abs(this.steer) || cmd * this.steer < 0 ? 1 / STEER.release : 1 / STEER.ramp;
+    this.steer += clamp(cmd - this.steer, -rate * dt, rate * dt);
+    // 2. the nose follows the steering (turns less the faster you go; none standing still; reversing it swings the other way, so ◀ still takes you left)
+    this.yaw += (this.steer * my * gate * sgn - this.yaw) * (1 - Math.exp(-dt / STEER.tau));
+    // 3. the side speed is speed x sin(nose angle); the tail steps out a little under full lock at speed
+    const dv0 = this.dv;
+    this.dv = this.v * Math.sin(this.yaw);
+    this.ay += ((this.dv - dv0) / dt - this.ay) * (1 - Math.exp(-dt / STEER.ayTau));   // side acceleration, smoothed (the body leans with it)
+    this.slide += (this.steer * STEER.slide * smooth((sp - 10) / 16) - this.slide) * (1 - Math.exp(-dt / STEER.slideTau));
+    // where the traffic should expect you (the road ahead of the nose, half a second on)
+    if (steerIn !== undefined) this.targetD = clamp(this.d + this.dv * 0.5, lo, hi);
     this.d += this.dv * dt;
-    if (this.d < lo || this.d > hi) { this.d = Math.max(lo, Math.min(hi, this.d)); if (steer !== undefined) { this.yaw *= 0.3; this.travel *= 0.3; } this.scrape = 0.2; }
+    if (this.d < lo || this.d > hi) {   // the curb: it scrubs a little speed and bounces the nose gently back out, and a scrape is felt
+      const side = this.d < lo ? -1 : 1, into = side * this.dv;
+      this.d = clamp(this.d, lo, hi);
+      if (into > 0.5) { this.yaw *= -0.3; this.steer *= 0.3; this.v *= 1 - Math.min(0.05, into * 0.01); this.scrape = 0.2; }
+      else this.yaw *= 0.5;
+      this.dv = 0;
+    }
 
     // speed: YOU drive it. GAS pulls (harder from low speed, easing off near the top), off the gas the car
     // coasts down on engine braking, BRAKE is progressive (a tap bites at ~40 %, holding builds to full in about
@@ -233,12 +236,12 @@ export class RunnerCar {
       this.v = this.v > 0 ? Math.max(0, this.v - coast * dt) : Math.min(0, this.v + 3 * dt);
     }
     this.accel = this.accel * 0.85 + ((this.v - v0) / dt) * 0.15;   // smoothed, for weight transfer / brake lights
-    this.s += this.v * dt;
+    this.s += this.v * Math.cos(this.yaw) * dt;   // (along the road: a little less than the speed while the nose is turned)
     this.invuln = Math.max(0, this.invuln - dt);
   }
   get pose() {
     const p = this.route.at(this.s, this.d);
-    p.a += this.yaw || 0;   // where the nose points
+    p.a += this.nose;   // where the nose points
     return p;
   }
 }
@@ -696,7 +699,7 @@ export class World {
     }
     this.ents = this.ents.filter((e) => e.alive);
     for (const tk of this.tokens) {
-      if (tk.alive && Math.abs(tk.s - car.s) < 2.6 && Math.abs(tk.d - car.d) < 1.5) { tk.alive = false; out.tokens++; }
+      if (tk.alive && this.cardsOn !== false && Math.abs(tk.s - car.s) < 2.6 && Math.abs(tk.d - car.d) < 1.5) { tk.alive = false; out.tokens++; }
     }
     // cross traffic
     for (const a of this.ambient) {
