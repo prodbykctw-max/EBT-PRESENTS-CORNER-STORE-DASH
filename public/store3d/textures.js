@@ -13,10 +13,10 @@ export function tex(canvas, { srgb = true, repeat = false, aniso = 4 } = {}) {
 /** cream floor tiles: 4 x 4 tiles per canvas (0.6 m each). Returns { map, normalMap, roughnessMap } (tileable). accent: gold / rose inlay tiles. */
 export function floorTextures(aniso) {
   const N = 512, T = N / 4, c = cv(N, N), g = c.getContext('2d'), hmap = new Float32Array(N * N), rough = cv(N, N), rg = rough.getContext('2d');
-  const accent = (i, j) => { const r = hash(i, j, 7); return r < 0.035 ? 'gold' : r < 0.06 ? 'rose' : null; };
+  const accent = (i, j) => { const r = hash(i, j, 7); return r < 0.075 ? 'gold' : r < 0.125 ? 'rose' : null; };
   for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) {
     const v = hash(i, j, 1), a = accent(i, j);
-    let base = a === 'gold' ? [240, 201, 92] : a === 'rose' ? [232, 160, 186] : [236 + v * 8 - 4, 224 + v * 8 - 4, 202 + v * 8 - 4];
+    let base = a === 'gold' ? [226, 170, 52] : a === 'rose' ? [214, 112, 150] : [206 + v * 8 - 4, 188 + v * 8 - 4, 158 + v * 8 - 4];
     g.fillStyle = `rgb(${base.map(Math.round).join(',')})`; g.fillRect(i * T, j * T, T, T);
     // terrazzo flecks
     for (let k = 0; k < 90; k++) { const x = i * T + hash(i * 100 + k, j, 3) * T, y = j * T + hash(i, j * 100 + k, 4) * T, r = 0.6 + hash(k, i + j, 5) * 1.5, tone = hash(k, j, 6);
@@ -109,7 +109,39 @@ export function glowTexture() {
 }
 /** a pickup / pay ring: a soft bright ring (no hard edge, nothing that could strobe) */
 export function ringTexture() {
-  const c = cv(256, 256), g = c.getContext('2d'), gr = g.createRadialGradient(128, 128, 60, 128, 128, 126);
-  gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.55, 'rgba(255,255,255,0.35)'); gr.addColorStop(0.72, 'rgba(255,255,255,1)'); gr.addColorStop(0.86, 'rgba(255,255,255,0.35)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  const c = cv(256, 256), g = c.getContext('2d'), gr = g.createRadialGradient(128, 128, 0, 128, 128, 126);
+  gr.addColorStop(0, 'rgba(255,255,255,0.05)'); gr.addColorStop(0.78, 'rgba(255,255,255,0.05)'); gr.addColorStop(0.86, 'rgba(255,255,255,0.55)'); gr.addColorStop(0.9, 'rgba(255,255,255,0.9)'); gr.addColorStop(0.95, 'rgba(255,255,255,0.3)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = gr; g.fillRect(0, 0, 256, 256); return tex(c, { aniso: 1 });
+}
+/** the painted PAY marking on the floor: a soft green panel with a gold edge, the word PAY (steady) */
+export function padTexture(w = 256, h = 512) {
+  const c = cv(w, h), g = c.getContext('2d'), r = 26, pad = 14;
+  const rr = (x, y, ww, hh, rad) => { g.beginPath(); g.moveTo(x + rad, y); g.arcTo(x + ww, y, x + ww, y + hh, rad); g.arcTo(x + ww, y + hh, x, y + hh, rad); g.arcTo(x, y + hh, x, y, rad); g.arcTo(x, y, x + ww, y, rad); g.closePath(); };
+  g.filter = 'blur(6px)'; rr(pad, pad, w - 2 * pad, h - 2 * pad, r); g.fillStyle = 'rgba(70,200,120,0.34)'; g.fill(); g.strokeStyle = 'rgba(245,197,24,0.9)'; g.lineWidth = 9; g.stroke(); g.filter = 'none';
+  rr(pad + 9, pad + 9, w - 2 * pad - 18, h - 2 * pad - 18, r - 6); g.strokeStyle = 'rgba(255,236,150,0.8)'; g.lineWidth = 3; g.stroke();
+  g.save(); g.translate(w / 2, h / 2); g.font = `bold ${w * 0.36}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = 'rgba(20,90,50,0.55)'; g.fillText('PAY', 3, 4); g.fillStyle = 'rgba(190,255,205,0.95)'; g.fillText('PAY', 0, 0); g.restore();
+  return tex(c, { aniso: 8 });
+}
+/** the painted wall: lavender paint above, a pink band with a gold line at about 1.1 m, a navy wainscot below. u: along the wall (3 m per tile), v: 0..1 over the wall height */
+export function wallTexture(aniso = 8) {
+  const W = 512, H = 1024, c = cv(W, H), g = c.getContext('2d');
+  // v = 1 is the top of the wall (canvas y = 0)
+  const y = (m) => H - (m / 3.4) * H;
+  let gr = g.createLinearGradient(0, 0, 0, y(1.25)); gr.addColorStop(0, '#9a93c8'); gr.addColorStop(1, '#b4aedb'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#25306a'; g.fillRect(0, y(0.95), W, H);                                  // wainscot
+  gr = g.createLinearGradient(0, y(1.25), 0, y(0.95)); gr.addColorStop(0, '#e24a8c'); gr.addColorStop(1, '#b52467'); g.fillStyle = gr; g.fillRect(0, y(1.25), W, y(0.95) - y(1.25));
+  g.fillStyle = '#f5c518'; g.fillRect(0, y(1.27), W, 5); g.fillRect(0, y(0.93), W, 4);   // gold rules
+  g.strokeStyle = 'rgba(10,14,40,0.35)'; g.lineWidth = 2; for (let k = 0; k <= 4; k++) { g.beginPath(); g.moveTo(k * W / 4, y(0.95)); g.lineTo(k * W / 4, H); g.stroke(); }   // wainscot panel seams
+  g.fillStyle = 'rgba(255,255,255,0.06)'; for (let k = 0; k < 4; k++) g.fillRect(k * W / 4 + 6, y(0.9), W / 4 - 12, 8);
+  gr = g.createLinearGradient(0, 0, 0, 200); gr.addColorStop(0, 'rgba(20,24,60,0.38)'); gr.addColorStop(1, 'rgba(20,24,60,0)'); g.fillStyle = gr; g.fillRect(0, 0, W, 200);   // darker up to the ceiling
+  return tex(c, { repeat: true, aniso });
+}
+/** a small wall poster */
+export function posterTexture(kind, w = 256, h = 340) {
+  const c = cv(w, h), g = c.getContext('2d');
+  const P = { sale: ['#d4306f', '#fff', 'SALE', 'FRESH DEALS'], fresh: ['#2e7d3a', '#fff', 'FRESH', 'FARM TO CART'], eat: ['#25306a', '#f5c518', 'EBT', 'WELCOME HERE'], cold: ['#1f6fb8', '#fff', 'ICE COLD', 'DRINKS'] }[kind];
+  g.fillStyle = '#f7f1e2'; g.fillRect(0, 0, w, h); g.fillStyle = P[0]; g.fillRect(10, 10, w - 20, h - 20); g.strokeStyle = '#f5c518'; g.lineWidth = 6; g.strokeRect(18, 18, w - 36, h - 36);
+  g.fillStyle = P[1]; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `bold ${w * 0.26}px ${FONT}`; g.fillText(P[2], w / 2, h * 0.38); g.font = `bold ${w * 0.1}px ${FONT}`; g.fillText(P[3], w / 2, h * 0.58);
+  g.fillStyle = '#f5c518'; g.beginPath(); g.arc(w / 2, h * 0.8, w * 0.12, 0, 6.283); g.fill(); g.fillStyle = P[0]; g.font = `bold ${w * 0.13}px ${FONT}`; g.fillText('$', w / 2, h * 0.805);
+  return tex(c, { aniso: 8 });
 }

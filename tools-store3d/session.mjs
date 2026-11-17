@@ -36,11 +36,11 @@ async function run(job) {
     const p = await newPage(job.vw || 390, job.vh || 844, job.dpr || 2);
     await p.goto(`http://localhost:${PORT}/standalone.html?nodrive`);
     await p.waitForFunction(() => window.__csd && window.__csd.S && window.__csd.S.mode === 'title', null, { timeout: 300000 });
-    await p.evaluate(async () => { const c = window.__csd, H = 1 / 120; c.arrive({ bonus: 0, bully: { lead: 25, caughtUp: false } }); document.getElementById('btnStart').click(); let n = 0; while (c.S.intro > 0 && n++ < 400) c.step(H, 12); c.freeze(true); c.step(H, 240); });
+    await p.evaluate(async () => { const c = window.__csd, H = 1 / 120; c.arrive({ bonus: 0, bully: { lead: 25, caughtUp: false } }); document.getElementById('btnStart').click(); let n = 0; while (c.S.intro > 0 && n++ < 400) c.step(H, 12); c.freeze(true); c.step(H, 240); c.step(H, 1500); });
     const out = [];
     for (const s of job.shots) {
       const info = await p.evaluate((s) => { const c = window.__csd, H = 1 / 120; const r = c.tp(s.px, s.py); const bl = c.bully; if (s.bx != null) { bl.x = s.bx; bl.y = s.by; } if (s.pay) { c.S.nGot = c.items.length; c.items.forEach((i) => { c.S.got[i.id] = true; }); } c.step(H, 30); return { snapped: r, bully: [bl.x, bl.y], mode: c.S.mode }; }, s);
-      await p.waitForTimeout(400); await p.screenshot({ path: s.out, type: 'png' }); out.push({ out: s.out, ...info });
+      await p.waitForTimeout(900); await p.screenshot({ path: s.out, type: 'png' }); out.push({ out: s.out, ...info });
     }
     const r = { shots: out, errs: p.errs }; await p.close(); return r;
   }

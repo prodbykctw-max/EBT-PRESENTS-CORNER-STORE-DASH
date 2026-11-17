@@ -14,7 +14,7 @@ const P = { x: num('px', layout.spawnPlayer.x), y: num('py', layout.spawnPlayer.
 const face = q.get('face') || 'U', bface = q.get('bface') || 'D', mv = q.get('walk') === '1' ? 1 : 0;
 s.setActor('player', P.x, P.y, face, mv, 0.3); if (q.get('bully') !== '0') s.setActor('bully', Bu.x, Bu.y, bface, mv, 0.1); else s.hideActor('bully');
 s.setXray(q.get('xray') !== '0'); s.setItems(q.get('items') || 'all'); s.setPay(q.get('pay') === '1');
-{ const t = s.tune = { key: num('key', 1.35), hemi: num('hemi', 0.5), env: num('env', 0.5), ex: num('ex', 0.9), lm: num('lm', 0.6), bloom: num('bloom', 0.3), bt: num('bt', 1.6) }; s.applyTune(t); }
+{ const t = s.tune = { key: num('key', 1.9), hemi: num('hemi', 0.28), env: num('env', 0.5), ex: num('ex', 0.85), lm: num('lm', 1.0), bloom: num('bloom', 0.22), bt: num('bt', 1.9) }; s.applyTune(t); }
 if (q.get('ao') === '0') s.look.fx.ao = false; if (q.get('shadow') === '0') { s.key.castShadow = false; }
 s.setCamera(P.x, P.y); s.resize(innerWidth, innerHeight);
 s.setCamera(P.x, P.y);

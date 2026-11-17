@@ -19,7 +19,7 @@ export class Store3D {
     this.layout = layout; this.base = base; this.mobile = mobile; this.canvas = canvas; this.t = 0;
     const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     r.info.autoReset = false; r.setPixelRatio(pixelRatio ?? Math.min(devicePixelRatio, mobile ? 1.5 : 2));
-    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFShadowMap; r.toneMapping = THREE.NeutralToneMapping; r.toneMappingExposure = 1.0;
+    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFShadowMap; r.toneMapping = THREE.NeutralToneMapping; r.toneMappingExposure = 0.85;
     this.scene = new THREE.Scene(); this.scene.background = new THREE.Color(0x0d1020);
     this.camera = new THREE.PerspectiveCamera(10, 1, 1, 1000);
     this.look = new RealLook(r, this.scene, this.camera, { mobile });
@@ -35,46 +35,49 @@ export class Store3D {
     // ---- textures and materials
     const loader = new THREE.TextureLoader(), conc = (f, srgb) => loader.loadAsync(new URL('tex/real/' + f, this.base).href).then((t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; return t; });
     const [concD, concN] = await Promise.all([conc('conc_d.webp', true), conc('conc_n.webp', false)]);
-    const floorT = T.floorTextures(aniso), atlas = T.labelAtlas(aniso); useAtlas(atlas); this.atlas = atlas;
+    const wallT = T.wallTexture(aniso), floorT = T.floorTextures(aniso), atlas = T.labelAtlas(aniso); useAtlas(atlas); this.atlas = atlas;
     const { aoMap, lightMap } = this.bakeFloorLight();
     const std = (o) => new THREE.MeshStandardMaterial(o);
     const mats = this.mats = {
       default: std({ color: 0x888888 }),
-      floor: std({ map: floorT.map, normalMap: floorT.normalMap, normalScale: new THREE.Vector2(0.9, 0.9), roughnessMap: floorT.roughnessMap, roughness: 1, metalness: 0, aoMap, aoMapIntensity: 1.0, lightMap, lightMapIntensity: 1.0, envMapIntensity: 0.55 }),
-      wall: std({ map: concD, normalMap: concN, normalScale: new THREE.Vector2(0.6, 0.6), color: new THREE.Color(0.52, 0.56, 0.82), roughness: 0.9, metalness: 0 }),
+      floor: new THREE.MeshPhysicalMaterial({ clearcoat: 0.55, clearcoatRoughness: 0.22, map: floorT.map, normalMap: floorT.normalMap, normalScale: new THREE.Vector2(0.9, 0.9), roughnessMap: floorT.roughnessMap, roughness: 1, metalness: 0, aoMap, aoMapIntensity: 1.0, lightMap, lightMapIntensity: 1.0, envMapIntensity: 0.55 }),
+      wall: std({ map: wallT, normalMap: concN, normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.82, metalness: 0 }),
       rail: std({ color: 0x3a3d4a, roughness: 0.7, metalness: 0.2 }),
       base: std({ color: 0x1d2140, roughness: 0.55, metalness: 0.15 }),
-      steel: std({ color: 0x353b61, roughness: 0.42, metalness: 0.55 }),
+      steel: std({ color: 0x1a1f40, roughness: 0.38, metalness: 0.5 }),
+      shelf: std({ color: 0x232a55, roughness: 0.34, metalness: 0.45 }), coolershelf: std({ color: 0x8892a6, roughness: 0.3, metalness: 0.5 }),
+      coolerbody: std({ color: 0x232733, roughness: 0.38, metalness: 0.45 }), coolerback: std({ color: 0xdfeaf6, emissive: 0xbfd8f0, emissiveIntensity: 0.5, roughness: 0.6 }), coolerlight: std({ color: 0xffffff, emissive: 0xe4f1ff, emissiveIntensity: 1.3 }),
+      tagwhite: std({ color: 0xf3efe0, roughness: 0.6 }), doorglass: std({ color: 0xbfe0ff, emissive: 0x86b6e6, emissiveIntensity: 0.55, roughness: 0.15, metalness: 0.1 }),
       cooler: std({ color: 0xe3e9ef, roughness: 0.34, metalness: 0.25 }),
       coolerbase: std({ color: 0x9fb0c2, roughness: 0.4, metalness: 0.2 }),
-      cap: std({ color: 0xdfe3ec, roughness: 0.35, metalness: 0.2 }),
-      back: std({ color: 0x4a527d, roughness: 0.7, metalness: 0.1 }),
+      cap: std({ color: 0x1f2552, roughness: 0.3, metalness: 0.45 }),
+      back: std({ color: 0x2a3166, roughness: 0.7, metalness: 0.1 }),
       plank: std({ color: 0xcfd4de, roughness: 0.38, metalness: 0.35 }),
       wood: std({ color: 0xb78a55, roughness: 0.78, metalness: 0 }),
       lip: std({ color: 0xf6efc0, roughness: 0.5, metalness: 0 }),
       trimBlue: std({ color: 0x2f6fd6, roughness: 0.35, metalness: 0.2 }), trimRed: std({ color: 0xc1272d, roughness: 0.35, metalness: 0.2 }), trimGold: std({ color: 0xf5c518, roughness: 0.3, metalness: 0.6 }),
       chrome: std({ color: 0xcfd4da, roughness: 0.22, metalness: 1.0, envMapIntensity: 1.2 }),
-      lam: std({ color: 0x232b57, roughness: 0.42, metalness: 0.1 }), top: std({ color: 0xdfe3ea, roughness: 0.3, metalness: 0.05 }),
-      belt: std({ color: 0x17181c, roughness: 0.85, metalness: 0 }), dark: std({ color: 0x15171d, roughness: 0.5, metalness: 0.3 }),
-      screen: std({ color: 0x0a1a38, emissive: 0x2a72d6, emissiveIntensity: 1.6, roughness: 0.2 }), lamp: std({ color: 0x103018, emissive: 0x35d070, emissiveIntensity: 1.8, roughness: 0.3 }),
+      lam: std({ color: 0x171c3e, roughness: 0.42, metalness: 0.1 }), top: std({ color: 0x2d313f, roughness: 0.28, metalness: 0.25 }),
+      belt: std({ color: 0x2a2c33, roughness: 0.8, metalness: 0 }), dark: std({ color: 0x15171d, roughness: 0.5, metalness: 0.3 }),
+      screen: std({ color: 0x0a1a38, emissive: 0x3a86e8, emissiveIntensity: 2.4, roughness: 0.2 }), lamp: std({ color: 0x103018, emissive: 0x35d070, emissiveIntensity: 1.8, roughness: 0.3 }),
       door: std({ color: 0x24160f, roughness: 0.6, metalness: 0.1 }), doorframe: std({ color: 0xe0a01c, roughness: 0.4, metalness: 0.4 }), bar: std({ color: 0xcfd4da, roughness: 0.25, metalness: 1 }),
       glass: new THREE.MeshStandardMaterial({ color: 0xd6ecf6, roughness: 0.05, metalness: 0, transparent: true, opacity: 0.13, depthWrite: false, envMapIntensity: 1.6 }),
       products: std({ map: atlas.map, vertexColors: true, roughness: 0.52, metalness: 0.0, envMapIntensity: 0.7 }),
     };
     // ---- the interior environment: a soft white room with ceiling light strips (reflections on tile, plastic, chrome)
-    this.scene.environment = this.makeEnvironment(); this.scene.environmentIntensity = 0.85;
+    this.scene.environment = this.makeEnvironment(); this.scene.environmentIntensity = 0.5;
     // ---- the structure from the layout
     const S = this.structure = buildStructure(layout, mats); this.scene.add(S.root);
     this.root = S.root;
     // ---- lights: one soft key light with the only shadow map, and the sky/ground fill
-    const hemi = this.hemi = new THREE.HemisphereLight(0xeaf0ff, 0xb9a98c, 0.5); this.scene.add(hemi);
-    const key = this.key = new THREE.DirectionalLight(0xfff1dc, 2.6); key.castShadow = true; this.scene.add(key, key.target);
+    const hemi = this.hemi = new THREE.HemisphereLight(0xdfe6ff, 0xa89478, 0.3); this.scene.add(hemi);
+    const key = this.key = new THREE.DirectionalLight(0xffe9c8, 2.0); key.castShadow = true; this.scene.add(key, key.target);
     const half = 15, sz = this.mobile ? 2048 : 4096; key.shadow.mapSize.set(sz, sz); Object.assign(key.shadow.camera, { left: -half, right: half, top: half, bottom: -half, near: 1, far: 120 });
-    key.shadow.bias = -0.0004; key.shadow.normalBias = 0.035; key.shadow.radius = 3; key.userData.dir = new THREE.Vector3(-0.42, 1.0, -0.62).normalize();
+    key.shadow.bias = -0.0004; key.shadow.normalBias = 0.035; key.shadow.radius = 2.2; key.shadow.intensity = 0.9; key.userData.dir = new THREE.Vector3(-0.42, 1.0, -0.62).normalize();
     { // the pavement outside the storefront (dark tile), below the door
       const pv = new THREE.Mesh(new THREE.PlaneGeometry(m(layout.board.w), m(layout.board.h - 1640)), new THREE.MeshStandardMaterial({ map: floorT.map, color: 0x242b4d, roughness: 0.6, metalness: 0 })); pv.geometry.attributes.uv.array.forEach((v, i, a) => { a[i] = v * (i % 2 ? 4.4 : 7.4); });
       pv.rotation.x = -Math.PI / 2; pv.position.set(m(layout.board.w) / 2, -0.002, m(1640 + (layout.board.h - 1640) / 2)); pv.receiveShadow = true; this.root.add(pv); }
-    this.buildSigns(); this.buildDecals(); this.buildCarts(); this.buildItems();
+    this.buildSigns(); this.buildDecals(); this.buildCarts(); this.buildExtras(); this.buildItems();
     await this.loadPeople();
     this.resize(this.view.w, this.view.h);
     return this;
@@ -101,7 +104,7 @@ export class Store3D {
     const sx = 214 / m(board.w), sz = 461 / m(board.h);
     for (let zi = 0; zi < 10; zi++) for (let xi = 0; xi < 4; xi++) {
       const x = 2.6 + xi * 4.5 + (zi % 2) * 2.0, z = 4.5 + zi * 4.2, gr = lg.createRadialGradient(x * sx, z * sz, 0, x * sx, z * sz, 3.4 * sx);
-      gr.addColorStop(0, 'rgba(255,238,205,0.34)'); gr.addColorStop(0.6, 'rgba(255,238,205,0.12)'); gr.addColorStop(1, 'rgba(255,238,205,0)'); lg.fillStyle = gr; lg.globalCompositeOperation = 'lighter'; lg.fillRect(0, 0, 214, 461);
+      gr.addColorStop(0, 'rgba(255,226,170,0.62)'); gr.addColorStop(0.55, 'rgba(255,226,170,0.2)'); gr.addColorStop(1, 'rgba(255,238,205,0)'); lg.fillStyle = gr; lg.globalCompositeOperation = 'lighter'; lg.fillRect(0, 0, 214, 461);
     }
     const lt = T.tex(l, { aniso: 1 }); lt.channel = 1; return { aoMap: ao, lightMap: lt };
   }
@@ -134,32 +137,69 @@ export class Store3D {
       const [x0, y0, x1, y1] = rect, w = m(x1 - x0), h = m(y1 - y0), tex = T.plateTexture(text, o), mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
       mesh.rotation.x = -Math.PI / 2; if (rot) mesh.rotation.z = Math.PI / 2; mesh.position.set(m((x0 + x1) / 2), 0.006, m((y0 + y1) / 2)); mesh.receiveShadow = true; this.root.add(mesh); return mesh;
     };
-    mat([335, 1562, 490, 1630], 'WELCOME', { w: 512, h: 240, bg: '#a82020', fg: '#f3c34a', border: '#f3c34a' });
     { const [x0, y0, x1, y1] = [734, 610, 790, 850], tex = T.plateTexture('ENTRANCE', { w: 1024, h: 240, bg: '#c2255c', fg: '#f5c518', border: '#f5c518' });
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(m(y1 - y0), m(x1 - x0)), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 })); mesh.rotation.x = -Math.PI / 2; mesh.rotation.z = -Math.PI / 2; mesh.position.set(m((x0 + x1) / 2), 0.006, m((y0 + y1) / 2)); this.root.add(mesh); }
-    // pay pads (shown when the list is done): a green soft pad with PAY and a slow ring
+    // pay pads (shown when the list is done): a painted PAY marking on the floor, soft green with a gold edge, steady (no blinking)
     this.padGroup = new THREE.Group(); this.padGroup.visible = false; this.root.add(this.padGroup);
+    const padTex = T.padTexture();
     L.PADS.forEach((p) => {
       const [x0, y0, x1, y1] = p, w = m(x1 - x0), h = m(y1 - y0), cx = m((x0 + x1) / 2), cz = m((y0 + y1) / 2);
-      const pad = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.15, 1.1, 0.5), transparent: true, opacity: 0.34, depthWrite: false, toneMapped: false })); pad.rotation.x = -Math.PI / 2; pad.position.set(cx, 0.012, cz);
-      const edge = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.1, h + 0.1), new THREE.MeshBasicMaterial({ map: ring, color: new THREE.Color(0.3, 1.4, 0.7), transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending })); edge.rotation.x = -Math.PI / 2; edge.position.set(cx, 0.013, cz);
-      const txt = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.36), new THREE.MeshBasicMaterial({ map: T.plateTexture('PAY', { w: 256, h: 100, bg: 'rgba(0,0,0,0)', fg: '#3adb76', border: 'rgba(0,0,0,0)' }), transparent: true, depthWrite: false, toneMapped: false })); txt.rotation.x = -Math.PI / 2; txt.rotation.z = Math.PI / 2; txt.position.set(cx, 0.014, cz);
-      this.padGroup.add(pad, edge, txt); this.pads.push({ pad, edge });
+      const pad = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: padTex, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false })); pad.rotation.x = -Math.PI / 2; pad.position.set(cx, 0.012, cz);
+      this.padGroup.add(pad); this.pads.push({ pad });
     });
   }
 
   buildCarts() {
-    const geo = (() => { const g = []; const add = (b, x, y, z) => { b.translate(x, y, z); g.push(b); const n = b.index ? b.toNonIndexed() : b; return n; };
-      const parts = [new THREE.BoxGeometry(0.58, 0.04, 0.95).translate(0, 0.28, 0), new THREE.BoxGeometry(0.58, 0.34, 0.025).translate(0, 0.47, -0.46), new THREE.BoxGeometry(0.025, 0.34, 0.95).translate(-0.29, 0.47, 0), new THREE.BoxGeometry(0.025, 0.34, 0.95).translate(0.29, 0.47, 0), new THREE.BoxGeometry(0.58, 0.025, 0.025).translate(0, 0.66, 0.47), new THREE.BoxGeometry(0.58, 0.03, 0.03).translate(0, 0.92, -0.5), new THREE.BoxGeometry(0.4, 0.04, 0.7).translate(0, 0.1, 0)];
-      const ng = parts.map((p) => { p = p.index ? p.toNonIndexed() : p; return p; }); return ng.length ? mergeList(ng) : null; })();
-    this.cartGeo = geo;
-    const mat = new THREE.MeshStandardMaterial({ color: 0xc8cdd4, metalness: 0.9, roughness: 0.3, envMapIntensity: 1.2 });
+    // a wire shopping cart: tapered basket (wire grid), rim, handle, child flap, base tray, four wheels. Long axis = x; the handle is at +x.
+    const P = [], bx = (w, h, d, x, y, z, rz = 0) => { const g = new THREE.BoxGeometry(w, h, d); if (rz) g.rotateZ(rz); g.translate(x, y, z); P.push(g.toNonIndexed()); };
+    const L = 0.95, Wd = 0.56, t = 0.012;
+    for (const z of [-Wd / 2, Wd / 2]) { for (const y of [0.5, 0.62, 0.74, 0.84]) bx(L - 0.06, t, t, 0, y, z); for (let x = -L / 2 + 0.08; x <= L / 2 - 0.08; x += 0.1) bx(t, 0.36, t, x, 0.66, z); }
+    for (const y of [0.5, 0.62, 0.74, 0.84]) { bx(t, t, Wd, -L / 2 + 0.04, y, 0); bx(t, t, Wd, L / 2 - 0.04, y, 0); }
+    for (let z = -Wd / 2 + 0.07; z < Wd / 2; z += 0.1) bx(L - 0.1, t, t, 0, 0.47, z);            // the basket floor wires
+    bx(0.06, 0.04, Wd + 0.04, L / 2 + 0.06, 0.97, 0); bx(0.02, 0.5, 0.02, L / 2 + 0.02, 0.72, -Wd / 2); bx(0.02, 0.5, 0.02, L / 2 + 0.02, 0.72, Wd / 2);   // handle bar and posts
+    bx(L - 0.1, 0.025, 0.02, 0, 0.2, -0.22); bx(L - 0.1, 0.025, 0.02, 0, 0.2, 0.22); bx(0.02, 0.025, 0.44, 0, 0.2, 0); bx(0.5, 0.012, 0.4, 0, 0.21, 0);   // base tray
+    for (const x of [-0.38, 0.4]) for (const z of [-0.2, 0.2]) { const w = new THREE.CylinderGeometry(0.055, 0.055, 0.035, 10); w.rotateX(Math.PI / 2); w.translate(x, 0.06, z); P.push(w.toNonIndexed()); bx(0.02, 0.12, 0.02, x, 0.14, z); }
+    const geo = mergeList(P); this.cartGeo = geo;
+    const mat = new THREE.MeshStandardMaterial({ color: 0x7d8491, metalness: 0.8, roughness: 0.42, envMapIntensity: 0.8 });
     const carts = new THREE.Group(); this.root.add(carts);
     (this.structure.info.corrals || []).forEach(([x0, z0, x1, z1]) => {
-      const n = Math.floor((x1 - x0 - 0.3) / 0.62), im = new THREE.InstancedMesh(geo, mat, n * 2), mm = new THREE.Matrix4(); let k = 0;
-      for (let row = 0; row < 2; row++) for (let i = 0; i < n; i++) { mm.makeRotationY(Math.PI / 2 * 0).setPosition(x0 + 0.45 + i * 0.62, 0, z0 + 0.45 + row * 1.2); im.setMatrixAt(k++, mm); }
-      im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false; carts.add(im);
+      // nested in rows along x: each cart steps 0.26 m along the row, rows 0.95 m apart in z; the row reads as a nested train of baskets
+      const step = 0.36, rows = Math.max(1, Math.floor((z1 - z0 - 0.2) / 0.78)), n = Math.floor((x1 - x0 - 0.25 - 0.95) / step) + 1, im = new THREE.InstancedMesh(geo, mat, n * rows), mm = new THREE.Matrix4(); let k = 0;
+      for (let row = 0; row < rows; row++) for (let i = 0; i < n; i++) { mm.makeRotationY(((row * 7 + i * 3) % 5 - 2) * 0.01).setPosition(x0 + 0.2 + 0.5 + i * step, 0.12, z0 + 0.5 + row * 0.78); im.setMatrixAt(k++, mm); }
+      im.count = k; im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false; carts.add(im);
     });
+  }
+
+  // potted plants, the WELCOME mat as a thick mat, wall posters, the accent tiles
+  buildExtras() {
+    const L = this.layout, root = this.root, mats = this.mats;
+    // the welcome mat: a thick rubber mat with a raised border
+    { const [x0, y0, x1, y1] = [335, 1562, 490, 1630], w = m(x1 - x0), h = m(y1 - y0), cx = m((x0 + x1) / 2), cz = m((y0 + y1) / 2);
+      const mat = new THREE.Mesh(new THREE.BoxGeometry(w, 0.025, h), new THREE.MeshStandardMaterial({ color: 0x4a1218, roughness: 0.95 })); mat.position.set(cx, 0.0125, cz); mat.receiveShadow = true; mat.castShadow = false; root.add(mat);
+      const top = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.1, h - 0.1), new THREE.MeshStandardMaterial({ map: T.plateTexture('WELCOME', { w: 512, h: 240, bg: '#a82020', fg: '#f3c34a', border: '#f3c34a' }), roughness: 0.95 })); top.rotation.x = -Math.PI / 2; top.position.set(cx, 0.0265, cz); top.receiveShadow = true; root.add(top); }
+    // potted plants by the entrance (decor only: they stand in the entrance lane's corners, like the painted ones)
+    { const pot = new THREE.MeshStandardMaterial({ color: 0x8a4a2a, roughness: 0.7 }), soil = new THREE.MeshStandardMaterial({ color: 0x2a1c12, roughness: 1 }), leaf = new THREE.MeshStandardMaterial({ color: 0x2f7d3a, roughness: 0.6 }), leaf2 = new THREE.MeshStandardMaterial({ color: 0x4a9d48, roughness: 0.6 });
+      for (const [bx, by] of [[262, 1588], [566, 1588]]) {
+        const g = new THREE.Group(); g.position.set(m(bx), 0, m(by));
+        const p = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.22, 0.5, 14), pot); p.position.y = 0.25; p.castShadow = true; p.receiveShadow = true; g.add(p);
+        const sl = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.02, 14), soil); sl.position.y = 0.5; g.add(sl);
+        for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2, l = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 6), i % 2 ? leaf : leaf2); l.scale.set(1, 0.4, 0.55); l.position.set(Math.cos(a) * 0.2, 0.75 + (i % 3) * 0.12, Math.sin(a) * 0.2); l.rotation.set(0, -a, 0.6); l.castShadow = true; g.add(l); }
+        const c = new THREE.Mesh(new THREE.SphereGeometry(0.24, 9, 7), leaf); c.position.y = 0.95; c.scale.y = 0.7; c.castShadow = true; g.add(c);
+        root.add(g); }
+    }
+    // posters on the north wall
+    { const wall = (x, kind) => { const t = T.posterTexture(kind), p = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.82), new THREE.MeshStandardMaterial({ map: t, roughness: 0.6, emissiveMap: t, emissive: 0xffffff, emissiveIntensity: 0.12 })); p.position.set(x, 2.35, m(100) + 0.01); root.add(p); };
+      wall(1.4, 'sale'); wall(3.6, 'fresh'); wall(5.8, 'cold'); wall(7.6, 'eat'); }
+    // the gold and pink accent tiles: a few more loose tiles scattered on the walkable cream floor (the painted floor has them too)
+    { const { board, field } = L, cell = board.cell, fieldAt = (cx, cy) => (cx < 0 || cy < 0 || cx >= board.mw || cy >= board.mh) ? 0 : field[cy].charCodeAt(cx) - 48, tiles = [];
+      const TS = 0.6 * 4 / 4, nx = Math.floor(m(board.w) / TS), nz = Math.floor(m(1640) / TS);
+      for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+        const h = T.hash(i, j, 41); if (h > 0.045) continue;
+        const x = i * TS + TS / 2, z = j * TS + TS / 2, ok = [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 0]].every(([a, b]) => fieldAt(Math.floor((x + a * TS * 0.45) * 48 / cell), Math.floor((z + b * TS * 0.45) * 48 / cell)));
+        if (ok) tiles.push([x, z, h < 0.022 ? 0 : 1]);
+      }
+      const im = new THREE.InstancedMesh(new THREE.PlaneGeometry(TS - 0.04, TS - 0.04).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0, color: 0xffffff, envMapIntensity: 0.6 }), tiles.length), mm = new THREE.Matrix4(), cl = new THREE.Color();
+      tiles.forEach(([x, z, k], i) => { mm.setPosition(x, 0.003, z); im.setMatrixAt(i, mm); im.setColorAt(i, cl.set(k ? 0xd0709a : 0xe2a82e)); }); im.receiveShadow = true; im.frustumCulled = false; root.add(im); }
   }
 
   buildItems() {
@@ -187,7 +227,7 @@ export class Store3D {
       o.traverse((q) => { if (q.isMesh) { q.castShadow = true; q.receiveShadow = true; q.frustumCulled = false; if (bully) q.material = makeBullyMaterial(q.material); } });
       const mixer = new THREE.AnimationMixer(o), act = {}; for (const k of ['stand', 'walk', 'run']) { act[k] = mixer.clipAction(clips[k]); act[k].play(); }
       // see-through: where a shelf stands between the camera and a person, a faint tinted shape of them shows through it (a plain gameplay aid: the player must never be lost behind a unit)
-      const xm = new THREE.MeshBasicMaterial({ color: bully ? 0xff5a4a : 0xffd34a, transparent: true, opacity: 0.4, depthTest: true, depthFunc: THREE.GreaterDepth, depthWrite: false, toneMapped: false }); const xr = [];
+      const xm = new THREE.MeshBasicMaterial({ color: bully ? 0xff5a4a : 0xffd34a, transparent: true, opacity: 0.2, depthTest: true, depthFunc: THREE.GreaterDepth, depthWrite: false, toneMapped: false }); const xr = [];
       xm.onBeforeCompile = (sh) => { sh.vertexShader = sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n gl_Position.z -= 0.004 * gl_Position.w;'); }; xm.customProgramCacheKey = () => 'xray-nudge';
       o.traverse((q) => { if (q.isSkinnedMesh) xr.push(q); });
       for (const q of xr) { const x = new THREE.SkinnedMesh(q.geometry, xm); x.bind(q.skeleton, q.bindMatrix); x.frustumCulled = false; x.renderOrder = 20; x.name = 'xray'; q.parent.add(x); }
@@ -236,8 +276,7 @@ export class Store3D {
     this.t += dt;
     // the pickups' ring and bob: a slow smooth swell (0.5 a second, never a hard on/off)
     const sw = 0.5 + 0.5 * Math.sin(this.t * Math.PI), s2 = 0.5 + 0.5 * Math.sin(this.t * Math.PI);
-    for (const g of this.items) { g.userData.ring.material.opacity = 0.45 + 0.4 * sw; g.userData.inner.position.y = 0.32 + 0.05 * Math.sin(this.t * Math.PI * 0.9); }
-    for (const p of this.pads) p.edge.material.opacity = 0.45 + 0.4 * s2;
+    for (const g of this.items) { g.userData.ring.material.opacity = 0.55 + 0.25 * sw; g.userData.inner.position.y = 0.32 + 0.05 * Math.sin(this.t * Math.PI * 0.9); }
     this.renderer.info.reset(); this.look.render();
   }
   stats() { const i = this.renderer.info; return { triangles: i.render.triangles, calls: i.render.calls, geometries: i.memory.geometries, textures: i.memory.textures, stock: this.structure.info.stockCount }; }

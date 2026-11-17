@@ -73,11 +73,10 @@ const KINDS = {
   ]),
   bottle: (o) => bottle({ r: 0.032, h: 0.2, cap: '#f4f4f0', ...o }),
   soda: (o) => bottle({ r: 0.052, h: 0.36, neck: 0.3, capH: 0.025, ...o }),
-  chips: ({ label, body = '#e8a42b' }) => merge([
-    part(box(0.2, 0.27, 0.05), { color: body, pos: [0, 0.135, 0], scale: [1, 1, 1] }),
-    part(box(0.2, 0.025, 0.055), { color: '#cfcfcf', pos: [0, 0.27, 0] }),
-    part(box(0.2, 0.02, 0.055), { color: '#cfcfcf', pos: [0, 0.01, 0] }),
-    part(plane(0.19, 0.22), { label, pos: [0, 0.135, 0.0255] }),
+  chips: ({ label, body = '#e8a42b' }) => merge([   // a pillow bag with crimped ends
+    part(sph(0.1, 10, 7), { color: body, pos: [0, 0.135, 0], scale: [1, 1.3, 0.3] }),
+    part(box(0.205, 0.028, 0.02), { color: '#f1ede2', pos: [0, 0.272, 0] }), part(box(0.205, 0.028, 0.02), { color: '#f1ede2', pos: [0, 0.003, 0] }),
+    part(plane(0.17, 0.2), { label, pos: [0, 0.135, 0.0305] }),
   ]),
   box: ({ label, body = '#f1f6fb', w = 0.17, h = 0.22, d = 0.05 }) => merge([
     part(box(w, h, d), { color: body, pos: [0, h / 2, 0] }),
