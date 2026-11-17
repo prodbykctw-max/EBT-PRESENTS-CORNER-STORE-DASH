@@ -1,0 +1,11 @@
+import { chromium } from 'playwright-core';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] });
+const p = await b.newPage({ viewport: { width: 480, height: 854 } });
+await p.route(/open-meteo/, (r) => r.abort());
+await p.goto('http://localhost:5487/drive/index.html?qa&time=21:00');
+await p.waitForFunction(() => window.__drive && window.__drive.foot, null, { timeout: 900000 });
+console.log(JSON.stringify(await p.evaluate(() => { const d = window.__drive, rig = d.three.carRig, T = d.three.THREE; const sp = rig.getObjectByName('car_headlights'); rig.updateMatrixWorld(true);
+  const w = (o) => o.getWorldPosition(new T.Vector3()).toArray().map((v) => +v.toFixed(2));
+  const fwd = new T.Vector3(0,0,-1).transformDirection(rig.matrixWorld).toArray().map(v=>+v.toFixed(2));
+  return { spot: !!sp, vis: sp?.visible, I: sp?.intensity, pos: sp && w(sp), tgt: sp && w(sp.target), rig: w(rig), rigRotY: rig.rotation.y, local: sp && sp.position.toArray(), tl: sp && sp.target.position.toArray(), yaw: d.car.yaw }; })));
+await b.close();
