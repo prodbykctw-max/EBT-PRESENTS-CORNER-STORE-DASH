@@ -37,6 +37,11 @@ const yieldNow = () => new Promise((r) => setTimeout(r, 0));
 const lap = (o, k) => { const t = performance.now(); o[k] = Math.round(t - (o._t || t)); o._t = t; };   // how long each build step held the page (init().timings)   // init() gives the page back between its big steps (the how-to-play stays responsive)
 const KEY_DIR = new THREE.Vector3(-0.42, 1.0, -0.62).normalize();        // toward the key light (north-west, high): shadows fall south-east
 
+/** The store's light and colour, one line to edit. key / hemi / env: the ceiling light, the fill and the reflections; ex: exposure (overall
+ *  brightness); lm: the light pools baked on the floor; bloom / bt: how much the brightest things glow and how bright they must be to glow;
+ *  sat / con: colour richness and contrast. (Before this existed the game never applied the preview's values and ran with the drive's outdoor
+ *  bloom, 0.55 at a 0.9 threshold, which washed the cream floor out to white.) */
+export const TUNE = { key: 1.7, hemi: 0.24, env: 0.45, ex: 0.74, lm: 0.85, bloom: 0.18, bt: 1.9, sat: 1.3, con: 0.2 };
 export class Store3D {
   constructor(canvas, { layout, base = new URL('../drive/', import.meta.url).href, mobile = false, pixelRatio } = {}) {
     this._unguard = guardRandom();   // until init() is over (see guardRandom)
@@ -90,11 +95,14 @@ export class Store3D {
     key.shadow.autoUpdate = false; key.shadow.needsUpdate = true;   // static: drawn on the first frame only
     lap(TM, 'structureLights'); await yieldNow(); this.buildSidewalk(concD, concN); lap(TM, 'sidewalk'); this.buildDecals(whiteUV); lap(TM, 'decals'); await yieldNow(); this.buildItems(); this.buildHighlight(); lap(TM, 'items');
     await this.loadPeople(); lap(TM, 'people'); await yieldNow();
+    this.applyTune();   // the store's light and colour (TUNE): the game uses exactly what the preview page shows
     this.resize(this.view.w, this.view.h);
     return this;
   }
 
-  applyTune(t) {
+  applyTune(t = TUNE) {
+    t = { ...TUNE, ...t };
+    this.look.m.fin.uniforms.uSat.value = t.sat; this.look.m.fin.uniforms.uContrast.value = t.con;
     this.key.intensity = t.key; this.hemi.intensity = t.hemi; this.scene.environmentIntensity = t.env; this.renderer.toneMappingExposure = t.ex; this.mats.floor.lightMapIntensity = t.lm;
     this.look.m.fin.uniforms.uBloom.value = t.bloom; this.look.m.pre.uniforms.uThreshold.value = t.bt; this.look.m.pre.uniforms.uKnee.value = 0.5;
   }
