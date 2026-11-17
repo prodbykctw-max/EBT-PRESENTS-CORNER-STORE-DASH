@@ -19,9 +19,19 @@ export const PAINT = {
 const col = new THREE.Color();
 
 export class GeoBuf {
-  constructor() { this.P = []; this.N = []; this.U = []; this.C = []; this.R = []; }
-  get count() { return this.P.length / 3; }
-  _v(x, y, z, nx, ny, nz, u, v, c, rm) { this.P.push(x, y, z); this.N.push(nx, ny, nz); this.U.push(u, v); this.C.push(c.r, c.g, c.b); this.R.push(rm[0], rm[1], rm[2]); }
+  // typed arrays that grow by doubling (plain arrays and push() made this the slowest part of the build)
+  constructor() { this.n = 0; this.cap = 0; this._grow(1024); }
+  _grow(cap) {
+    const g = (a, k) => { const b = new Float32Array(cap * k); if (a) b.set(a.subarray(0, this.n * k)); return b; };
+    this.P = g(this.P, 3); this.N = g(this.N, 3); this.U = g(this.U, 2); this.C = g(this.C, 3); this.R = g(this.R, 3); this.cap = cap;
+  }
+  get count() { return this.n; }
+  _v(x, y, z, nx, ny, nz, u, v, c, rm) {
+    if (this.n === this.cap) this._grow(this.cap * 2);
+    const i = this.n++, i3 = i * 3, i2 = i * 2, P = this.P, N = this.N, C = this.C, R = this.R;
+    P[i3] = x; P[i3 + 1] = y; P[i3 + 2] = z; N[i3] = nx; N[i3 + 1] = ny; N[i3 + 2] = nz; this.U[i2] = u; this.U[i2 + 1] = v;
+    C[i3] = c.r; C[i3 + 1] = c.g; C[i3 + 2] = c.b; R[i3] = rm[0]; R[i3 + 1] = rm[1]; R[i3 + 2] = rm[2];
+  }
   /** a quad from 4 corners (counter-clockwise seen from the front), one normal, uv per corner */
   quad(a, b, c, d, n, uv, color, rm) {
     const q = [a, b, c, d];
@@ -59,9 +69,8 @@ export class GeoBuf {
   }
   build() {
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(this.N, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.U, 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(this.C, 3));
-    g.setAttribute('aRM', new THREE.Float32BufferAttribute(this.R, 3)); g.computeBoundingSphere(); g.computeBoundingBox(); return g;
+    const n = this.n, A = (a, k) => new THREE.BufferAttribute(a.slice(0, n * k), k);
+    g.setAttribute('position', A(this.P, 3)); g.setAttribute('normal', A(this.N, 3)); g.setAttribute('uv', A(this.U, 2)); g.setAttribute('color', A(this.C, 3)); g.setAttribute('aRM', A(this.R, 3)); g.computeBoundingSphere(); g.computeBoundingBox(); return g;
   }
 }
 

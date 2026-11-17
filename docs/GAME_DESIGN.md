@@ -218,3 +218,29 @@ harder on phone frame times", not as exact. Lunge duels set up at the same 260 s
 about as often as before (34 vs 33 of ~97). With the bully frozen, the bot's full shop takes the same time (17.6 s both),
 so the player's easing doesn't slow you down. If the store needs to be easier still, `B_CAP`, `B_BASE` and `LUNGE_WIND`
 are the knobs.
+
+## The 3D store (`?store=3d`, not the default)
+
+Open the game with `?store=3d` at the end of the address and the store run is drawn in real 3D instead of on the painted board,
+in the look of the realistic street. It is the same store: the same shelves in the same places, the same seven items at the same
+spots, the same three PAY spots, the same doors, seen from the same overhead camera that follows you the same way. Only the look
+changes. You walk exactly where you could walk before, the bully hunts the same way, and the score and the leaderboard are the same,
+because the game itself is untouched: the 3D store is only told, every frame, where you and the bully are, which way you face, how
+fast you go, which item is live and whether the PAY spots are up.
+
+What you see in 3D: real shelving units with faced products (milk, eggs and yogurt in the dairy cooler, rice, beans, pasta and cereal,
+bread and bagels, juices, chips and cookies, fruit and vegetables piled in tilted wooden crates, meat trays, household, sodas and
+water, frozen food behind glass), cardboard overstock cases on the unit tops, the checkouts with their belts and registers, cart
+corrals, a glass storefront with its sliding doors parked open and the sidewalk and curb outside. The two people are the drive's own
+3D characters, walking and running by how fast they move. The live item floats over a soft gold ring, its shelf glows gold (the
+same slow 0.7-a-second swell as before), the PAY spots are painted green panels with a gold edge, and the bully's lunge wind-up is a
+soft red ring on the floor under him that fades in, holds steady and fades out. Nothing flashes. The score, the EBT LIST, the
+item's name, the speech bubbles, the red edges and the arrow when he is off screen are the same 2D layers as before, drawn on top.
+
+Where something stands between the camera and a person (behind a unit top, a checkout's back panel), a thin outline of them shows
+through: only their edge, never a filled shape.
+
+Loading: the 3D files download while you drive, and the store is built while the store's how-to-play is up. It is used only if it
+is completely ready when you tap START RUN; START never waits for it. If the phone has no WebGL, a file fails, or the build is not
+done in time, the run uses the painted board, exactly as without the switch, with no message. Without `?store=3d` nothing of it is
+loaded and the store is pixel for pixel what it was.

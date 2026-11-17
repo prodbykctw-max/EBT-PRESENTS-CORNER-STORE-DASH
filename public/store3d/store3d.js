@@ -18,7 +18,7 @@ import { useAtlas, productGeometry } from './products.js';
 import { buildStructure, PX, m } from './structure.js';
 import { GeoBuf, paintMaterial, withRM } from './geobuf.js';
 
-const ELEV = 45 * Math.PI / 180, DIST = 800;   // camera elevation, distance (a long lens: close to orthographic)
+const ELEV = 45 * Math.PI / 180, DIST = 8000;   // camera elevation, distance (a very long lens: within 0.3 px of orthographic, so the floor lies under the 2D layers everywhere on screen)
 const FACE_YAW = { U: Math.PI, D: 0, L: -Math.PI / 2, R: Math.PI / 2 };   // character.glb faces +z (the camera) at yaw 0
 // The game shares Math.random (the run's item order, the bully's spawn and lines). Nothing here may draw from it: three.js gives every
 // object an id from Math.random, so while the store is being built, any call coming from this code or the three.js it uses is answered
@@ -33,7 +33,8 @@ function guardRandom() {
   Math.random = g; return () => { if (Math.random === g) Math.random = real; };
 }
 function withoutRandom(fn) { const real = Math.random; Math.random = isoRandom; try { return fn(); } finally { Math.random = real; } }
-const yieldNow = () => new Promise((r) => setTimeout(r, 0));   // init() gives the page back between its big steps (the how-to-play stays responsive)
+const yieldNow = () => new Promise((r) => setTimeout(r, 0));
+const lap = (o, k) => { const t = performance.now(); o[k] = Math.round(t - (o._t || t)); o._t = t; };   // how long each build step held the page (init().timings)   // init() gives the page back between its big steps (the how-to-play stays responsive)
 const KEY_DIR = new THREE.Vector3(-0.42, 1.0, -0.62).normalize();        // toward the key light (north-west, high): shadows fall south-east
 
 export class Store3D {
@@ -57,12 +58,13 @@ export class Store3D {
 
   async init() { try { return await this._init(); } finally { this._unguard(); } }
   async _init() {
+    const TM = this.timings = { _t: performance.now() };
     const { layout } = this, aniso = this.mobile ? 4 : 8;
     const loader = new THREE.TextureLoader(), conc = (f, srgb) => loader.loadAsync(new URL('tex/real/' + f, this.base).href).then((t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; return t; });
     const [concD, concN] = await Promise.all([conc('conc_d.webp', true), conc('conc_n.webp', false)]);
-    await yieldNow(); const wallT = T.wallTexture(aniso), floorT = T.floorTextures(aniso); await yieldNow(); const atlas = T.labelAtlas(aniso); useAtlas(atlas); this.atlas = atlas;
+    lap(TM, 'concrete'); await yieldNow(); const wallT = T.wallTexture(aniso), floorT = T.floorTextures(aniso); lap(TM, 'wallFloorTex'); await yieldNow(); const atlas = T.labelAtlas(aniso); useAtlas(atlas); this.atlas = atlas;
     const white = atlas.cell('white'), whiteUV = [(white[0] + white[2]) / 2, (white[1] + white[3]) / 2];
-    await yieldNow(); const { aoMap, lightMap } = this.bakeFloorLight(); await yieldNow();
+    lap(TM, 'labelAtlas'); await yieldNow(); const { aoMap, lightMap } = this.bakeFloorLight(); lap(TM, 'floorLight'); await yieldNow();
     const mats = this.mats = {
       default: new THREE.MeshStandardMaterial({ color: 0x888888 }),
       paint: paintMaterial(atlas.map, { envMapIntensity: 0.8 }),
@@ -70,8 +72,14 @@ export class Store3D {
       wall: new THREE.MeshStandardMaterial({ map: wallT, normalMap: concN, normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.82, metalness: 0 }),
       glass: new THREE.MeshStandardMaterial({ color: 0xcfe6f2, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.22, depthWrite: false, envMapIntensity: 2.2 }),
     };
-    this.scene.environment = this.makeEnvironment(); this.scene.environmentIntensity = 0.5; await yieldNow();
-    const S = this.structure = buildStructure(layout, mats, { white: whiteUV }); this.scene.add(S.root); this.root = S.root;
+    lap(TM, 'materials'); this.scene.environment = this.makeEnvironment(); this.scene.environmentIntensity = 0.5; lap(TM, 'environment'); await yieldNow();
+    const S = this.structure = buildStructure(layout, mats, { white: whiteUV, defer: true }); lap(TM, 'structure');
+    { // the stock and the merged meshes, a slice at a time (the page gets a turn at least every ~30 ms)
+      let t = performance.now(); const bf = (z) => S.builder.bufFor(z), pause = async () => { if (performance.now() - t > 30) { await yieldNow(); t = performance.now(); } };
+      for (let i = 0; i < S.stock.list.length; i += 24) { S.stock.emit(bf, i, i + 24); await pause(); }
+      S.root.add(await S.builder.finishAsync(pause));
+    }
+    lap(TM, 'stock'); this.scene.add(S.root); this.root = S.root;
     // lights: the sky/ground fill and one key light whose shadow map covers the whole store and is drawn once
     const hemi = this.hemi = new THREE.HemisphereLight(0xe6ebff, 0xb0a296, 0.3); this.scene.add(hemi);
     const key = this.key = new THREE.DirectionalLight(0xfff0e0, 2.0); key.castShadow = true; this.scene.add(key, key.target);
@@ -80,8 +88,8 @@ export class Store3D {
     key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03; key.shadow.radius = 2; key.shadow.intensity = 0.9;
     key.target.position.copy(c); key.position.copy(c).addScaledVector(KEY_DIR, 70); key.target.updateMatrixWorld(); key.updateMatrixWorld(); key.shadow.camera.updateProjectionMatrix();
     key.shadow.autoUpdate = false; key.shadow.needsUpdate = true;   // static: drawn on the first frame only
-    await yieldNow(); this.buildSidewalk(concD, concN); this.buildDecals(whiteUV); await yieldNow(); this.buildItems(); this.buildHighlight();
-    await this.loadPeople(); await yieldNow();
+    lap(TM, 'structureLights'); await yieldNow(); this.buildSidewalk(concD, concN); lap(TM, 'sidewalk'); this.buildDecals(whiteUV); lap(TM, 'decals'); await yieldNow(); this.buildItems(); this.buildHighlight(); lap(TM, 'items');
+    await this.loadPeople(); lap(TM, 'people'); await yieldNow();
     this.resize(this.view.w, this.view.h);
     return this;
   }
@@ -93,13 +101,20 @@ export class Store3D {
   // the floor's baked light: ambient occlusion from the mask (a soft contact shadow where shelves, counters and walls meet the tile)
   // and the soft pools of the ceiling lights (neutral white, so the cream stays cream)
   bakeFloorLight() {
-    const { board, field } = this.layout, mw = board.mw, mh = board.mh, K = 2, c = document.createElement('canvas'); c.width = mw * K; c.height = mh * K;
-    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.fillStyle = '#000';
-    for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) if (field[y][x] === '0') g.fillRect(x * K, y * K, K, K);
-    const b = document.createElement('canvas'); b.width = c.width; b.height = c.height; const bg = b.getContext('2d'); bg.fillStyle = '#fff'; bg.fillRect(0, 0, b.width, b.height);
-    bg.filter = 'blur(9px)'; bg.drawImage(c, 0, 0); bg.filter = 'blur(2.5px)'; bg.globalCompositeOperation = 'multiply'; bg.drawImage(c, 0, 0); bg.filter = 'none';
-    const id = bg.getImageData(0, 0, b.width, b.height), d = id.data;
-    for (let i = 0; i < d.length; i += 4) { const v = d[i] / 255, a = 0.4 + 0.6 * Math.pow(v, 0.9); d[i] = d[i + 1] = d[i + 2] = a * 255; } bg.putImageData(id, 0, 0);
+    // (blurred in plain JS, three box blurs per axis ~ a gaussian: the canvas 'blur()' filter took 2.3 s here on a software-drawn canvas)
+    const { board, field } = this.layout, mw = board.mw, mh = board.mh, K = 2, W = mw * K, H = mh * K, src = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) src[y * W + x] = field[(y / K) | 0][(x / K) | 0] === '0' ? 0 : 1;
+    const boxBlur = (a, r) => {
+      const t = new Float32Array(a.length), o = new Float32Array(a.length), n = 2 * r + 1;
+      for (let y = 0; y < H; y++) { let acc = 0; for (let x = -r; x <= r; x++) acc += a[y * W + Math.min(W - 1, Math.max(0, x))]; for (let x = 0; x < W; x++) { t[y * W + x] = acc / n; acc += a[y * W + Math.min(W - 1, x + r + 1)] - a[y * W + Math.max(0, x - r)]; } }
+      for (let x = 0; x < W; x++) { let acc = 0; for (let y = -r; y <= r; y++) acc += t[Math.min(H - 1, Math.max(0, y)) * W + x]; for (let y = 0; y < H; y++) { o[y * W + x] = acc / n; acc += t[Math.min(H - 1, y + r + 1) * W + x] - t[Math.max(0, y - r) * W + x]; } }
+      return o;
+    };
+    const gauss = (a, sigma) => { const r = Math.max(1, Math.round(sigma * 0.93)); return boxBlur(boxBlur(boxBlur(a, r), r), r); };
+    const wide = gauss(src, 9), tight = gauss(src, 2.5), b = document.createElement('canvas'); b.width = W; b.height = H;
+    const bg = b.getContext('2d'), id = bg.createImageData(W, H), d = id.data;
+    for (let i = 0; i < W * H; i++) { const v = wide[i] * tight[i], a = 0.4 + 0.6 * Math.pow(v, 0.9), q = a * 255; d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = q; d[i * 4 + 3] = 255; }
+    bg.putImageData(id, 0, 0);
     const ao = T.tex(b, { srgb: false, aniso: 1 }); ao.channel = 1;
     const l = document.createElement('canvas'); l.width = 214; l.height = 461; const lg = l.getContext('2d'); lg.fillStyle = '#000'; lg.fillRect(0, 0, 214, 461);
     const sx = 214 / m(board.w), sz = 461 / m(board.h);
@@ -205,7 +220,7 @@ export class Store3D {
       // body, only where it is behind something, in a steady colour. Never a filled shape.
       const xm = new THREE.MeshBasicMaterial({ color: bully ? 0xff6a5a : 0xffd84a, transparent: true, opacity: 0.95, depthTest: true, depthFunc: THREE.GreaterDepth, depthWrite: false, toneMapped: false });
       xm.onBeforeCompile = (sh) => {
-        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vNv;').replace('#include <project_vertex>', '#include <project_vertex>\nvNv = normalize(normalMatrix * objectNormal);');
+        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vNv;').replace('#include <project_vertex>', '#include <project_vertex>\nvNv = normalize(normalMatrix * objectNormal);\ngl_Position.z -= 0.011 * gl_Position.w;');   // ~0.5 m toward the camera: an arm or leg behind the other is not "hidden"
         sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vNv;').replace('#include <opaque_fragment>', 'float rim = 1.0 - abs(normalize(vNv).z);\ndiffuseColor.a *= smoothstep(0.72, 0.92, rim);\n#include <opaque_fragment>');
       };
       xm.customProgramCacheKey = () => 'store3d-outline';
@@ -246,8 +261,8 @@ export class Store3D {
   }
   setXray(on) { for (const a of Object.values(this.actors)) a.o.traverse((q) => { if (q.name === 'xray') q.visible = !!on; }); }
   hideActor(which) { const a = this.actors[which]; if (a) { a.vis = false; a.g.visible = false; a.sh.visible = false; } }
-  /** which pickups to show: 'all', an id, or null */
-  setItems(which) { for (const g of this.items) g.visible = which === 'all' || g.userData.id === which; }
+  /** which pickups to show: 'all', an id, or null; at: the game's own spot for it, board px {x, y} (else where layout.json has it) */
+  setItems(which, at = null) { for (const g of this.items) { g.visible = which === 'all' || g.userData.id === which; if (g.visible && at) g.position.set(m(at.x), 0, m(at.y)); } }
   setPay(on) { this.padMesh.visible = !!on; }
   /** a soft gold glow on the shelf edge where the active item came from: board rect {x,y,w,h} or null; k 0..1 its strength */
   setHighlight(rect, k = 1) {

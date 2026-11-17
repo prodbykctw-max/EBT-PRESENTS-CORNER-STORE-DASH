@@ -2129,6 +2129,7 @@ function startWithDrive(){
   if(!driveAvailable()){ showStoreHow(null); return; }
   if(S.mode==="drive") return;                         // a second tap while it loads
   S.mode="drive"; storeView(false);
+  fetchStore3D();                                       // ?store=3d only: its code and layout download during the drive
   // the first start of a page is the prepared drive (below); every later one (RESTART, BUSTED, a second run after the store) builds as it always did
   if(!prepUsed && !noPrep()){ prepUsed=true; startPrepared(); return; }
   startFreshDrive();
@@ -2204,7 +2205,7 @@ function startPrepared(){
 // Once you get to the store (the drive is over, or there is no drive): the store's how-to-play, on its own plain
 // screen. START RUN starts the run, then banks the drive's bonus on top of the fresh score.
 var arrival=null;
-function showStoreHow(r,from){ arrival=r||null; S.mode="how"; storeView(false); hide("ovTitle"); hide("ovDriveHow"); show("ovHow",0,from); }
+function showStoreHow(r,from){ arrival=r||null; S.mode="how"; storeView(false); hide("ovTitle"); hide("ovDriveHow"); show("ovHow",0,from); buildStore3D(700); }   // (?store=3d only: built once the how-to-play has come up)
 /* The store only shows on its own turn: dimmed behind the title card, then the run and its pause / end screens. From
    the drive's how-to-play until START RUN (the drive, its loading screens, the store's how-to-play) it is hidden and
    not drawn at all, so no fade or hand-off can ever flash it, and a phone isn't drawing a hidden store under the drive. */
@@ -2213,6 +2214,7 @@ function storeView(on){
   storeHidden=!on; var v=on?"":"hidden";
   if(view) view.style.visibility=v;
   if(actorCv) actorCv.style.visibility=v;   // the characters' layer sits beside the board canvas, so it hides with it
+  if(S3.cv && !on) S3.cv.style.visibility="hidden";   // (the 3D store: shown again by store3dFrame on its own turn)
   var sb=document.querySelector(".sideBtns"); if(sb) sb.style.visibility=v;   // the store's pause / mute go with it
 }
 function startStoreRun(){
@@ -2264,6 +2266,7 @@ function pickBullySpawn(){
 function startRun(){
   endingKill(); el("ovEnd").classList.remove("won");
   hide("ovEnd"); hide("ovTitle"); hide("ovHow"); hide("ovDriveHow");
+  S3.use=S3.state==="ready"; S3.a={}; S3.lk=0; S3.lastT=null;   // ?store=3d: only if it is already built (START never waits for it)
   S.mode="play"; storeView(true); S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.runSecs=0; S.won=false; S.drive=null; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9; S.itemPts=0; S.combo=1; S.comboMax=1; S.lastPick=null; S.beatOut=false; S.noCatch=false;
   S.bullyOutside=false; S.bullyIn=0; S.bullyTail=false;
   if(GS) GS.killTweensOf(SHOWN); SHOWN.v=0; REVEAL.idx=-1; PAYIN.on=false;   // motion state starts fresh with the run
@@ -2547,6 +2550,7 @@ function drawList(g){
 function draw(){
   var g=vctx;
   g.imageSmoothingEnabled=false;
+  if(store3dOn()){ draw3DOverlay(g); return; }   // ?store=3d: the store itself is the 3D canvas under this one
   g.drawImage(board,0,0);
   if(S.mode==="play"||S.mode==="end") drawShelfHighlight(g,S.t);
   // score
@@ -2664,7 +2668,8 @@ function drawActors(){
   if(!(S.mode==="play"||S.mode==="end") || !player) return;
   g.imageSmoothingEnabled=false;
   var two=!S.bullyOutside && bully, pFirst=!two || rpos(player).y<=rpos(bully).y;   // the one higher up the screen first
-  if(pFirst){ drawSheet(g,player,false); if(two) drawSheet(g,bully,true); }
+  if(store3dOn()){}   // ?store=3d: the people are drawn in 3D; this layer keeps only the bubbles
+  else if(pFirst){ drawSheet(g,player,false); if(two) drawSheet(g,bully,true); }
   else { drawSheet(g,bully,true); drawSheet(g,player,false); }
   for(var b2=0;b2<bubbles.length;b2++) drawBubble(g,bubbles[b2]);
 }
@@ -2694,6 +2699,124 @@ function drawBubble(g,bb){
   markDirty(dx,dy,dw,dh);
 }
 
+/* ---------- the 3D store (?store=3d) ----------
+   With ?store=3d in the address, the store run is drawn in real-time 3D (public/store3d/: the same shelves, items, PAY spots and walls,
+   built on the layout of this board) on a WebGL canvas UNDER the board canvas. Nothing about the game changes: the same 1/120 s steps,
+   collision mask, bully, scoring, PADS, items and leaderboard payload; the 3D scene is only told each frame where everyone is
+   (store3dFrame). The board canvas then draws only what sits on top of the store: the header band, the score, the EBT LIST panel and
+   the live item's name (draw3DOverlay); the actor layer draws only the bubbles. The 3D code and files are fetched during the drive
+   (fetchStore3D) and built during the store how-to-play (buildStore3D); a run uses it only if it was READY when START RUN was tapped, so
+   START never waits for it. Anything failing (no WebGL, a file, a lost GL context) leaves the painted board, exactly as without the switch. */
+var S3={state:"",st:null,cv:null,use:false,files:null,lk:0,lw:0,a:{},err:null,ms:{}};
+var S3_HEAD=64, S3_LIST=[8,100,98,278];   // the board's header band (rows 0..S3_HEAD) and the EBT LIST panel box, drawn over the 3D store
+var FACE_YAW3={U:Math.PI,D:0,L:-Math.PI/2,R:Math.PI/2};
+function store3dWanted(){ return /[?&]store=3d\b/.test(location.search) && /^https?:$/.test(location.protocol); }
+function runMode(){ return S.mode==="play"||S.mode==="paused"||S.mode==="end"; }
+function store3dOn(){ return S3.use && !!S3.st && runMode(); }
+function fetchStore3D(){   // network only (code + layout): during the drive
+  if(!store3dWanted()||S3.state) return;
+  S3.state="fetching"; S3.ms.fetch0=performance.now();
+  // Loading three.js makes objects (and draws from Math.random for their ids) as its code runs. The drive has usually loaded it
+  // already; when it hasn't (no drive), that first run of its code is answered by a private generator, so the store's shared
+  // Math.random (the item order, the bully's spawn) is the same with or without the 3D store. Not while the drive runs: its
+  // traffic draws from the shared one, as it always has.
+  var unguard=S.mode==="drive"? function(){} : store3dGuard();
+  S3.files=Promise.all([import("./store3d/store3d.js"), fetch("./store3d/layout.json").then(function(r){ if(!r.ok) throw new Error("layout.json "+r.status); return r.json(); })]);
+  S3.files.then(function(){ unguard(); S3.ms.fetched=performance.now(); }, function(e){ unguard(); store3dFail(e); });
+}
+function store3dGuard(){   // until the returned function is called: calls to Math.random from /drive/ or /store3d/ code get a private generator
+  var real=Math.random, s=0x3d5eed;
+  var iso=function(){ s|=0; s=(s+0x6D2B79F5)|0; var t=Math.imul(s^(s>>>15),1|s); t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; };
+  var g=function(){ var st=(new Error().stack||"").split("\n").slice(2).join("\n"); return /\/(store3d|drive)\//.test(st)? iso() : real.call(Math); };
+  Math.random=g; return function(){ if(Math.random===g) Math.random=real; };
+}
+function buildStore3D(delay){   // the build (geometry, textures, the people, shaders): during the store how-to-play
+  fetchStore3D(); if(S3.state!=="fetching") return;
+  S3.state="waiting";
+  setTimeout(function(){
+    if(S3.state!=="waiting") return; S3.state="building"; S3.ms.build0=performance.now();
+    S3.files.then(function(a){
+      if(S3.state!=="building") return;
+      var cv=document.createElement("canvas"); cv.id="store3d"; cv.setAttribute("aria-hidden","true");
+      cv.style.cssText="position:fixed;left:0;top:0;z-index:0;pointer-events:none;visibility:hidden";
+      document.body.insertBefore(cv, view); S3.cv=cv;
+      cv.addEventListener("webglcontextlost",function(e){ e.preventDefault(); store3dFail(new Error("WebGL context lost")); });
+      var coarse=typeof matchMedia==="function" && matchMedia("(pointer: coarse)").matches;
+      var st=new a[0].Store3D(cv,{layout:a[1], mobile:coarse});
+      return st.init().then(function(){
+        if(S3.state!=="building") return;
+        st.resize(window.innerWidth||390, window.innerHeight||780);
+        // the hidden warm-up frame shows the whole store, as the run's first frame does (the intro starts on the full view), so every
+        // mesh and texture is on the GPU before START
+        var vw=window.innerWidth||390, vh=window.innerHeight||780;
+        st.setView({scale:fitScale,tx:(vw-IW*fitScale)/2,ty:(vh-IH*fitScale)/2}); S3.ms.built=performance.now();
+        // every shader compiled before the run (in parallel where the browser can), then one hidden frame
+        return (st.renderer.compileAsync? st.renderer.compileAsync(st.scene,st.camera) : Promise.resolve()).then(function(){
+          if(S3.state!=="building") return;
+          S3.ms.compiled=performance.now(); st.render(0,MOTION,0);
+          S3.st=st; S3.state="ready"; S3.ms.ready=performance.now();
+        });
+      });
+    }).catch(store3dFail);
+  }, delay||0);
+}
+function store3dFail(e){
+  if(S3.state==="failed") return;
+  try{ console.warn("3D store unavailable, the painted board is used:", e); }catch(x){}
+  S3.state="failed"; S3.use=false; S3.err=String(e&&e.message||e);
+  try{ if(S3.st) S3.st.renderer.dispose(); }catch(x){}
+  S3.st=null; if(S3.cv&&S3.cv.parentNode) S3.cv.parentNode.removeChild(S3.cv); S3.cv=null;
+}
+// what the board canvas draws while the 3D store is under it: the header band, the score, the EBT LIST panel, the live item's name
+function draw3DOverlay(g){
+  g.clearRect(0,0,IW,IH);
+  g.drawImage(board,0,0,IW,S3_HEAD,0,0,IW,S3_HEAD);
+  g.drawImage(board,S3_LIST[0],S3_LIST[1],S3_LIST[2],S3_LIST[3],S3_LIST[0],S3_LIST[1],S3_LIST[2],S3_LIST[3]);
+  g.font="bold 30px ui-monospace,Menlo,monospace"; g.fillStyle=PAL.gold;
+  g.fillText(String(shownScore()).padStart(4,"0"), 118, 42);
+  drawList(g);
+  var it2=currentItem();
+  if(it2 && S.curPos){
+    if(S.activeIdx!==REVEAL.idx){ REVEAL.idx=S.activeIdx; if(MOTION){ REVEAL.k=0; GS.killTweensOf(REVEAL); GS.to(REVEAL,{k:1,duration:0.5,ease:"back.out(2.2)"}); } else REVEAL.k=1; }
+    var cx=S.curPos.x, rk=REVEAL.k, top=S3.st.itemTop(it2.id,S.t,MOTION)*48*rk, ty=S.curPos.y-top-14;
+    if(rk!==1){ g.save(); g.translate(cx,S.curPos.y); g.scale(rk,rk); g.translate(-cx,-S.curPos.y); ty=S.curPos.y-top/Math.max(rk,0.01)-14; }
+    g.font="bold 17px ui-monospace,monospace"; g.fillStyle="#FFFFFF"; g.strokeStyle=PAL.navy; g.lineWidth=4;
+    var tw=g.measureText(it2.id).width; g.strokeText(it2.id,cx-tw/2,ty); g.fillText(it2.id,cx-tw/2,ty);
+    if(rk!==1) g.restore();
+  }
+}
+// one person in 3D: where the game draws them this frame (rpos), facing (turned smoothly to the game's U/D/L/R), walking by how far they went
+function actor3d(which,e,dt){
+  var r=rpos(e), x=r.x, y=r.y, A=S3.a[which];
+  if(!A) A=S3.a[which]={yaw:FACE_YAW3[e.face]||0,mv:0};
+  var d=(FACE_YAW3[e.face]||0)-A.yaw; d=Math.atan2(Math.sin(d),Math.cos(d));
+  A.yaw+=d*(dt>0? 1-Math.exp(-dt/0.07) : 1);
+  A.mv+=(((e.moved||0)>0.05?1:0)-A.mv)*(dt>0? 1-Math.exp(-dt/0.08) : 1);
+  var sp=Math.min(1,Math.hypot(e.vx||0,e.vy||0)/PSPEED), a3=S3.st.actors[which];
+  S3.st.setActor(which,x,y,A.yaw,A.mv,(e.anim||0)*60/STRIDE*(a3?a3.dur:1),sp);
+}
+function store3dFrame(dt,force){
+  if(S3.hold && !force) return;   // tests: only __csd.step draws (software GL can't keep up with every frame)
+  var on=store3dOn() && !storeHidden;
+  if(S3.cv){ var vis=on?"visible":"hidden"; if(S3.cv.style.visibility!==vis) S3.cv.style.visibility=vis; }
+  if(!on){ S3.pausedDrawn=false; return; }
+  if(S.mode==="paused"){ if(S3.pausedDrawn) return; S3.pausedDrawn=true; } else S3.pausedDrawn=false;   // paused: one frame, then nothing
+  var st=S3.st;
+  // the easing below runs on the game's own clock (S.t), so it is the same however the frames fall (and in __csd.step)
+  dt=S3.lastT==null? 0 : Math.max(0,Math.min(0.1,S.t-S3.lastT)); S3.lastT=S.t;
+  st.setView({scale:scale,tx:VX,ty:VY});
+  if(player) actor3d("player",player,dt); else st.hideActor("player");
+  if(bully && !S.bullyOutside) actor3d("bully",bully,dt); else st.hideActor("bully");
+  var it=currentItem(); st.setItems(it&&S.curPos? it.id : null, S.curPos); st.setItemScale(REVEAL.k);
+  st.setHighlight(it&&it.shelf? it.shelf : null, it? strobe(S.t) : 0);
+  st.setPay(S.nGot===ITEMS.length);
+  // the lunge cue: eased in and out (about 0.1 s each way), steady while he winds up
+  var wind=!!(bully && bully.lunge && bully.lunge.phase==="wind" && !S.bullyOutside);
+  S3.lk+=((wind?1:0)-S3.lk)*(dt>0? 1-Math.exp(-dt/0.05) : 1);
+  if(wind) S3.lw=1-Math.max(0,bully.lunge.t)/LUNGE_WIND;
+  if(bully){ var rb=rpos(bully); st.setLunge(rb.x,rb.y,S3.lk,S3.lw||0); } else st.setLunge(0,0,0,0);
+  st.render(0,MOTION,S.t);
+}
 /* ---------- audio ---------- */
 var AC=null, musicTimer=null, mStep=0;
 function ac(){ if(!AC){ AC=new (window.AudioContext||window.webkitAudioContext)(); } return AC; }
@@ -2837,6 +2960,7 @@ function fit(){
   fitScale=Math.min(vw/IW, vh/IH);
   zoomScale=Math.max(fitScale, Math.min(0.8, vw/480));
   sizeActorLayer();
+  if(S3.st) S3.st.resize(vw,vh);
   cam.init=false; placeView(0);
 }
 function placeView(dt){
@@ -3008,6 +3132,7 @@ function loop(ts){
   if(S.mode!=="boot" && !storeHidden) draw();   // hidden under the drive and its how-to-play: nothing to draw
   placeView(fdt);
   if(!storeHidden) drawActors();
+  if(S3.cv) store3dFrame(fdt);
 }
 // where an actor is drawn this frame: between his last two steps. (A big jump, like a continue putting you back at
 // the door, is drawn at once rather than slid across the store.)
@@ -3108,7 +3233,8 @@ function init(){
 window.__csd={ get S(){return S;}, get player(){return player;}, get bully(){return bully;}, get items(){return ITEMS;},
   fieldAt:function(x,y){return fieldAt(x,y);}, boxFree:function(x,y){return boxFree(x,y);},
   path:function(){ var p=findPath(bully.x,bully.y,player.x,player.y); return p?p.length:-1; },
-  step:function(dt,n){ n=n||1; for(var i=0;i<n;i++) update(dt); ALPHA=1; draw(); placeView(0); drawActors(); },
+  step:function(dt,n){ n=n||1; for(var i=0;i<n;i++) update(dt); ALPHA=1; draw(); placeView(0); drawActors(); if(S3.cv) store3dFrame(0,true); },
+  get store3d(){ return S3; },
   tp:function(x,y){ var s=snapToField(x,y); player.x=s.x; player.y=s.y; return [s.x,s.y]; },
   freeze:function(v){ S.freezeBully=!!v; },
   setInput:function(x,y){ S.testVec=(x===null)?null:{x:x,y:y}; },

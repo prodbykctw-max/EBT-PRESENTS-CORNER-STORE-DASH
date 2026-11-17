@@ -174,8 +174,8 @@ export function productGeometry(kind, opts = {}) {
 export class Stock {
   constructor() { this.list = []; this.n = 0; }
   add(kind, opts, x, y, z, ry = 0, s = 1, tilt = 0) { this.list.push([kind, opts, x, y, z, ry, s, tilt]); this.n++; }
-  emit(bufFor) {
+  emit(bufFor, from = 0, to = this.list.length) {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
-    for (const [kind, opts, x, y, z, ry, s, tilt] of this.list) { e.set(tilt, ry, 0, 'XYZ'); q.setFromEuler(e); m.compose(v.set(x, y, z), q, sc.set(s, s, s)); bufFor(z).geo(productGeometry(kind, opts), m); }
+    for (const [kind, opts, x, y, z, ry, s, tilt] of this.list.slice(from, to)) { e.set(tilt, ry, 0, 'XYZ'); q.setFromEuler(e); m.compose(v.set(x, y, z), q, sc.set(s, s, s)); bufFor(z).geo(productGeometry(kind, opts), m); }
   }
 }

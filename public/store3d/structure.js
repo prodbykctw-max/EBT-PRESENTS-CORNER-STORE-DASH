@@ -92,13 +92,15 @@ export class Builder {
     }
     this.bufFor(zc).box(mat, x0, y0, z0, x1, y1, z1, { skip: o.skip || 'ny', white: this.white });
   }
-  finish() {
-    const grp = new THREE.Group(); grp.name = 'static';
+  /** finish() a mesh at a time, calling pause() between them (it may return a promise) */
+  async finishAsync(pause) { const grp = new THREE.Group(); grp.name = 'static'; for (const m of this._meshes()) { grp.add(m); await pause(); } return grp; }
+  finish() { const grp = new THREE.Group(); grp.name = 'static'; for (const m of this._meshes()) grp.add(m); return grp; }
+  *_meshes() {
+    const grp = { add: (m) => m };
     const add = (geo, mat, name, cast = true) => { const mesh = new THREE.Mesh(geo, mat); mesh.castShadow = cast; mesh.receiveShadow = true; mesh.name = name; grp.add(mesh); return mesh; };
-    for (const [k, buf] of [...this.chunks].sort((a, b) => a[0] - b[0])) if (buf.count) add(buf.build(), this.mats.paint || this.mats.default, 'static:paint' + k);
-    if (this.wallBuf.count) add(this.wallBuf.build(), this.mats.wall || this.mats.default, 'static:wall');
-    if (this.glassBuf.count) add(this.glassBuf.build(), this.mats.glass || this.mats.default, 'static:glass', false);
-    return grp;
+    for (const [k, buf] of [...this.chunks].sort((a, b) => a[0] - b[0])) if (buf.count) yield add(buf.build(), this.mats.paint || this.mats.default, 'static:paint' + k);
+    if (this.wallBuf.count) yield add(this.wallBuf.build(), this.mats.wall || this.mats.default, 'static:wall');
+    if (this.glassBuf.count) yield add(this.glassBuf.build(), this.mats.glass || this.mats.default, 'static:glass', false);
   }
 }
 
@@ -112,7 +114,10 @@ export function buildStructure(layout, mats, opts = {}) {
 
   // ---- the walls: every solid cell of the mask that is not a fixture, within 1.5 m of the floor (beyond it the dark void is the same colour)
   const near = new Uint8Array(mw * mh), R = 20;
-  for (let cy = 0; cy < mh; cy++) for (let cx = 0; cx < mw; cx++) if (fieldAt(cx, cy)) for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) { const x = cx + dx, y = cy + dy; if (x >= 0 && y >= 0 && x < mw && y < mh && Math.abs(dx) + Math.abs(dy) <= R + 6) near[y * mw + x] = 1; }
+  // (only the floor's edge cells need their neighbourhood marked: the shape is convex and centred, so anything near an inner floor cell
+  // is near the edge cell between them; the floor itself is marked first. 8x faster than every floor cell, the same cells)
+  for (let cy = 0; cy < mh; cy++) for (let cx = 0; cx < mw; cx++) if (fieldAt(cx, cy)) near[cy * mw + cx] = 1;
+  for (let cy = 0; cy < mh; cy++) for (let cx = 0; cx < mw; cx++) if (fieldAt(cx, cy) && !(fieldAt(cx - 1, cy) && fieldAt(cx + 1, cy) && fieldAt(cx, cy - 1) && fieldAt(cx, cy + 1))) for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) { const x = cx + dx, y = cy + dy; if (x >= 0 && y >= 0 && x < mw && y < mh && Math.abs(dx) + Math.abs(dy) <= R + 6) near[y * mw + x] = 1; }
   // thin solid slivers of the mask (the painted banners' dark top edges: 4 px high lines inside open lanes) are low floor strips, not walls
   const rails = layout.blobs.filter((b) => b.cells < 100 && b.fill > 0.99), inRail = (cx, cy) => rails.some((b) => cx * cell >= b.x0 && cx * cell < b.x1 && cy * cell >= b.y0 && cy * cell < b.y1);
   const wallCells = (cx, cy) => !fieldAt(cx, cy) && near[cy * mw + cx] && !inFix(cx, cy) && !inCorral(cx, cy) && !inRail(cx, cy) && cy * cell >= 96 - 4 && cy * cell < 1600;
@@ -182,9 +187,12 @@ export function buildStructure(layout, mats, opts = {}) {
       if (ok) B.bufFor(z).box([h < 0.022 ? '#e2a82e' : '#d0709a', 0.3, 0], x - TS / 2 + 0.02, 0, z - TS / 2 + 0.02, x + TS / 2 - 0.02, 0.003, z + TS / 2 - 0.02, { skip: 'ny nx px nz pz', white: w });
     } }
 
-  stock.emit((z) => B.bufFor(z)); info.stockCount = stock.n;
-  root.add(B.finish()); info.solids = B.solids;
-  return { root, info, builder: B };
+  info.stockCount = stock.n; info.solids = B.solids;
+  // opts.defer: the caller writes the stock into the buffers itself (a few products at a time, giving the page back in between:
+  // store3d.js) and then calls finishAsync; otherwise (the node tools) it is all done here
+  if (opts.defer) return { root, info, builder: B, stock };
+  stock.emit((z) => B.bufFor(z)); root.add(B.finish());
+  return { root, info, builder: B, stock };
 }
 const hash = (a, b, s = 0) => { let h = (a * 374761393 + b * 668265263 + s * 2147483647) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
 
