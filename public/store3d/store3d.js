@@ -159,7 +159,8 @@ export class Store3D {
     entries.push({ name: 'exit', w: 256, h: 96, draw: (g, w, h) => T.drawPlate(g, w, h, 'EXIT', { bg: '#b3202a', fg: '#fff', border: '#f5c518' }) });
     for (const k of ['sale', 'fresh', 'cold', 'eat']) entries.push({ name: 'poster_' + k, w: 256, h: 340, draw: (g, w, h) => T.drawPoster(g, w, h, k) });
     entries.push({ name: 'entrance', w: 1024, h: 240, draw: (g, w, h) => T.drawPlate(g, w, h, 'ENTRANCE', { bg: '#c2255c', fg: '#f5c518', border: '#f5c518' }) });
-    entries.push({ name: 'welcome', w: 512, h: 240, draw: (g, w, h) => T.drawPlate(g, w, h, 'WELCOME', { bg: '#a82020', fg: '#f3c34a', border: '#f3c34a' }) });
+    entries.push({ name: 'matEntrance', w: 256, h: 240, draw: (g, w, h) => T.drawPlate(g, w, h, 'ENTRANCE', { bg: '#a82020', fg: '#f3c34a', border: '#f3c34a' }) });
+    entries.push({ name: 'matExit', w: 256, h: 240, draw: (g, w, h) => T.drawPlate(g, w, h, 'EXIT', { bg: '#a82020', fg: '#f3c34a', border: '#f3c34a' }) });
     const A = this.decalAtlas = T.decalAtlas(entries, this.mobile ? 4 : 8), wd = A.white, buf = new GeoBuf();
     // header signs: a pink board, the lettered face toward the camera (+z)
     info.signs.forEach((s, i) => buf.box(['#ffffff', 0.4, 0, 0.55], s.x - s.w / 2, s.y - s.h / 2, s.z - 0.03, s.x + s.w / 2, s.y + s.h / 2, s.z + 0.03, { skip: '', white: wd, uv: { pz: A.cell('sign' + i) } }));
@@ -168,10 +169,10 @@ export class Store3D {
     { const ex = info.exit; buf.box(['#ffffff', 0.4, 0, 0.9], ex.x - 0.45, 2.45, ex.z + 0.05, ex.x + 0.45, 2.79, ex.z + 0.13, { skip: '', white: wd, uv: { pz: A.cell('exit') } }); }
     // posters on the north wall (the wall's south face is at board y 100)
     [[1.4, 'sale'], [3.6, 'fresh'], [5.8, 'cold'], [7.6, 'eat']].forEach(([x, k]) => buf.box(['#ffffff', 0.6, 0, 0.12], x - 0.31, 1.94, m(100), x + 0.31, 2.76, m(100) + 0.012, { skip: '', white: wd, uv: { pz: A.cell('poster_' + k) } }));
-    // floor lettering: the ENTRANCE mat (reads along the east lane, rotated) and the welcome mat's top
+    // floor lettering: the ENTRANCE mat (reads along the east lane, rotated) and the two door mats' tops
     { const [x0, y0, x1, y1] = [734, 610, 790, 850], c = A.cell('entrance'); const a = [m(x0), 0.006, m(y1)], b = [m(x1), 0.006, m(y1)], cc = [m(x1), 0.006, m(y0)], d = [m(x0), 0.006, m(y0)];
       buf.quad(a, b, cc, d, [0, 1, 0], [[c[2], c[1]], [c[2], c[3]], [c[0], c[3]], [c[0], c[1]]], new THREE.Color(1, 1, 1), [0.9, 0, 0]); }
-    { const [x0, z0, x1, z1, y] = info.welcome, c = A.cell('welcome'), e = 0.05; buf.quad([x0 + e, y, z1 - e], [x1 - e, y, z1 - e], [x1 - e, y, z0 + e], [x0 + e, y, z0 + e], [0, 1, 0], [[c[0], c[1]], [c[2], c[1]], [c[2], c[3]], [c[0], c[3]]], new THREE.Color(1, 1, 1), [0.95, 0, 0]); }
+    for (const mt of info.mats) { const [x0, z0, x1, z1, y] = mt.rect, c = A.cell(mt.name), e = 0.05; buf.quad([x0 + e, y, z1 - e], [x1 - e, y, z1 - e], [x1 - e, y, z0 + e], [x0 + e, y, z0 + e], [0, 1, 0], [[c[0], c[1]], [c[2], c[1]], [c[2], c[3]], [c[0], c[3]]], new THREE.Color(1, 1, 1), [0.95, 0, 0]); }
     const mesh = this.decals = new THREE.Mesh(buf.build(), paintMaterial(A.map, { envMapIntensity: 0.6 })); mesh.castShadow = true; mesh.receiveShadow = true; mesh.name = 'decals'; this.root.add(mesh);
     // the PAY markings (shown when the list is done): one mesh, painted on the tile, steady
     const pb = new GeoBuf();
