@@ -15,7 +15,7 @@ A free browser game from EBT (Everything But Trapped), in two parts.
 
 | | Touch | Keyboard |
 | --- | --- | --- |
-| **The drive** | ◀ ▶ change lanes, one per tap · GAS to go · BRAKE to stop (hold at a stop to reverse) · HORN clears the way | ↑/W gas · ↓/S brake/reverse · ←/→ or A/D one lane per press · SPACE or H = horn · P or Esc = pause |
+| **The drive** | hold ◀ ▶ to steer (let go and the car straightens) · GAS to go · BRAKE to stop (hold at a stop to reverse) · HORN clears the way | ↑/W gas · ↓/S brake/reverse · ←/→ or A/D to steer (hold) · SPACE or H = horn · P or Esc = pause |
 | **The store** | Drag anywhere on the screen to move (a floating joystick) | Arrows / WASD · P or Esc = pause |
 
 **The drive.** If you hit a police car, you're busted and go back to the start of the drive. If the

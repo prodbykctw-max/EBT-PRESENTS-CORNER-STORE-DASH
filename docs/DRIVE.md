@@ -1,7 +1,7 @@
 # Drive level: "Get to the Store"
 
 A 70-second drive through real downtown Atlanta, seen from behind the car (rear third-person), where
-◀ ▶ move the whole car one lane at a time. It ends at the EBT Corner Store and hands straight off to the
+◀ ▶ steer the car (hold to turn, let go and it straightens). It ends at the EBT Corner Store and hands straight off to the
 store level. It lives in
 the same game rather than as a separate app.
 
@@ -45,7 +45,7 @@ Map: `drive/route_v1.png`. To regenerate it, run `node drive/tools/route.mjs` an
 
 ## Game design: "Temple Run with cars"
 
-You drive it: GAS and BRAKE set your speed, and ◀ ▶ move the whole car one lane to get around what's in
+You drive it: GAS and BRAKE set your speed, and ◀ ▶ steer the car across the road to get around what's in
 your way (see Controls). Everything runs in route space (s = metres along the route, d = metres across it), so lanes,
 obstacles and collisions line up exactly with what's painted on the road.
 
@@ -526,19 +526,31 @@ with reduced motion, with `?bot`, `?skipfoot` or `?nofly`, or under `?qa` unless
 
 ## Controls (mobile-first: the game is played on phones)
 
-You drive it: lane buttons bottom left, pedals bottom right, all held buttons. **Stiff lane steering:** each press
-of ◀ or ▶ moves the whole car exactly one lane, and holding does nothing more. The car never turns: its nose stays on
-the road's heading, the front wheels stay straight and the body doesn't lean; it slides across as one block. There
-are up to four lanes, right to left: your parking lane, your lane, the oncoming lane, the far parking lane. Parking
-lanes only exist where the street is wide enough, so ◀ ▶ skip one that isn't there, and if the one you're in runs
-out the car moves onto the road beside it. The car stays centred in its lane as the street widens and narrows.
-A press acts the moment it happens (`tapLane`, from the touch or key event itself, so even a lightning tap between two
-frames counts), and the car is half way into the next lane in about 60 ms and fully in it in about 0.2 s, at any speed:
-a stiff critically damped spring (w = 28) with no side-speed cap. The car is drawn between the 120 Hz physics steps,
-so the move stays smooth whatever the screen's frame rate.
+You drive it: steering buttons bottom left, pedals bottom right, all held buttons. **Real steering** (it replaced the old
+stiff one-lane-per-press steering, Nov 2026, after the owner asked for a car that steers like the reference clip instead of
+jerking from lane to lane): holding ◀ or ▶ turns the steering value toward full lock (`STEER.ramp` 0.15 s) and letting go
+returns it to centre (`STEER.release` 0.2 s). The car's nose angle to the road follows the steering value (`STEER.tau` 0.11 s
+lag) and the side speed is speed x sin(nose angle), so it arcs across the road at an angle. How far the nose can turn
+shrinks with speed (`maxYaw`: 0.40 rad at 5 m/s or less, 0.20 rad at 30 m/s), and it turns nothing standing still (`STEER.gate`,
+full effect from 3 m/s; reversing, the nose swings the other way so ◀ still takes the car left). There is nothing to snap to:
+the car stays wherever you leave it across the road, and when you let go the nose straightens back to the road's heading by
+itself in about half a second (no counter-steer). Under full lock at speed the tail steps out a little (`STEER.slide`, up to 0.07
+rad of extra nose angle, drawn only). The road's edges are the outermost lane's centre plus 0.4 m (as before); hitting one
+scrubs a little speed, bounces the nose gently back out and gives a light haptic tick (`HAP.edge`); the wheel does not push
+into the curb once you are against it. A tap (finger down and up between two frames) still steers: a press counts for at
+least `TAP_MIN` (0.12 s). The physics is the same 120 Hz as before and the car (position and nose angle) is drawn between
+steps. **What you see:** the front wheels turn with the steering value (`CAR_LEAN.lock`, 0.5 rad at full lock, less at
+speed), the body leans out of the turn with the smoothed side acceleration (`CAR_LEAN`, at most 0.05 rad) and the tyres squeal
+in a hard turn at speed (`sideSlip` in `drive.js`, from `car.ay`). The hit boxes are still the car's footprint along the
+road (they do not turn with the nose).
+**Measured response** (`tools-steer/steer.mjs`, 3.45 m lanes, software WebGL, same on main + PR #77): nose turning 0.03 s (10 m/s) / 0.05 s (25 m/s) after the press; peak nose angle 0.38 rad (21.7 deg) at 10 m/s, 0.22 rad (12.6 deg) at 25 m/s, reached in about 0.32 s; holding across one lane takes 1.1 s at 10 m/s and 0.8 s at 25 m/s; after letting go the nose is within 0.02 rad in 0.38-0.45 s and within 0.005 rad in 0.53-0.60 s, with no wrong-way overshoot; the car centre never went past the road edge (closest -0.046 m). **Autopilot (`?bot`) and the opening:** with no `steerIn` the car steers itself toward
+`car.targetD` (`STEER.seek`: it asks for a side speed of 2.2 x the distance left, through the same steering, nose and curb
+rules). The bot writes `targetD`; so does the pull-out after getting in (`pullOut` in `drive.js`: your car sits at the curb
+and swings out into the travel lane by itself until you steer, 4 s at most; the parked cars within `PULLOUT_CLEAR` 17 m ahead of
+its space are removed so the swing has the room it needs).
 The camera sits behind the car (rear third-person chase view): about 8 m behind and 3 m up at a standstill, easing back
 and up with speed, aimed ahead of the car so the car sits in the lower part of the screen with the street ahead in
-view. It follows each lane change.
+view. It follows the car across the road (nothing in the camera was changed for the new steering).
 
 The realistic look (the default) has its own, closer and lower chase camera (`CAM_R` at the top of `drive.js`: 6.8 m behind
 the car's centre plus 0.03 m per m/s, 2.8 m up with no speed term). It is aimed by where the car lands on screen (the car's
@@ -551,17 +563,17 @@ of air under the camera is applied again where the camera really is (on the Luck
 without that and 2.5 m with it). The comic look keeps the 8 m / 3 m camera above, untouched.
 
 Realistic look only (`guide.js`, built only when the realistic look loaded): two red lines on the road ahead of the car,
-one each side of it, that follow the lane you are steering to (a lane tap swings them across) and bend in to the parking
+one each side of it, that run straight ahead from where the car is (they move across the road with it; with `?bot`, along its line) and bend in to the parking
 space for the last 45 m; amber chevrons through the route's one real bend (about s 150-225); and, behind the `?pullin`
 flag (off by default), three pull-in chevrons before the space. The HUD is a racing bar (`HUD_HTML_REAL`, CSS under
 `.drive-root.real`): POSITION / TIME / CHECKPOINT on top; EBT, the race to the store, SPEED and the distance below. The comic
 HUD markup is unchanged.
 
-(Code: `drive.js` laneAt / laneShift / followLane and the camera rig; `runner.js` Car.step's lateral path.)
+(Code: `runner.js` `STEER` + `RunnerCar.step`; `drive.js` `steerIn` / `tapHold` / `pullOut`, `CAR_LEAN`, the wheel and lean lines beside `carRig`, the camera rig.)
 
 | Phone | Keyboard | Action |
 | --- | --- | --- |
-| **◀ / ▶** | ← / → or A / D | Move the whole car one lane per press (holding does nothing more); a haptic tick per lane crossed |
+| **◀ / ▶** | ← / → or A / D | Steer: hold to turn, let go and the car straightens; a light haptic tick when the curb is hit |
 | **GAS** | ↑ / W | Accelerate (to 67 mph; corners cap it). Off the gas the car coasts down |
 | **BRAKE** | ↓ / S | Progressive brake; keep holding for half a second at a standstill to **reverse** (to 11 mph) |
 | **HORN** | Space / H | Anyone on foot in your path up ahead hops clear, dogs bolt, the crowd flinches |
