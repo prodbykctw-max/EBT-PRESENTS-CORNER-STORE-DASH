@@ -15,6 +15,7 @@ import { RealLook } from '../drive/real-post.js';
 import { makeBullyMaterial, makeStandClip, makeRunClip, addArmSwing, ARMS, MODEL_H, PLAYER_H, BULLY_H } from '../drive/people.js';
 import * as T from './textures.js';
 import { useAtlas, productGeometry } from './products.js';
+import { pickupGeometry, PICKUP_KINDS } from './pickups.js';
 import { buildStructure, PX, m } from './structure.js';
 import { GeoBuf, paintMaterial, withRM } from './geobuf.js';
 
@@ -42,6 +43,21 @@ const KEY_DIR = new THREE.Vector3(-0.42, 1.0, -0.62).normalize();        // towa
  *  sat / con: colour richness and contrast. (Before this existed the game never applied the preview's values and ran with the drive's outdoor
  *  bloom, 0.55 at a 0.9 threshold, which washed the cream floor out to white.) */
 export const TUNE = { key: 1.7, hemi: 0.24, env: 0.45, ex: 0.74, lm: 0.85, bloom: 0.18, bt: 1.9, sat: 1.3, con: 0.2 };
+/** The pickups' size: the pickups' own models (pickups.js) are held to ITEM_W m across; the gold ring is 1.3 m. */
+const ITEM_W = 1.05, ITEM_LOAD_MS = 15000;
+/**
+ * The scanned pickups: for each, its pieces from items/items.glb (glb: the piece's name; real metres, base at y = 0) or a procedural
+ * piece kept from buildItems (keep: its index), each scaled by s (a little larger than life, like the shelf-sized shapes before them),
+ * turned by rot (x, y, z radians) so its print faces the camera, and placed at (x, y, z) m. Remove an entry and that pickup is
+ * procedural again.
+ */
+const ITEM_MODELS = {
+  APPLE: { parts: [{ glb: 'apple', s: 4.9 }] },
+  BREAD: { parts: [{ glb: 'buns', s: 4.9 }] },
+  MILK: { parts: [{ glb: 'milk', s: 2.77, rot: [0, 0, 0] }] },
+  LEMONADE: { parts: [{ keep: 0 }, { glb: 'lemon', s: 2.6, rot: [0, 0, Math.PI / 2], at: [0.2, 0, 0.12] }] },
+  'RICE & BEANS': { parts: [{ keep: 0, at: [-0.22, 0, 0] }, { glb: 'beans', s: 3.04, rot: [0, 0, 0], at: [0.34, 0, 0] }] },
+};
 export class Store3D {
   constructor(canvas, { layout, base = new URL('../drive/', import.meta.url).href, mobile = false, pixelRatio } = {}) {
     this._unguard = guardRandom();   // until init() is over (see guardRandom)
@@ -94,7 +110,7 @@ export class Store3D {
     key.target.position.copy(c); key.position.copy(c).addScaledVector(KEY_DIR, 70); key.target.updateMatrixWorld(); key.updateMatrixWorld(); key.shadow.camera.updateProjectionMatrix();
     key.shadow.autoUpdate = false; key.shadow.needsUpdate = true;   // static: drawn on the first frame only
     lap(TM, 'structureLights'); await yieldNow(); this.buildSidewalk(concD, concN); lap(TM, 'sidewalk'); this.buildDecals(whiteUV); lap(TM, 'decals'); await yieldNow(); this.buildItems(); this.buildHighlight(); lap(TM, 'items');
-    await this.loadPeople(); lap(TM, 'people'); await yieldNow();
+    await Promise.all([this.loadPeople(), this.loadItemModels()]); lap(TM, 'people'); await yieldNow();
     this.applyTune();   // the store's light and colour (TUNE): the game uses exactly what the preview page shows
     this.resize(this.view.w, this.view.h);
     return this;
@@ -188,20 +204,62 @@ export class Store3D {
   }
 
   buildItems() {
-    // the pickups: real products on a soft gold ring, a little larger than on the shelf so they read from above. (RICE & BEANS: a sack and a can.)
+    // the pickups on a soft gold ring, a little larger than life so they read from above. Built here first from procedural shapes
+    // (pickups.js: CHIPS, CHICKEN, LEMONADE; products.js: the rest), then loadItemModels() swaps in the scanned models where it can.
     const L = this.layout, glow = this.glow = T.glowTexture(), ring = this.ringTex = T.ringTexture();
-    const KINDS = this.ITEM_KINDS = { APPLE: [['apple', { body: '#c8282b' }]], CHIPS: [['chips', { label: 'chips', body: '#e8a42b' }]], CHICKEN: [['drumsticks', {}]], LEMONADE: [['bottle', { label: 'lemonade', body: '#f0d23a' }]], BREAD: [['loaf', { label: 'bread', body: '#c98a3c' }]], MILK: [['jug', { label: 'milk', cap: '#2f6fd6' }]], 'RICE & BEANS': [['sack', { label: 'rice', body: '#f4d27a' }], ['can', { label: 'beans', body: '#b3322b' }]] };
+    const KINDS = this.ITEM_KINDS = { APPLE: [['apple', { body: '#c8282b' }]], CHIPS: [['chipsBag', {}]], CHICKEN: [['roastChicken', {}]], LEMONADE: [['lemonBottle', {}]], BREAD: [['loaf', { label: 'bread', body: '#c98a3c' }]], MILK: [['jug', { label: 'milk', cap: '#2f6fd6' }]], 'RICE & BEANS': [['sack', { label: 'rice', body: '#f4d27a' }], ['can', { label: 'beans', body: '#b3322b' }]] };
     this.itemGroup = new THREE.Group(); this.root.add(this.itemGroup);
     const ringMat = new THREE.MeshBasicMaterial({ map: ring, color: new THREE.Color(1.5, 1.2, 0.35), transparent: true, opacity: 0.8, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending });
     const shMat = new THREE.MeshBasicMaterial({ map: glow, color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false, toneMapped: false });
     for (const it of L.items) {
       const g = new THREE.Group(), x = m(it.sx ?? it.x), z = m(it.sy ?? it.y); g.position.set(x, 0, z); g.userData.id = it.id; g.visible = false;
       const inner = new THREE.Group(); g.add(inner);
-      (KINDS[it.id] || []).forEach(([k, o], i) => { const geo = withRM(productGeometry(k, o).clone()); const hgt = geo.boundingBox.max.y, tgt = { apple: 0.42, can: 0.45, sack: 0.62 }[k] || 0.66, mesh = new THREE.Mesh(geo, this.mats.paint); mesh.scale.setScalar(tgt / hgt); mesh.position.x = it.id === 'RICE & BEANS' ? (i ? 0.34 : -0.22) : 0; inner.add(mesh); });
+      (KINDS[it.id] || []).forEach(([k, o], i) => {
+        const own = PICKUP_KINDS.includes(k), geo = withRM((own ? pickupGeometry(k, o) : productGeometry(k, o)).clone()); geo.computeBoundingBox();
+        const bb = geo.boundingBox, hgt = bb.max.y, tgt = { apple: 0.42, can: 0.45, sack: 0.62 }[k] || 0.66, mesh = new THREE.Mesh(geo, this.mats.paint);
+        // the pickups' own models are also held to ITEM_W across (the roast chicken's tray is wide and low)
+        mesh.scale.setScalar(own ? Math.min(tgt / hgt, ITEM_W / Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z)) : tgt / hgt);
+        mesh.position.x = it.id === 'RICE & BEANS' ? (i ? 0.34 : -0.22) : 0; inner.add(mesh);
+      });
       const ringM = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.3), ringMat.clone()); ringM.rotation.x = -Math.PI / 2; ringM.position.y = 0.014; g.add(ringM);
       const shadow = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.9), shMat); shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.01; g.add(shadow);
       g.userData.inner = inner; g.userData.ring = ringM; g.userData.top = Math.max(...inner.children.map((q) => q.scale.y * q.geometry.boundingBox.max.y)); this.itemGroup.add(g); this.items.push(g);
     }
+  }
+  /**
+   * The scanned pickups (items/items.glb, Poly Haven CC0, credits in items/CREDITS.txt): ITEM_MODELS says which pieces make each
+   * pickup. A pickup whose pieces all loaded gets them in place of its procedural shape; if the file fails to load (or takes over
+   * ITEM_LOAD_MS), or a piece is missing, that pickup simply keeps the shape buildItems() gave it. Never throws.
+   */
+  async loadItemModels() {
+    let gltf;
+    try {
+      const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
+      gltf = await Promise.race([loader.loadAsync(new URL('items/items.glb', import.meta.url).href), new Promise((_, no) => setTimeout(() => no(new Error('items.glb: timed out')), ITEM_LOAD_MS))]);
+    } catch (e) { this.itemModels = { error: String(e && e.message || e) }; return; }
+    const piece = {}; gltf.scene.traverse((o) => { if (o.isMesh) piece[o.name] = o; });
+    const used = [];
+    for (const g of this.items) {
+      const spec = ITEM_MODELS[g.userData.id]; if (!spec) continue;
+      if (!spec.parts.every((p) => !p.glb || piece[p.glb])) continue;
+      const model = new THREE.Group();
+      for (const p of spec.parts) {
+        let o;
+        if (p.glb) {   // (its own node transform stays: the meshopt build stores the positions quantized and undoes that there)
+          o = piece[p.glb]; o.removeFromParent(); o.castShadow = false; o.receiveShadow = false; o.material.envMapIntensity = 0.8;
+        } else {   // a procedural piece kept from buildItems (RICE & BEANS: the rice sack); it keeps its size
+          o = g.userData.inner.children[p.keep]; if (!o) continue; o.position.set(0, 0, 0);
+        }
+        // turn the piece (rot), sit it on the floor centred, then scale (s) and place (at) it
+        const spin = new THREE.Group(), holder = new THREE.Group(); spin.add(o); spin.rotation.set(...(p.rot || [0, 0, 0])); holder.add(spin);
+        holder.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(spin), c = bb.getCenter(new THREE.Vector3());
+        spin.position.set(-c.x, -bb.min.y, -c.z); holder.scale.setScalar(p.s ?? 1); holder.position.set(...(p.at || [0, 0, 0]));
+        model.add(holder);
+      }
+      model.updateMatrixWorld(true); g.userData.top = new THREE.Box3().setFromObject(model).max.y;   // (measured before it is parented: no bob, no grow-in scale)
+      const inner = g.userData.inner; inner.clear(); inner.add(model); used.push(g.userData.id);
+    }
+    this.itemModels = { used };
   }
   /** the shelf highlight (where the active item sits on its shelf) and the lunge cue ring: soft floor-level shapes, steady */
   buildHighlight() {

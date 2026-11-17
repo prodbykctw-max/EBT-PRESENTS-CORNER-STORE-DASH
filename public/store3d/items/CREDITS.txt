@@ -1,0 +1,24 @@
+The 3D store's pickups (public/store3d/items/items.glb), loaded by store3d.js loadItemModels() with ?store=3d only.
+
+All four source models are from Poly Haven and licensed CC0 1.0 (public domain dedication):
+https://polyhaven.com/license  ("Our assets are all licensed as CC0") - no attribution is required; credited here anyway.
+Downloaded from api.polyhaven.com (glTF, 1k textures) on 2026-11-17, then simplified, resized and compressed by
+tools-store3d/items/build_items.mjs (and, for Long Life Food, retouched by tools-store3d/items/retouch_pantry.py).
+
+piece   pickup              model              author               source                                         licence
+apple   APPLE               Food Apple 01      Oliver Harries       https://polyhaven.com/a/food_apple_01          CC0
+buns    BREAD               Hamburger Buns     Alexander Shulha     https://polyhaven.com/a/hamburger_buns         CC0
+milk    MILK                Long Life Food     Mia Pecina Zorko     https://polyhaven.com/a/long_life_food         CC0
+beans   RICE & BEANS (can)  Long Life Food     Mia Pecina Zorko     https://polyhaven.com/a/long_life_food         CC0
+lemon   LEMONADE (lemon)    Lemon              Kuutti Siitonen      https://polyhaven.com/a/lemon                  CC0
+
+Changes made here: only the milk carton and the beans can are taken from Long Life Food; its texture keeps only their parts
+(the tomato and sardine labels are dropped), and the made-up brand marks are painted out (the carton's "Pecina's" ribbon, cow
+badge and the side-panel text naming it; the can's "Pezor's BEST BEANS" starburst), so no brand name or logo is in the game.
+The three rolls of Hamburger Buns are pushed together into a cluster. Meshes simplified with meshoptimizer, textures resized to
+512 px (normal maps 256 px) WebP, geometry meshopt-compressed.
+
+Made here (no outside model; public/store3d/pickups.js, procedural, no brands): the roast chicken in its black tray (CHICKEN),
+the chips bag (CHIPS), the lemonade bottle (LEMONADE) and, from products.js, the rice sack (RICE & BEANS). No CC0 / CC BY
+roast chicken, drumstick, chips bag or drink bottle was downloadable from the sources this build could reach (Poly Haven has
+none; Sketchfab's CC BY food models need a signed-in account to download).
