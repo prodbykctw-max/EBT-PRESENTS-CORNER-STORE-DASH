@@ -19,7 +19,7 @@ import os
 if os.path.exists(f'{d}/street.png'):   # a frame of the realistic drive for exposure / contrast / saturation comparison
     st = Image.open(f'{d}/street.png').convert('RGB'); sw = S.width - pad * 2; sh = round(sw * 0.42)
     # centre crop of the street frame, as a strip
-    r = sw / st.width; st = st.resize((sw, round(st.height * r)), Image.LANCZOS); top0 = max(0, (st.height - sh) // 2); st = st.crop((0, top0, sw, top0 + sh))
-    g.text((pad, y), 'the street, for comparison (realistic drive, same exposure pipeline)', font=f2, fill=(200, 200, 215)); y += 30
+    r = sw / st.width; st = st.resize((sw, round(st.height * r)), Image.LANCZOS); top0 = 0; st = st.crop((0, top0, sw, top0 + sh))
+    g.text((pad, y), 'the street, for comparison (a frame of the realistic drive, captured by another session)', font=f2, fill=(200, 200, 215)); y += 30
     S.paste(st, (pad, y)); y += sh + pad
 S = S.crop((0, 0, S.width, y)); S.save(f'{d}/store3d_sheet.jpg', quality=90); print(S.size)
