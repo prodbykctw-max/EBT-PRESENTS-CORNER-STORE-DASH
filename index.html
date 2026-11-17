@@ -2204,7 +2204,7 @@ function startPrepared(){
 // Once you get to the store (the drive is over, or there is no drive): the store's how-to-play, on its own plain
 // screen. START RUN starts the run, then banks the drive's bonus on top of the fresh score.
 var arrival=null;
-function showStoreHow(r,from){ arrival=r||null; S.mode="how"; storeView(false); hide("ovTitle"); hide("ovDriveHow"); show("ovHow",0,from); buildStore3D(700); }   // (?store=3d only: built once the how-to-play has come up)
+function showStoreHow(r,from){ arrival=r||null; S.mode="how"; storeView(false); hide("ovTitle"); hide("ovDriveHow"); show("ovHow",0,from); buildStore3D(700); store3dGate(); }   // (?store=3d only: built once the how-to-play has come up)
 /* The store only shows on its own turn: dimmed behind the title card, then the run and its pause / end screens. From
    the drive's how-to-play until START RUN (the drive, its loading screens, the store's how-to-play) it is hidden and
    not drawn at all, so no fade or hand-off can ever flash it, and a phone isn't drawing a hidden store under the drive. */
@@ -2759,6 +2759,23 @@ function buildStore3D(delay){   // the build (geometry, textures, the people, sh
     }).catch(store3dFail);
   }, delay||0);
 }
+// ?store=3d only: START RUN waits for the 3D store instead of quietly starting the painted one. The button reads LOADING 3D STORE while it
+// builds, and if the build fails it says so in plain words (with the reason underneath) and starts the painted store on the next tap.
+function store3dPending(){ return store3dWanted() && S3.state!=="ready" && S3.state!=="failed" && S3.state!==""; }
+function store3dGate(){
+  if(!store3dWanted()) return;
+  var b=el("btnStart"); if(!b) return;
+  var note=el("s3note");
+  if(!note){ note=document.createElement("div"); note.id="s3note"; note.style.cssText="margin-top:10px;font:12px ui-monospace,Menlo,monospace;color:#9aa;text-align:center;max-width:300px;margin-left:auto;margin-right:auto"; b.parentNode.insertBefore(note,b.nextSibling); }
+  if(S3.state==="ready"){ b.textContent="START RUN"; b.style.opacity=""; note.textContent="3D store ready"; }
+  else if(S3.state==="failed"){ b.textContent="START RUN"; b.style.opacity=""; note.textContent="3D store could not load on this device, so this run uses the painted store. Reason: "+(S3.err||"unknown"); }
+  else if(S3.state){ b.textContent="LOADING 3D STORE"; b.style.opacity="0.55"; note.textContent=""; }
+  if(S3.state!=="ready" && S3.state!=="failed"){
+    if(!S3.gate0) S3.gate0=performance.now();
+    if(performance.now()-S3.gate0>60000){ store3dFail(new Error("took longer than 60 seconds (stopped at: "+S3.state+")")); }   // never leaves START stuck
+    setTimeout(store3dGate,200);
+  }
+}
 function store3dFail(e){
   if(S3.state==="failed") return;
   try{ console.warn("3D store unavailable, the painted board is used:", e); }catch(x){}
@@ -3185,7 +3202,7 @@ function init(){
   // -> START RUN -> the run. With no drive (opened from disk, ?nodrive) it goes straight to the store's.
   el("btnTitle").addEventListener("click",function(){ if(TITLE.skipped){ TITLE.skipped=false; return; } if(!TITLE.done) return; titleIdleOff(); hide("ovTitle"); if(driveAvailable()){ storeView(false); show("ovDriveHow",0,el("btnTitle")); } else showStoreHow(null,el("btnTitle")); });
   el("btnDrive").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
-  el("btnStart").addEventListener("click",function(){ sfx.start(); startStoreRun(); });
+  el("btnStart").addEventListener("click",function(){ if(store3dPending()) return; sfx.start(); startStoreRun(); });   // (?store=3d: the button waits for the 3D store, store3dGate)
   springButtons();
   prefetchDrive();
   el("btnAgain").addEventListener("click",startRun);
