@@ -21,7 +21,8 @@ const click = (id) => p.evaluate((i) => document.getElementById(i).click(), id);
 const nDrives = () => p.evaluate(() => window.__drives.length);
 const waitDrive = (n) => p.waitForFunction((n) => window.__drives.length >= n && window.__drive && window.__drive.foot, n, { timeout: T });
 const shown = () => p.evaluate(() => { const o = (id) => document.getElementById(id).classList.contains('on'); const r = document.querySelector('.drive-root'); return { ovTitle: o('ovTitle'), ovDriveHow: o('ovDriveHow'), ovHow: o('ovHow'), mode: window.__csd?.S.mode, driveRoot: !!r, driveVisible: !!r && getComputedStyle(r.parentElement).visibility !== 'hidden', loader: !!document.querySelector('.drive-loading'), glLive: window.__glc.filter((g) => { try { return !g.isContextLost(); } catch { return false; } }).length, ac: window.__ac.filter((c) => c.state !== 'closed').length }; });
-if (flow === 'early') { await click('btnTitle'); await p.waitForTimeout(150); await click('btnDrive'); }
+if (flow === 'early' || flow === 'direct') {   // (direct: the same click-through, for ?noprepare; the skip steps then follow)
+  await click('btnTitle'); await p.waitForTimeout(flow === 'direct' ? 600 : 150); await click('btnDrive'); }
 else {
   await p.waitForFunction(() => performance.getEntriesByName('drive:prepared').length, null, { timeout: T, polling: 300 });
   step('prepared, screens', await shown());
