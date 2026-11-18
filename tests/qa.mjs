@@ -207,7 +207,7 @@ if (puppeteer) {
   page.on('response', (r) => r.status() === 404 && errors.push(`404 ${r.url()}`));
   // (the browser logs a failed /api call as "Failed to load resource": that is the point of the 400/429/500 checks below)
   page.on('console', (m) => m.type() === 'error' && !/^Failed to load resource/.test(m.text()) && errors.push(m.text()));
-  await page.goto('http://localhost:5198/', { waitUntil: 'load' });
+  await page.goto('http://localhost:5198/?store=2d', { waitUntil: 'load' });   // the painted store: this run checks the game's rules and scoring (the 3D store only draws them, and takes minutes to build on software GL)
   await page.waitForFunction(() => window.__csd && window.__csd.S && window.__csd.S.mode === 'title', { timeout: 60000 });
   check('live game boots to the title screen with no page errors', errors.length === 0, errors.slice(0, 2).join(' | '));
 
