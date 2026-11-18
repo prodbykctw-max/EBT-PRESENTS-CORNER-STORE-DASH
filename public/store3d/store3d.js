@@ -53,7 +53,7 @@ const ITEM_W = 1.05, ITEM_LOAD_MS = 15000;
  */
 const ITEM_MODELS = {
   APPLE: { parts: [{ glb: 'apple', s: 4.9 }] },
-  BREAD: { parts: [{ glb: 'buns', s: 4.9 }] },
+  // BREAD: { parts: [{ glb: 'buns', s: 4.9 }] },   // three scanned rolls (in items.glb, ready): off, the bagged loaf stays until the owner picks
   MILK: { parts: [{ glb: 'milk', s: 2.77, rot: [0, 0, 0] }] },
   LEMONADE: { parts: [{ keep: 0 }, { glb: 'lemon', s: 2.6, rot: [0, 0, Math.PI / 2], at: [0.2, 0, 0.12] }] },
   'RICE & BEANS': { parts: [{ keep: 0, at: [-0.22, 0, 0] }, { glb: 'beans', s: 3.04, rot: [0, 0, 0], at: [0.34, 0, 0] }] },
