@@ -1251,7 +1251,7 @@ function startWithDrive(){
   if(!driveAvailable()){ showStoreHow(null); return; }
   if(S.mode==="drive") return;                         // a second tap while it loads
   S.mode="drive"; storeView(false);
-  fetchStore3D();                                       // ?store=3d only: its code and layout download during the drive
+  fetchStore3D();                                       // the 3D store's code and layout download during the drive
   // the first start of a page is the prepared drive (below); every later one (RESTART, BUSTED, a second run after the store) builds as it always did
   if(!prepUsed && !noPrep()){ prepUsed=true; startPrepared(); return; }
   startFreshDrive();
@@ -1388,7 +1388,7 @@ function pickBullySpawn(){
 function startRun(){
   endingKill(); el("ovEnd").classList.remove("won");
   hide("ovEnd"); hide("ovTitle"); hide("ovHow"); hide("ovDriveHow");
-  S3.use=S3.state==="ready"; S3.a={}; S3.lk=0; S3.lastT=null;   // ?store=3d: only if it is already built (START never waits for it)
+  S3.use=S3.state==="ready"; S3.a={}; S3.lk=0; S3.lastT=null;   // the 3D store, if it is built (the START RUN button waited for it: store3dGate)
   S.mode="play"; storeView(true); S.intro=INTRO_SHOW+INTRO_ZOOM; S.score=0; S.got={}; S.nGot=0; S.active=false; S.aggroT=0; S.runT=0; S.runSecs=0; S.won=false; S.drive=null; S.timeBonus=0; S.line=0; S.continues=1; S.padHint=-9; S.itemPts=0; S.combo=1; S.comboMax=1; S.lastPick=null; S.beatOut=false; S.noCatch=false;
   S.bullyOutside=false; S.bullyIn=0; S.bullyTail=false;
   if(GS) GS.killTweensOf(SHOWN); SHOWN.v=0; REVEAL.idx=-1; PAYIN.on=false;   // motion state starts fresh with the run
@@ -1672,7 +1672,7 @@ function drawList(g){
 function draw(){
   var g=vctx;
   g.imageSmoothingEnabled=false;
-  if(store3dOn()){ draw3DOverlay(g); return; }   // ?store=3d: the store itself is the 3D canvas under this one
+  if(store3dOn()){ draw3DOverlay(g); return; }   // 3D store: the store itself is the 3D canvas under this one
   g.drawImage(board,0,0);
   if(S.mode==="play"||S.mode==="end") drawShelfHighlight(g,S.t);
   // score
@@ -1790,7 +1790,7 @@ function drawActors(){
   if(!(S.mode==="play"||S.mode==="end") || !player) return;
   g.imageSmoothingEnabled=false;
   var two=!S.bullyOutside && bully, pFirst=!two || rpos(player).y<=rpos(bully).y;   // the one higher up the screen first
-  if(store3dOn()){}   // ?store=3d: the people are drawn in 3D; this layer keeps only the bubbles
+  if(store3dOn()){}   // 3D store: the people are drawn in 3D; this layer keeps only the bubbles
   else if(pFirst){ drawSheet(g,player,false); if(two) drawSheet(g,bully,true); }
   else { drawSheet(g,bully,true); drawSheet(g,player,false); }
   for(var b2=0;b2<bubbles.length;b2++) drawBubble(g,bubbles[b2]);
@@ -1821,8 +1821,8 @@ function drawBubble(g,bb){
   markDirty(dx,dy,dw,dh);
 }
 
-/* ---------- the 3D store (?store=3d) ----------
-   With ?store=3d in the address, the store run is drawn in real-time 3D (public/store3d/: the same shelves, items, PAY spots and walls,
+/* ---------- the 3D store (the default; ?store=2d keeps the painted board) ----------
+   The store run is drawn in real-time 3D (public/store3d/: the same shelves, items, PAY spots and walls,
    built on the layout of this board) on a WebGL canvas UNDER the board canvas. Nothing about the game changes: the same 1/120 s steps,
    collision mask, bully, scoring, PADS, items and leaderboard payload; the 3D scene is only told each frame where everyone is
    (store3dFrame). The board canvas then draws only what sits on top of the store: the header band, the score, the EBT LIST panel and
@@ -1832,7 +1832,10 @@ function drawBubble(g,bb){
 var S3={state:"",st:null,cv:null,use:false,files:null,lk:0,lw:0,a:{},err:null,ms:{}};
 var S3_HEAD=64, S3_LIST=[8,100,98,278];   // the board's header band (rows 0..S3_HEAD) and the EBT LIST panel box, drawn over the 3D store
 var FACE_YAW3={U:Math.PI,D:0,L:-Math.PI/2,R:Math.PI/2};
-function store3dWanted(){ return /[?&]store=3d\b/.test(location.search) && /^https?:$/.test(location.protocol); }
+// The 3D store is what every player gets. ?store=2d (or painted / off / 0) keeps the painted board; ?store=3d is the same 3D store with its
+// loading result spelled out under START RUN (for checking a device). Any failure, or a build over the time limit, is the painted board.
+function store3dWanted(){ return !/[?&]store=(2d|painted|off|0)\b/.test(location.search) && /^https?:$/.test(location.protocol); }
+function store3dExplicit(){ return /[?&]store=3d\b/.test(location.search); }
 function runMode(){ return S.mode==="play"||S.mode==="paused"||S.mode==="end"; }
 function store3dOn(){ return S3.use && !!S3.st && runMode(); }
 function fetchStore3D(){   // network only (code + layout): during the drive
@@ -1882,20 +1885,22 @@ function buildStore3D(delay){   // the build (geometry, textures, the people, sh
     }).catch(store3dFail);
   }, delay||0);
 }
-// ?store=3d only: START RUN waits for the 3D store instead of quietly starting the painted one. The button reads LOADING 3D STORE while it
-// builds, and if the build fails it says so in plain words (with the reason underneath) and starts the painted store on the next tap.
+// START RUN waits for the 3D store instead of quietly starting the painted one: the button reads LOADING STORE while it builds (at most
+// S3_WAIT_MS, then the painted store). With ?store=3d the wait is longer and the result, or the reason it failed, is written under the button.
+var S3_WAIT_MS=25000, S3_WAIT_EXPLICIT_MS=60000;
 function store3dPending(){ return store3dWanted() && S3.state!=="ready" && S3.state!=="failed" && S3.state!==""; }
 function store3dGate(){
   if(!store3dWanted()) return;
   var b=el("btnStart"); if(!b) return;
-  var note=el("s3note");
-  if(!note){ note=document.createElement("div"); note.id="s3note"; note.style.cssText="margin-top:10px;font:12px ui-monospace,Menlo,monospace;color:#9aa;text-align:center;max-width:300px;margin-left:auto;margin-right:auto"; b.parentNode.insertBefore(note,b.nextSibling); }
-  if(S3.state==="ready"){ b.textContent="START RUN"; b.style.opacity=""; note.textContent="3D store ready"; }
-  else if(S3.state==="failed"){ b.textContent="START RUN"; b.style.opacity=""; note.textContent="3D store could not load on this device, so this run uses the painted store. Reason: "+(S3.err||"unknown"); }
-  else if(S3.state){ b.textContent="LOADING 3D STORE"; b.style.opacity="0.55"; note.textContent=""; }
+  var ex=store3dExplicit(), note=el("s3note");
+  if(ex && !note){ note=document.createElement("div"); note.id="s3note"; note.style.cssText="margin-top:10px;font:12px ui-monospace,Menlo,monospace;color:#9aa;text-align:center;max-width:300px;margin-left:auto;margin-right:auto"; b.parentNode.insertBefore(note,b.nextSibling); }
+  if(S3.state==="ready"){ b.textContent="START RUN"; b.style.opacity=""; if(note) note.textContent="3D store ready"; }
+  else if(S3.state==="failed"){ b.textContent="START RUN"; b.style.opacity=""; if(note) note.textContent="3D store could not load on this device, so this run uses the painted store. Reason: "+(S3.err||"unknown"); }
+  else if(S3.state){ b.textContent="LOADING STORE"; b.style.opacity="0.55"; if(note) note.textContent=""; }
   if(S3.state!=="ready" && S3.state!=="failed"){
     if(!S3.gate0) S3.gate0=performance.now();
-    if(performance.now()-S3.gate0>60000){ store3dFail(new Error("took longer than 60 seconds (stopped at: "+S3.state+")")); }   // never leaves START stuck
+    var lim=ex?S3_WAIT_EXPLICIT_MS:S3_WAIT_MS;
+    if(performance.now()-S3.gate0>lim){ store3dFail(new Error("took longer than "+Math.round(lim/1000)+" seconds (stopped at: "+S3.state+")")); }   // never leaves START stuck
     setTimeout(store3dGate,200);
   }
 }
@@ -2325,7 +2330,7 @@ function init(){
   // -> START RUN -> the run. With no drive (opened from disk, ?nodrive) it goes straight to the store's.
   el("btnTitle").addEventListener("click",function(){ if(TITLE.skipped){ TITLE.skipped=false; return; } if(!TITLE.done) return; titleIdleOff(); hide("ovTitle"); if(driveAvailable()){ storeView(false); show("ovDriveHow",0,el("btnTitle")); } else showStoreHow(null,el("btnTitle")); });
   el("btnDrive").addEventListener("click",function(){ sfx.start(); startWithDrive(); });
-  el("btnStart").addEventListener("click",function(){ if(store3dPending()) return; sfx.start(); startStoreRun(); });   // (?store=3d: the button waits for the 3D store, store3dGate)
+  el("btnStart").addEventListener("click",function(){ if(store3dPending()) return; sfx.start(); startStoreRun(); });   // (the button waits for the 3D store, store3dGate)
   springButtons();
   prefetchDrive();
   el("btnAgain").addEventListener("click",startRun);

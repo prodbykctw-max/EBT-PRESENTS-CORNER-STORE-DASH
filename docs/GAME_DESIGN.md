@@ -219,7 +219,9 @@ about as often as before (34 vs 33 of ~97). With the bully frozen, the bot's ful
 so the player's easing doesn't slow you down. If the store needs to be easier still, `B_CAP`, `B_BASE` and `LUNGE_WIND`
 are the knobs.
 
-## The 3D store (`?store=3d`, not the default)
+## The 3D store (the default)
+
+**Since Nov 18 2026 every player gets the 3D store.** `?store=2d` keeps the painted board. START RUN reads LOADING STORE until the 3D store is built (at most 25 s); if it fails or runs out of time the run uses the painted board with no message. `?store=3d` is the same store with the load result, or the reason it failed, written under the button. The paragraphs below were written when it was behind the switch.
 
 Open the game with `?store=3d` at the end of the address and the store run is drawn in real 3D instead of on the painted board,
 in the look of the realistic street. It is the same store: the same shelves in the same places, the same seven items at the same
