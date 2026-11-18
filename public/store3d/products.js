@@ -166,6 +166,7 @@ const KINDS = {
   tag: () => merge([part(box(0.05, 0.022, 0.003), { color: '#fff3a8', pos: [0, 0, 0] })]),   // shelf-edge price tag
 };
 export const KIND_NAMES = Object.keys(KINDS);
+export { part, merge, RM };   // for pickups.js (the pickups' own, finer models)
 const cache = new Map();
 export function productGeometry(kind, opts = {}) {
   const k = kind + JSON.stringify(opts); if (!cache.has(k)) { if (!KINDS[kind]) throw new Error('product ' + kind); cache.set(k, KINDS[kind](opts)); } return cache.get(k);
