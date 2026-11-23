@@ -42,7 +42,9 @@ const KEY_DIR = new THREE.Vector3(-0.42, 1.0, -0.62).normalize();        // towa
  *  brightness); lm: the light pools baked on the floor; bloom / bt: how much the brightest things glow and how bright they must be to glow;
  *  sat / con: colour richness and contrast. (Before this existed the game never applied the preview's values and ran with the drive's outdoor
  *  bloom, 0.55 at a 0.9 threshold, which washed the cream floor out to white.) */
-export const TUNE = { key: 1.7, hemi: 0.24, env: 0.45, ex: 0.74, lm: 0.85, bloom: 0.18, bt: 1.9, sat: 1.3, con: 0.2 };
+// (Nov 23 2026: the owner asked for the look of the first 3D sheets he was shown back, in place of the darker, richer grade of Nov 17.
+//  These are that preview's values. The bloom stays the store's own, 0.22 over a 1.9 threshold, so the floor does not wash out to white.)
+export const TUNE = { key: 1.9, hemi: 0.28, env: 0.5, ex: 0.85, lm: 1.0, bloom: 0.22, bt: 1.9, sat: 1.04, con: 0.1 };
 /** The pickups' size: the pickups' own models (pickups.js) are held to ITEM_W m across; the gold ring is 1.3 m. */
 const ITEM_W = 1.05, ITEM_LOAD_MS = 15000;
 /**
