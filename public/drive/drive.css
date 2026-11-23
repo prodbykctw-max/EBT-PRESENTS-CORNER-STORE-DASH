@@ -22,7 +22,7 @@
    tip, "GAS to go · ◀ ▶ change lanes · HORN clears the way", is gone: the drive's how-to-play already says it, and it
    showed while you were still on foot, where it was the wrong instruction.) */
 @media (pointer: coarse) { .drive-pad { display: flex; } .drive-box { min-width: 64px; padding: 4px 8px; } .drive-box b { font-size: 16px; } }
-.drive-skip { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 12px; padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.2); background: rgba(10,12,16,.7); color: #fff; font-weight: 800; }
+.drive-skip { position: absolute; top: max(10px, env(safe-area-inset-top)); left: 12px; padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.2); background: rgba(10,12,16,.7); color: #fff; font-weight: 800; cursor: pointer; }
 /* the loader covers everything in the drive, HUD and buttons included, until the first frame is on screen */
 .drive-loading { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; text-align: center; background: #101318; z-index: 20; }
 /* the way out: fades to black over the drive (drive.js finish), then the next screen comes up on black */
@@ -86,12 +86,12 @@
 }
 /* pause: a ❚❚ button top-right, and a dimmed card with RESUME / SKIP DRIVE */
 .drive-pausebtn { position: absolute; top: max(10px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); width: 44px; height: 40px; border-radius: 10px;
-  border: 1px solid rgba(255,255,255,.2); background: rgba(10,12,16,.7); display: flex; align-items: center; justify-content: center; gap: 5px; z-index: 4; }
+  border: 1px solid rgba(255,255,255,.2); background: rgba(10,12,16,.7); display: flex; align-items: center; justify-content: center; gap: 5px; z-index: 4; cursor: pointer; }
 .drive-pausebtn i { width: 5px; height: 16px; border-radius: 2px; background: #fff; }
 .drive-paused { position: absolute; inset: 0; z-index: 6; display: grid; place-content: center; gap: 14px; text-align: center; background: rgba(8,10,16,.66); }
 .drive-paused[hidden] { display: none; }
 .drive-paused b { font: 900 clamp(34px, 9vw, 60px)/1 system-ui, sans-serif; letter-spacing: .08em; color: #ffd400; text-shadow: 0 4px 0 #000; margin-bottom: 6px; }
-.drive-paused button { justify-self: center; min-width: 200px; padding: 14px 24px; border-radius: 12px; border: 0; background: #ffd400; color: #111; font: 800 18px system-ui, sans-serif; }
+.drive-paused button { justify-self: center; min-width: 200px; padding: 14px 24px; border-radius: 12px; border: 0; background: #ffd400; color: #111; font: 800 18px system-ui, sans-serif; cursor: pointer; }
 .drive-paused button.alt { background: rgba(255,255,255,.14); color: #fff; font-size: 15px; }
 .drive-root.is-paused .drive-pad, .drive-root.is-paused .drive-pausebtn { visibility: hidden; }
 /* iPhone haptics: an invisible switch label over each button (see haptics.js tapHaptic) */
@@ -183,3 +183,8 @@
 .drive-root.flying .drive-rhud, .drive-root.flying .drive-hud, .drive-root.flying .drive-race, .drive-root.flying .drive-light, .drive-root.flying .drive-hint,
 .drive-root.flying .drive-msg, .drive-root.flying .drive-pop, .drive-root.flying .drive-skip, .drive-root.flying .drive-pausebtn { opacity: 0 !important; pointer-events: none; }
 .drive-flyskip { position: absolute; left: 0; right: 0; bottom: max(26px, calc(env(safe-area-inset-bottom) + 18px)); z-index: 2; text-align: center; pointer-events: none; font: 800 13px system-ui, sans-serif; letter-spacing: .16em; color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.7); opacity: .85; }
+/* keyboard focus ring for the drive's buttons (keyboard only; mouse and touch look the same) */
+.drive-skip:focus-visible, .drive-pausebtn:focus-visible, .drive-paused button:focus-visible, .drive-busted button:focus-visible { outline: 3px solid #ffd400; outline-offset: 3px; }
+/* reduced motion: the +25 pop and the message fade in place instead of flying up / scaling (the JS tweens are already off when it is set) */
+@keyframes popup-fade { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .drive-pop b { animation: popup-fade .9s linear forwards; } .drive-msg { transform: none; } }

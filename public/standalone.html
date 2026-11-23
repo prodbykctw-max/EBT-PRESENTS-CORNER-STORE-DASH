@@ -100,6 +100,7 @@
     background:var(--gold); color:var(--ink); border:3px solid var(--navy);
     box-shadow:0 4px 0 var(--navy); padding:12px 22px; }
   .btn:active{ transform:translateY(3px); box-shadow:0 1px 0 var(--navy); }
+  .btn:focus-visible, .sideBtns button:focus-visible, .slot button:focus-visible{ outline:3px solid var(--gold); outline-offset:3px; }   /* keyboard only: mouse and touch look the same */
   .btn.alt{ background:var(--cream); }
   /* starts once the screen's entrance is over (csd.js adds .ready): a running CSS opacity animation would override
      the button's rise and pop it in at full strength ahead of the card */
@@ -192,7 +193,7 @@
 <script type="application/ld+json">[{"@context": "https://schema.org", "@type": "VideoGame", "name": "Corner Store Dash", "url": "https://ebt-corner-store-dash.prodbykctw.workers.dev/", "image": "https://ebt-corner-store-dash.prodbykctw.workers.dev/share.jpg", "description": "Corner Store Dash is a free browser game from the EBT (Everything But Trapped) brand. First the bully chases you up the block to your car; then you race him down Auburn Ave to the corner store against a 70-second clock: change lanes one tap at a time, don’t hit the police, grab EBT tokens and park in the spot out front for a bonus. Then you go inside: beat him there and you get a head start before he walks in, otherwise he follows you in. Grab everything on the EBT list without getting caught and pay at a register. Plays on phone or desktop, no download, with a global leaderboard.", "genre": ["Arcade", "Driving", "Chase"], "gamePlatform": "Web browser", "applicationCategory": "Game", "operatingSystem": "Any", "playMode": "SinglePlayer", "inLanguage": "en", "isAccessibleForFree": true, "author": {"@type": "Organization", "name": "PRODBYKCTW LLC", "url": "https://www.instagram.com/prodbykctw/", "founder": {"@type": "Person", "name": "Melvin D. Brown III"}}, "about": {"@type": "MusicGroup", "name": "EBT (Everything But Trapped)"}, "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}}, {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [{"@type": "Question", "name": "What is Corner Store Dash?", "acceptedAnswer": {"@type": "Answer", "text": "A free browser game from the EBT (Everything But Trapped) brand: outrun the bully to your car, race him down Auburn Ave to the corner store without hitting the police and park out front, then grab everything on the EBT list before he catches you and pay at a register."}}, {"@type": "Question", "name": "How do you play?", "acceptedAnswer": {"@type": "Answer", "text": "On foot: drag anywhere on the screen and you run the way you drag, the camera following behind you; the whole street is yours, so run anywhere outside (buildings block you) to your car (hazards flashing); arrows or WASD on a keyboard; the bully shoves you if he catches you. The drive: ◀ ▶ change lanes one per tap, GAS to go, BRAKE to stop (hold to reverse), HORN clears the way; on a keyboard, arrows or WASD, SPACE for the horn, P to pause. Hit a police car and you’re busted. Beat the 70-second clock, grab EBT tokens and park clean for a bonus that carries into the store; the bar at the top shows how far behind you the bully is, and your lead becomes your head start in the store. In the store, drag anywhere on the screen to move (arrows or WASD on a keyboard), grab all 7 items on the EBT list, dodge the bully and pay at any register. You get one continue per run. Scoring: grab items within 4 seconds of each other for a combo (x2, then x3); pay before the bully walks in for +2,000, never get caught for +1,000, and a faster run earns a speed bonus of up to 3,000."}}, {"@type": "Question", "name": "Is there a leaderboard?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. After a run, enter three initials and save your score to the global leaderboard."}}, {"@type": "Question", "name": "What is EBT?", "acceptedAnswer": {"@type": "Answer", "text": "EBT — Everything But Trapped — is an Atlanta brand run by Kema; Corner Store Dash is its standalone game."}}, {"@type": "Question", "name": "Who built it?", "acceptedAnswer": {"@type": "Answer", "text": "RARƎ AGENCY / PRODBYKCTW (Melvin D. Brown III, @prodbyKCTW) with partner Kema."}}, {"@type": "Question", "name": "Is it free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes — no download, no sign-up, plays on phone or desktop."}}]}]</script>
 </head>
 <body>
-  <div id="loading">LOADING…</div>
+  <div id="loading" role="status">LOADING…</div>
   <canvas id="view" width="853" height="1844"></canvas>
   <div class="sideBtns">
     <button id="btnPause" aria-label="Pause">⏸</button>
@@ -237,7 +238,7 @@
     <div class="scoreBig">SCORE <span id="finalScore">000000</span></div>
     <button class="btn" id="btnContinue">CONTINUE ▶</button>
     <div id="submitRow">
-      <div class="initRow">
+      <div class="initRow" role="group" aria-label="Your initials">
         <div class="slot"><button id="up0" aria-label="Initial 1: next letter">▲</button><div class="lt" id="init0" aria-live="polite">E</div><button id="dn0" aria-label="Initial 1: previous letter">▼</button></div>
         <div class="slot"><button id="up1" aria-label="Initial 2: next letter">▲</button><div class="lt" id="init1" aria-live="polite">B</div><button id="dn1" aria-label="Initial 2: previous letter">▼</button></div>
         <div class="slot"><button id="up2" aria-label="Initial 3: next letter">▲</button><div class="lt" id="init2" aria-live="polite">T</div><button id="dn2" aria-label="Initial 3: previous letter">▼</button></div>
@@ -245,7 +246,7 @@
       <button class="btn alt" id="btnSubmit">SAVE SCORE</button>
     </div>
     <ol id="lbList"></ol>
-    <div id="lbNote"></div>
+    <div id="lbNote" role="status"></div>
     <button class="btn" id="btnCredits">ROLL CREDITS ▶</button>
     <button class="btn" id="btnAgain">RUN IT BACK</button>
     <button class="btn alt" id="btnMenu">MAIN MENU</button>
@@ -2299,10 +2300,10 @@ function inputVec(){
 document.addEventListener("keydown",function(ev){
   var k=ev.key;
   if(k==="p"||k==="P"||k==="Escape"){ togglePause(); return; }
-  if(k==="ArrowUp"||k==="w"||k==="W"){keys.u=1;ev.preventDefault();}
-  if(k==="ArrowDown"||k==="s"||k==="S"){keys.d=1;ev.preventDefault();}
-  if(k==="ArrowLeft"||k==="a"||k==="A"){keys.l=1;ev.preventDefault();}
-  if(k==="ArrowRight"||k==="d"||k==="D"){keys.r=1;ev.preventDefault();}
+  if(k==="ArrowUp"||k==="w"||k==="W"){keys.u=1;if(S.mode==="play")ev.preventDefault();}
+  if(k==="ArrowDown"||k==="s"||k==="S"){keys.d=1;if(S.mode==="play")ev.preventDefault();}
+  if(k==="ArrowLeft"||k==="a"||k==="A"){keys.l=1;if(S.mode==="play")ev.preventDefault();}
+  if(k==="ArrowRight"||k==="d"||k==="D"){keys.r=1;if(S.mode==="play")ev.preventDefault();}
 });
 document.addEventListener("keyup",function(ev){
   var k=ev.key;
@@ -2956,17 +2957,30 @@ function submitScore(){
 
 /* ---------- boot / loop ---------- */
 function el(id){ return document.getElementById(id); }
+/* keyboard focus: move it into a screen when it opens and back to the opener when it closes, but only if the last
+   input was a key, so mouse and touch players see nothing change */
+var KBD=false;
+document.addEventListener("keydown",function(){ KBD=true; },true);
+document.addEventListener("pointerdown",function(){ KBD=false; },true);
+function focusIn(o,id){
+  if(!KBD||id==="ovPause") return;   // (pause resumes on any tap; its first button leaves the run, so Enter must not land on it)
+  var bs=o.querySelectorAll("button");
+  for(var i=0;i<bs.length;i++){ if(bs[i].offsetParent!==null){ try{ bs[i].focus({preventScroll:true}); }catch(e){} return; } }
+}
 function show(id,contentDelay,from){   // from: the button that opened it (the panel grows out of it and closes back into it)
   var o=el(id);
   if(o.classList.contains("on")&&!o._leaving) return;   // already up (a fade-out in progress is turned back around)
   var turned=o._leaving; o._from=from||null;
   o._leaving=false; o.classList.remove("ready"); o.classList.add("on"); overlayIn(o,contentDelay,from,turned);
+  focusIn(o,id);
   if(id==="ovTitle") TitleScene.start({intro:true,sprites:{player:playerImg,bully:bullyImg}});   // (intro only plays the first time)
 }
 function hide(id){
   var o=el(id);
   if(!o.classList.contains("on")||o._leaving) return;
+  var back=KBD&&o.contains(document.activeElement)?o._from:null;
   if(MOTION) overlayOut(o); else o.classList.remove("on");
+  if(back){ try{ back.focus({preventScroll:true}); }catch(e){} }
 }
 /* Follow camera. The board used to be shrunk to fit the whole store on screen, which made everyone tiny on a
    phone. Now it's shown bigger (about 1.8x on a phone, never below fit-to-screen) and scrolls to keep the player

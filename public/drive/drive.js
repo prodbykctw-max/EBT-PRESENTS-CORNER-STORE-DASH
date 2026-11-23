@@ -429,6 +429,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const honk = () => { if (hornT <= 0) { audio.horn(); hornT = 0.6; } };
   // ---------- pause ----------
   let paused = false;
+  let kbd = false;   // true while the last input was a key (focus only moves for keyboard players)
   // The pause panel grows out of the pause button and, on resume, shrinks back into it ("nothing just appears"). Motion
   // only: `paused`, the panel's `hidden` and the world all change exactly when they always did; on resume a throw-away
   // copy of the panel (no listeners, no taps) plays the shrink while the real one is already gone.
@@ -453,6 +454,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
       G.fromTo(ghost, { opacity: 1, scale: 1, transformOrigin: at.x + 'px ' + at.y + 'px' }, { opacity: 0, scale: 0.55, duration: 0.2, ease: 'power2.in', onComplete: () => ghost.remove() });
     }
     panel.hidden = !p;
+    if (kbd && (p || was)) { try { (p ? panel.querySelector('[data-resume]') : pauseBtn)?.focus({ preventScroll: true }); } catch {} }   // keyboard players: focus follows the panel (mouse and touch: nothing moves)
     if (p && G) {   // the pause panel grows out of the pause button (fades up where there is no button to grow from) and its buttons come in
       G.killTweensOf(panel); G.killTweensOf(panel.children);
       if (at) {
@@ -478,6 +480,8 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     keys.add(k);
   };
   const ku = (e) => { const k = KEYMAP[e.code]; if (k) keys.delete(k); };
+  const kbdOn = () => { kbd = true; }, kbdOff = () => { kbd = false; };
+  addEventListener('keydown', kbdOn, true); addEventListener('pointerdown', kbdOff, true);
   addEventListener('keydown', kd); addEventListener('keyup', ku);
   // the four lanes (your parking lane, your lane, the oncoming lane, the far parking lane, where the street has them): the
   // edges of the road you can drive on (runner.js steps with them)
@@ -1692,7 +1696,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
     if (finished) return; finished = true;   // SKIP tapped twice, or SKIP and the bot's timer: one exit
     if (result.busted || result.restart) retryNext = true;   // the host starts the drive again: that start skips the flyover
     cancelFrame(raf); audio.stop(); document.removeEventListener('visibilitychange', onHide); clearTimeout(flash.t);
-    removeEventListener('keydown', kd); removeEventListener('keyup', ku); removeEventListener('resize', resize);
+    removeEventListener('keydown', kd); removeEventListener('keyup', ku); removeEventListener('keydown', kbdOn, true); removeEventListener('pointerdown', kbdOff, true); removeEventListener('resize', resize);
     removeEventListener('orientationchange', onTurn); window.visualViewport?.removeEventListener('resize', resize);   // (a restart builds the whole drive again: nothing of the last one stays hooked to the page)
     const veil = document.createElement('div'); veil.className = 'drive-veil'; root.appendChild(veil);
     const done = () => {
@@ -1812,7 +1816,7 @@ const HUD_HTML_REAL = `
   </div>
   <div class="drive-row2">
     <div class="rb-cell tok"><span>E.B.T</span><b class="drive-tokens">0</b></div>
-    <div class="drive-race" hidden><div class="track"><b class="flag">STORE</b><i class="hd him" aria-label="The bully"></i><i class="hd you" aria-label="You"></i></div><span class="gap"></span></div>
+    <div class="drive-race" hidden><div class="track"><b class="flag">STORE</b><i class="hd him" role="img" aria-label="The bully"></i><i class="hd you" role="img" aria-label="You"></i></div><span class="gap"></span></div>
     <div class="rb-cell"><span>SPEED</span><b class="drive-speed">0 mph</b></div>
     <div class="rb-cell"><span>STORE</span><b class="drive-dist">—</b></div>
   </div>
@@ -1842,7 +1846,7 @@ const HUD_HTML = `
   <div class="drive-box tok"><span>E.B.T</span><b class="drive-tokens">0</b></div>
   <div class="drive-box"><span>SPEED</span><b class="drive-speed">0 mph</b></div>
 </div>
-<div class="drive-race" hidden><div class="track"><b class="flag">STORE</b><i class="hd him" aria-label="The bully"></i><i class="hd you" aria-label="You"></i></div><span class="gap"></span></div>
+<div class="drive-race" hidden><div class="track"><b class="flag">STORE</b><i class="hd him" role="img" aria-label="The bully"></i><i class="hd you" role="img" aria-label="You"></i></div><span class="gap"></span></div>
 <div class="drive-light"><i></i><i></i><i></i><b></b></div>
 <div class="drive-msg"></div>
 <div class="drive-pop"></div>
