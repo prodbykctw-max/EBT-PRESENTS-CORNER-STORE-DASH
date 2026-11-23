@@ -1421,10 +1421,10 @@ function inputVec(){
 document.addEventListener("keydown",function(ev){
   var k=ev.key;
   if(k==="p"||k==="P"||k==="Escape"){ togglePause(); return; }
-  if(k==="ArrowUp"||k==="w"||k==="W"){keys.u=1;ev.preventDefault();}
-  if(k==="ArrowDown"||k==="s"||k==="S"){keys.d=1;ev.preventDefault();}
-  if(k==="ArrowLeft"||k==="a"||k==="A"){keys.l=1;ev.preventDefault();}
-  if(k==="ArrowRight"||k==="d"||k==="D"){keys.r=1;ev.preventDefault();}
+  if(k==="ArrowUp"||k==="w"||k==="W"){keys.u=1;if(S.mode==="play")ev.preventDefault();}
+  if(k==="ArrowDown"||k==="s"||k==="S"){keys.d=1;if(S.mode==="play")ev.preventDefault();}
+  if(k==="ArrowLeft"||k==="a"||k==="A"){keys.l=1;if(S.mode==="play")ev.preventDefault();}
+  if(k==="ArrowRight"||k==="d"||k==="D"){keys.r=1;if(S.mode==="play")ev.preventDefault();}
 });
 document.addEventListener("keyup",function(ev){
   var k=ev.key;
@@ -2078,17 +2078,30 @@ function submitScore(){
 
 /* ---------- boot / loop ---------- */
 function el(id){ return document.getElementById(id); }
+/* keyboard focus: move it into a screen when it opens and back to the opener when it closes, but only if the last
+   input was a key, so mouse and touch players see nothing change */
+var KBD=false;
+document.addEventListener("keydown",function(){ KBD=true; },true);
+document.addEventListener("pointerdown",function(){ KBD=false; },true);
+function focusIn(o,id){
+  if(!KBD||id==="ovPause") return;   // (pause resumes on any tap; its first button leaves the run, so Enter must not land on it)
+  var bs=o.querySelectorAll("button");
+  for(var i=0;i<bs.length;i++){ if(bs[i].offsetParent!==null){ try{ bs[i].focus({preventScroll:true}); }catch(e){} return; } }
+}
 function show(id,contentDelay,from){   // from: the button that opened it (the panel grows out of it and closes back into it)
   var o=el(id);
   if(o.classList.contains("on")&&!o._leaving) return;   // already up (a fade-out in progress is turned back around)
   var turned=o._leaving; o._from=from||null;
   o._leaving=false; o.classList.remove("ready"); o.classList.add("on"); overlayIn(o,contentDelay,from,turned);
+  focusIn(o,id);
   if(id==="ovTitle") TitleScene.start({intro:true,sprites:{player:playerImg,bully:bullyImg}});   // (intro only plays the first time)
 }
 function hide(id){
   var o=el(id);
   if(!o.classList.contains("on")||o._leaving) return;
+  var back=KBD&&o.contains(document.activeElement)?o._from:null;
   if(MOTION) overlayOut(o); else o.classList.remove("on");
+  if(back){ try{ back.focus({preventScroll:true}); }catch(e){} }
 }
 /* Follow camera. The board used to be shrunk to fit the whole store on screen, which made everyone tiny on a
    phone. Now it's shown bigger (about 1.8x on a phone, never below fit-to-screen) and scrolls to keep the player
