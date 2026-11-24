@@ -14,7 +14,7 @@
 import * as THREE from './vendor/three.module.min.js';
 import { hooks } from './mode.js';
 import { GLOW } from './daylight.js';
-import { lampPools, lightHero, shopSpill } from './streetlight.js';
+import { lampPools, lightHero, shopSpill, lampLight } from './streetlight.js';
 export { RealLook } from './real-post.js';
 export { carLights } from './streetlight.js';
 
@@ -104,14 +104,14 @@ function propGeo(g, name) {
 function propMaterial() {
   const m = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.05, clearcoat: 1, clearcoatRoughness: 0.05 });
   chain(m, (sh) => {
-    sh.uniforms.uLamp = GLOW.uLamp;
+    sh.uniforms.uLamp = GLOW.uLamp; sh.uniforms.uDark = GLOW.uDark;
     sh.vertexShader = rep(rep(sh.vertexShader, '#include <common>', 'attribute vec2 aProp; varying vec2 vProp;'),
       '#include <color_vertex>', `vProp = aProp;
       #ifdef USE_INSTANCING_COLOR
         // undo the blanket tint and re-apply it only to "paint" (white) vertices (as runner.js does for the comic look)
         vColor.rgb = color.rgb * mix(vec3(1.0), instanceColor.rgb, step(0.985, min(color.r, min(color.g, color.b))));
       #endif`);
-    let f = rep(sh.fragmentShader, '#include <common>', 'varying vec2 vProp; uniform float uLamp;');
+    let f = rep(sh.fragmentShader, '#include <common>', 'varying vec2 vProp; uniform float uLamp, uDark;');
     f = rep(f, '#include <metalnessmap_fragment>', `
       int pc = int(vProp.x + 0.5); float pAO = vProp.y > 0.001 ? vProp.y : 1.0;
       float pCoat = 0.0, pCoatR = 0.05; vec3 pEmit = vec3(0.0);
@@ -123,7 +123,7 @@ function propMaterial() {
       } else if (pc == 3) {                           // rubber
         diffuseColor.rgb = max(diffuseColor.rgb, vec3(0.03)); roughnessFactor = 0.85; metalnessFactor = 0.0;
       } else if (pc == 4) {                           // headlamp
-        diffuseColor.rgb = vec3(0.9, 0.88, 0.8); roughnessFactor = 0.12; metalnessFactor = 0.0; pCoat = 1.0; pCoatR = 0.02; pEmit = vec3(2.4, 2.25, 1.9) * mix(1.0, 2.6, uLamp);   // (headlamps: brighter once the street lamps are on; steady)
+        diffuseColor.rgb = vec3(0.9, 0.88, 0.8); roughnessFactor = 0.12; metalnessFactor = 0.0; pCoat = 1.0; pCoatR = 0.02; pEmit = vec3(2.4, 2.25, 1.9) * mix(1.0, 2.6, uLamp) * (1.0 - 0.45 * uDark);   // (headlamps: brighter once the street lamps are on, a little less at night (uDark) so a near one is not a big white blob; steady)
       } else if (pc == 5) {                           // tail lamp
         roughnessFactor = 0.15; metalnessFactor = 0.0; pCoat = 1.0; pCoatR = 0.03; pEmit = vec3(2.6, 0.06, 0.03) * mix(1.0, 1.35, uLamp);
       } else if (pc == 6) {                           // chrome and bright metal
@@ -133,7 +133,7 @@ function propMaterial() {
       } else if (pc == 9) {                           // light-bar lens
         roughnessFactor = 0.2; metalnessFactor = 0.0; pCoat = 1.0; pCoatR = 0.03; pEmit = diffuseColor.rgb * 1.6;
       } else if (pc == 10) {                          // street lamp lens: a steady warm glow once the lamps come on (uLamp), pale glass by day
-        diffuseColor.rgb = vec3(0.8, 0.72, 0.55); roughnessFactor = 0.2; metalnessFactor = 0.0; pEmit = vec3(1.0, 0.7, 0.38) * (0.15 + 7.0 * uLamp);
+        diffuseColor.rgb = vec3(0.8, 0.72, 0.55); roughnessFactor = 0.2; metalnessFactor = 0.0; pEmit = vec3(1.0, 0.7, 0.38) * (0.15 + 7.0 * uLamp * (1.0 - 0.35 * uDark));
       } else { roughnessFactor = 0.62; metalnessFactor = 0.04; }`);
     f = rep(f, '#include <lights_physical_fragment>', 'material.clearcoat = pCoat; material.clearcoatRoughness = min(1.0, pCoatR + geometryRoughness);');
     f = rep(f, '#include <emissivemap_fragment>', 'totalEmissiveRadiance += pEmit;');
@@ -188,7 +188,8 @@ export function tuneWeather(w, { scene, renderer, sun, hemi, look }) {
   scene.fog.near = scene.fog.far * 0.7;
   look.setAtmosphere({ haze: L.haze, sunColor: L.sunColor, sunDir: L.sunDir, k: fog ? 0.006 : THREE.MathUtils.lerp(0.0004, 0.0009, Math.min(1, cloud * 0.85 + w.rain * 0.3)), mix: fog ? 0.9 : 0.45 });
   const u = look.m.fin.uniforms; u.uSat.value = L.sat; u.uContrast.value = L.con; u.uTint.value.copy(L.tint);
-  scene.getObjectByName('city_pools') && (scene.getObjectByName('city_pools').visible = L.lamp > 0.01);
+  scene.getObjectByName('city_pools') && (scene.getObjectByName('city_pools').visible = L.lamp > 0.01 && L.dark < 0.999);   // (the decals are the dusk's pools; at night lampLight lights the street)
+  scene.getObjectByName('shop_spill') && (scene.getObjectByName('shop_spill').visible = L.dark < 0.999);
 }
 
 // ------------------------------------------------------------------ the world
@@ -196,20 +197,24 @@ function wallPatch(T) {
   return (sh) => {
     Object.assign(sh.uniforms, {
       rBrickD: { value: T.brickD }, rBrickN: { value: T.brickN }, rConcD: { value: T.concD }, rConcN: { value: T.concN }, rCurtD: { value: T.curtD }, rCurtN: { value: T.curtN },
-      rMean: { value: new THREE.Vector3(T.mean.brickD, T.mean.concD, T.mean.curtD) }, uLit: GLOW.uLit,
+      rMean: { value: new THREE.Vector3(T.mean.brickD, T.mean.concD, T.mean.curtD) }, uLit: GLOW.uLit, uDark: GLOW.uDark,
     });
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec3 aInfo; varying vec3 vInfo; varying vec2 vFac;')
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvInfo = aInfo; vFac = uv;');
     let f = sh.fragmentShader;
     f = rep(f, '#include <common>', `
-      uniform sampler2D rBrickD, rBrickN, rConcD, rConcN, rCurtD, rCurtN; uniform vec3 rMean; uniform float uLit; varying vec3 vInfo; varying vec2 vFac;
+      uniform sampler2D rBrickD, rBrickN, rConcD, rConcN, rCurtD, rCurtN; uniform vec3 rMean; uniform float uLit, uDark; varying vec3 vInfo; varying vec2 vFac;
       ${GLSL_TBN}
       float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       vec3 wEm = vec3(0.0), wEmD = vec3(0.0);   // light given off: wEm only when it is dark (uLit), wEmD always (a sign's own faint colour)
       float wRough = 0.8, wMetal = 0.0, wAO = 1.0; vec3 wNr = vec3(0.5, 0.5, 1.0); vec2 wTilt = vec2(0.0), wUv = vec2(0.0);`);
     f = rep(f, '#include <color_fragment>', `
       float style = vInfo.x, height = vInfo.y, seed = vInfo.z;
+      // (at night, uDark, the building's seed is snapped to a 1/4096 grid: it is one value per building, but its interpolation wobbles in the last bits from
+      // pixel to pixel, and the window hashes below (sin of ~1e4) turn that wobble into a different answer per pixel: every lit facade was a field of
+      // per-pixel speckle. The light is set once per drive, so this never switches while you play; by day and at dusk the seed is as it was)
+      if (uDark > 0.5) seed = floor(seed * 4096.0 + 0.5) / 4096.0;
       vec3 tint = diffuseColor.rgb;
       bool isBrick = style < 0.5, isTower = style > 2.5;
       tint = mix(vec3(rLum(tint)), tint, isTower ? 0.4 : 0.75);     // the comic palette is candy: pull it toward real brick, stucco and glass (glass most), same colour family
@@ -234,7 +239,11 @@ function wallPatch(T) {
         // night: whole floors of the tower are lit, with the odd dark panel (steady, hashed from the panel's place)
         vec2 tid = floor(vFac / vec2(3.1, 3.9)); float tfl = h21(vec2(tid.y, seed * 13.0 + 1.0)), tpc = h21(tid + seed * 91.0);
         float far = smoothstep(1.0, 4.0, max(fwidth(vFac.x), fwidth(vFac.y)));   // a pixel that covers several rooms shows the average, not noise
-        wEm += mix(vec3(1.0, 0.8, 0.52), vec3(0.78, 0.88, 1.0), step(0.6, h21(tid + 9.0 + seed))) * mix(step(0.36, tfl) * step(0.14, tpc), 0.55, far) * pm * (1.0 - band) * 0.7;
+        // at night (uDark) fewer floors are lit (offices empty out), each lit panel at its own level instead of one flat cream band, and a pixel that
+        // covers more than about half a panel already shows the average: the full-strength bands sparkled into noisy white blocks on a phone
+        float farN = mix(far, smoothstep(0.35, 1.5, max(fwidth(vFac.x), fwidth(vFac.y))), uDark);
+        float tLit = step(mix(0.36, 0.55, uDark), tfl) * step(0.14, tpc) * mix(1.0, 0.5 + 0.5 * h21(tid * 1.7 + seed * 7.0 + 3.1), uDark);
+        wEm += mix(mix(vec3(1.0, 0.8, 0.52), vec3(0.78, 0.88, 1.0), step(0.6, h21(tid + 9.0 + seed))), vec3(0.93, 0.83, 0.67), farN * uDark) * mix(tLit, mix(0.55, 0.3, uDark), farN) * mix(pm, 0.8, farN * uDark) * (1.0 - band) * 0.7;
       } else {
         float bay = isTower ? 1.55 : (style > 1.5 ? 2.4 : 3.0), floorH = style > 2.5 ? 3.9 : 3.6;
         vec2 cell = vec2(fract(vFac.x / bay), fract(vFac.y / floorH)), id = vec2(floor(vFac.x / bay), floor(vFac.y / floorH));
@@ -262,8 +271,11 @@ function wallPatch(T) {
         float grd = 1.0 - step(0.5, id.y);
         float roomR = h21(id * 1.31 + seed * 53.0 + 4.7), roomC = h21(id.yx * 2.17 + seed * 29.0 + 1.3);
         vec3 wc = roomC < 0.55 ? vec3(1.0, 0.7, 0.36) : (roomC < 0.85 ? vec3(0.95, 0.88, 0.7) : vec3(0.55, 0.65, 1.0));   // warm bulbs, white, and the odd TV blue
-        float farR = smoothstep(1.0, 4.0, max(fwidth(vFac.x), fwidth(vFac.y)));
-        wEm += wc * win * (1.0 - rim) * mix(step(grd > 0.5 ? 0.12 : 0.5, roomR), grd > 0.5 ? 0.88 : 0.5, farR) * mix(0.6, 1.5, roomR) * (grd > 0.5 ? 1.4 : 1.0);
+        float farR = mix(smoothstep(1.0, 4.0, max(fwidth(vFac.x), fwidth(vFac.y))), smoothstep(0.35, 1.5, max(fwidth(vFac.x), fwidth(vFac.y))), uDark);   // (at night the average sooner: see the towers above)
+        // (at night, uDark, a pixel that covers a room or more gets the rooms' average colour, level and window area: per-room colours and levels
+        // at a pixel or two a room sparkled warm / white / blue across every far facade)
+        float fN = farR * uDark, winA = (hi.x - lo.x) * (hi.y - lo.y);
+        wEm += mix(wc, vec3(0.93, 0.78, 0.55), fN) * mix(win * (1.0 - rim), winA * 0.8, fN) * mix(step(grd > 0.5 ? 0.12 : 0.5, roomR), grd > 0.5 ? 0.88 : 0.5, farR) * mix(mix(0.6, 1.5, roomR), 1.05, fN) * (grd > 0.5 ? 1.4 : 1.0);
         if (grd > 0.5 && style < 2.5) {
           float bw = bay * 2.0, sid = floor(vFac.x / bw);
           vec2 q = (vec2(fract(vFac.x / bw), cell.y) - vec2(0.5, 0.9)) / vec2(0.42, 0.075);
@@ -281,7 +293,8 @@ function wallPatch(T) {
       diffuseColor.rgb *= mix(1.0, 0.8, 1.0 - smoothstep(0.0, 0.25, vFac.y));       // street grime`);
     f = rep(f, '#include <roughnessmap_fragment>', 'roughnessFactor = wRough;');
     f = rep(f, '#include <metalnessmap_fragment>', 'metalnessFactor = wMetal;');
-    f = rep(f, '#include <emissivemap_fragment>', 'totalEmissiveRadiance += wEm * uLit + wEmD;');
+    // (at night, uDark, the rooms and floors give off a little over half the dusk's light: against a dark street the dusk values were flat white blocks; the neon signs keep most of theirs)
+    f = rep(f, '#include <emissivemap_fragment>', 'totalEmissiveRadiance += wEm * uLit * (1.0 - 0.45 * uDark) + wEmD;');
     f = rep(f, '#include <normal_fragment_maps>', `{ vec3 mN = rNormal(wNr.xy, 1.0); mN.xy += wTilt; mN = normalize(mN); normal = normalize(rTBN(-vViewPosition, normal, wUv) * mN); }`, 'replace');
     f = rep(f, '#include <aomap_fragment>', 'reflectedLight.indirectDiffuse *= wAO; reflectedLight.indirectSpecular *= mix(1.0, wAO, 0.6);', 'replace');
     sh.fragmentShader = f;
@@ -393,7 +406,8 @@ export function upgradeCity({ city, T, scene, hero = null }) {
   faceTerrainUp(city);
   if (hero) lightHero(hero, chain);   // the hand-built storefronts: their painted signs and shop windows light up at night
   const pools = lampPools(city, scene); if (pools) scene.add(pools);
-  if (hero) { const spill = shopSpill(hero, city); if (spill) scene.add(spill); }   // soft light pools under the street lamps (streetlight.js)
+  let spill = null; if (hero) { spill = shopSpill(hero, city); if (spill) scene.add(spill); }   // soft light pools under the street lamps (streetlight.js)
+  scene.userData.lampMap = lampLight(city, spill?.userData.spots || []);   // the night's lamp light, applied by the final pass (real-post.js)
   const seen = new Set(), once = (m, tag, fn) => { if (seen.has(m)) return; seen.add(m); (tag === 'walls' ? swap : chain)(m, fn, tag); };
   city.group.traverse((o) => {
     if (!o.isMesh) return;
@@ -409,6 +423,37 @@ export function upgradeCity({ city, T, scene, hero = null }) {
   for (const s of city.surfaces || []) if (s.material?.userData?.wet) once(s.material, 'road', roadPatch(T));
   // the signals: lit lamps pushed above 1 so they bloom
   scene.traverse((o) => { if (o.name === 'signal_lamps') o.material.color.setScalar(o.material.transparent ? 1.6 : 3.4); });
+}
+
+/** call once the traffic signals exist (drive.js, after new Signals: upgradeCity runs before them, so its signal_lamps line above finds nothing) */
+export function upgradeSignals(scene) {
+  scene.traverse((o) => { if (o.name === 'signal_lamps' && o.material.transparent) chain(o.material, signalGlowPatch, 'sigglow'); });
+}
+
+/** the signals' glow (a flat 0.42 m additive disc by day, as before) at night (uDark): a soft radial falloff, 0.6 the size, and never bigger on screen
+ *  than it is at 22 m (closer than that the disc shrinks with the distance), so a signal beside the on-foot camera, which stands at the heads' height,
+ *  is a small glow round the lamp and not a big flat disc */
+function signalGlowPatch(sh) {
+  sh.uniforms.uDark = GLOW.uDark;
+  sh.vertexShader = rep(rep(sh.vertexShader, '#include <common>', 'uniform float uDark; varying float vGlowR;'), '#include <begin_vertex>', `
+    vGlowR = length(position) / 0.42;
+    { vec4 gc = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0); float gk = clamp(-gc.z / 22.0, 0.15, 1.0);
+      transformed *= mix(1.0, 0.6 * gk, uDark); }`);
+  sh.fragmentShader = rep(rep(sh.fragmentShader, '#include <common>', 'uniform float uDark; varying float vGlowR;'), '#include <opaque_fragment>',
+    '{ float gf = 1.0 - clamp(vGlowR, 0.0, 1.0); diffuseColor.a *= mix(1.0, gf * gf * 1.4, uDark); outgoingLight *= mix(1.0, gf * gf * 1.4, uDark); }', 'before');
+}
+
+/** the streetcar rails (tram.js: bright steel, metalness 0.8, roughness 0.32) at night: the moon is the only direct light, and its highlight ran down
+ *  every rail as a blue-white line brighter than the street lamps. At night (uDark) the steel is rougher and duller, so the highlight spreads and fades;
+ *  by day it is untouched */
+export function upgradeRails(mesh) {
+  if (!mesh?.material) return;
+  chain(mesh.material, (sh) => {
+    sh.uniforms.uDark = GLOW.uDark;
+    let f = rep(sh.fragmentShader, '#include <common>', 'uniform float uDark;');
+    f = rep(f, '#include <roughnessmap_fragment>', 'roughnessFactor = mix(roughnessFactor, 0.7, uDark);');
+    sh.fragmentShader = rep(f, '#include <metalnessmap_fragment>', 'metalnessFactor = mix(metalnessFactor, 0.35, uDark); diffuseColor.rgb *= 1.0 - 0.5 * uDark;');
+  }, 'rails');
 }
 
 // ------------------------------------------------------------------ the player's car
@@ -451,6 +496,24 @@ export function upgradeCar(carModel, T) {
 }
 
 /** the bully is made from the player's material by cloning it (drive.js makePerson), so anything the player's look needs goes here, first */
+/** you and the bully at night (uDark): their own albedo lifted a little and a cool rim where the body turns away from the camera, so a runner on a dark
+ *  road reads as a figure and not a black cut-out (the on-foot camera looks down on them from behind, mostly at the unlit side). Steady; by day
+ *  and through the pink dusk (uDark 0) nothing changes. Call after the bully's recolour material exists (chain keeps it). */
+export const PEOPLE_NIGHT = { lift: 0.14, rim: 1.1, cool: 0.03 };
+export function lightPeople(roots) {
+  const seen = new Set();
+  for (const root of roots) root.traverse((o) => {
+    const m = o.isMesh && o.material; if (!m || seen.has(m)) return; seen.add(m);
+    chain(m, (sh) => {
+      sh.uniforms.uDark = GLOW.uDark;
+      let f = rep(sh.fragmentShader, '#include <common>', 'uniform float uDark;');
+      sh.fragmentShader = rep(f, '#include <emissivemap_fragment>', `
+        { float fr = 1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0); fr *= fr;
+          totalEmissiveRadiance += uDark * ((diffuseColor.rgb * (${PEOPLE_NIGHT.lift.toFixed(3)} + ${PEOPLE_NIGHT.rim.toFixed(3)} * fr)) * vec3(0.8, 0.86, 1.0) + ${PEOPLE_NIGHT.cool.toFixed(3)} * fr * vec3(0.6, 0.7, 1.0)); }`);
+    }, 'people_night');
+  });
+}
+
 export function upgradeCharacter(root) {
   root.traverse((o) => { if (o.isMesh && o.material?.isMeshStandardMaterial) { o.material.roughness = 0.82; o.material.envMapIntensity = 0.85; } });
 }

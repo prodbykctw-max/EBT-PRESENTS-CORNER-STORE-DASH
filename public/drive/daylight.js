@@ -19,7 +19,10 @@ export const AUBURN = { lat: 33.75541, lon: -84.37772 };
 const D2R = Math.PI / 180, ZONE = 'America/New_York';
 
 /** the shared glow numbers: 0 = daylight, 1 = fully lit (windows and signs: lit; lamps and headlights: lamp) */
-export const GLOW = { uLit: { value: 0 }, uLamp: { value: 0 }, uPoolK: { value: 1 } };   // (uPoolK: the lamp pools are stronger on wet roads)
+export const GLOW = { uLit: { value: 0 }, uLamp: { value: 0 }, uPoolK: { value: 1 }, uDark: { value: 0 } };   // (uPoolK: the lamp pools are stronger on wet roads)
+// uDark: 0 until the pink dusk is over (sun at -4.2 degrees), 1 from -7.5 down (blue hour and night). The night treatment (lamp light that falls on
+// the street from the depth buffer instead of flat decals, softer signal and hazard glows, tamer windows, matte rails under the moon, the night
+// ambient) is weighted by it, so day, golden hour and the pink dusk are exactly what they were.
 
 // ------------------------------------------------------------------ the sun
 /** NOAA solar position: { el, az } in degrees (az clockwise from north), refraction included. `date` is a Date or ms since 1970 (UTC). */
@@ -98,8 +101,8 @@ export const atlantaClock = (t) => new Intl.DateTimeFormat('en-US', { timeZone: 
 //   envSat: how much of the sky's colour the ambient keeps; ex: exposure; sat / con / tint: the final pass's grade
 const DAWN = [0x6f93d0, 0x93aede, 0xbdb8e0, 0xf0c4bc, 0xffdcb4];   // zenith to horizon
 const KEYS = [
-  { el: -18, sky: [0x040818, 0x060c20, 0x0a1230, 0x101a3a, 0x1a2646], sun: 0x000000, sunI: 0, hemi: 0x2c3c74, hemiG: 0x16161f, hemiI: 0.4, env: 0.36, envSat: 0.4, ex: 1.34, sat: 0.95, con: 0.1, tint: 0x9aa8d0, cloud: 0x10141f },
-  { el: -10, sky: [0x0b1236, 0x131b48, 0x1f2658, 0x40306a, 0x6a3a6c], sun: 0x000000, sunI: 0, hemi: 0x3a4a80, hemiG: 0x1c1a24, hemiI: 0.5, env: 0.45, envSat: 0.4, ex: 1.32, sat: 1.02, con: 0.1, tint: 0xb4b0d6, cloud: 0x2a2a46 },
+  { el: -18, sky: [0x040818, 0x060c20, 0x0a1230, 0x101a3a, 0x1a2646], sun: 0x000000, sunI: 0, hemi: 0x5c6a94, hemiG: 0x3a3430, hemiI: 0.95, env: 0.6, envSat: 0.4, ex: 1.5, sat: 0.95, con: 0.1, tint: 0x9aa8d0, cloud: 0x10141f },
+  { el: -10, sky: [0x0b1236, 0x131b48, 0x1f2658, 0x40306a, 0x6a3a6c], sun: 0x000000, sunI: 0, hemi: 0x5c6a96, hemiG: 0x3a3434, hemiI: 0.95, env: 0.6, envSat: 0.4, ex: 1.42, sat: 1.02, con: 0.1, tint: 0xb4b0d6, cloud: 0x2a2a46 },
   { el: -6.5, sky: [0x1a1446, 0x2d2468, 0x5a3584, 0xa24a86, 0xe0607a], sun: 0x000000, sunI: 0, hemi: 0x7a729c, hemiG: 0x2e2a34, hemiI: 0.7, env: 0.55, envSat: 0.3, ex: 1.28, sat: 1.1, con: 0.12, tint: 0xe0b8c8, cloud: 0x7a4a80 },
   { el: -3, sky: [0xd81ea6, 0xf83a88, 0xfb6070, 0xfc9f48, 0xfece28], sun: 0xff7a40, sunI: 0.0, hemi: 0xb09cb4, hemiG: 0x8a6a6c, hemiI: 1.2, env: 0.85, envSat: 0.22, ex: 1.28, sat: 1.04, con: 0.12, tint: 0xffe2cc, cloud: 0xff6a8a },
   { el: 0, sky: [0x5a3aa6, 0xc03a8c, 0xf0586c, 0xff8a40, 0xffb23c], sun: 0xff6a30, sunI: 3.0, hemi: 0xb0a0a8, hemiG: 0x5a4c4c, hemiI: 0.9, env: 0.7, envSat: 0.25, ex: 1.14, sat: 1.12, con: 0.12, tint: 0xffc89a, cloud: 0xff7a5a },
@@ -146,11 +149,11 @@ export function lightFor(t, w = { cloud: 10, rain: 0, code: 0 }) {
   // dawn is not dusk run backwards: the sun is in the east and the sky is cool and pale, a peach / lavender horizon under a pale blue zenith, not the dusk's magenta
   const dawnW = (az < 180 ? 1 : 0) * smooth(-9, -4, el) * (1 - smooth(3, 11, el));
   if (dawnW > 0) { DAWN.forEach((h, k) => sky[k].lerp(col(h), dawnW * 0.88)); }                  // 0 until the end of civil twilight, 1 at night
-  const moonI = 0.9 * night * (1 - grey * 0.5);
+  const moonI = 0.5 * night * (1 - grey * 0.5);   // (a soft moon: at 0.9 it was the night's main light, with daylight-sharp tree shadows and a glint down every rail)
   const sunDir = sunVector(el, az);
   const useSun = el > -2.5;
   const lightDir = useSun ? sunVector(Math.max(el, 7), az) : MOON.clone();
-  const lit = 1 - smooth(-5, 1.5, el), lamp = 1 - smooth(-4, 2.5, el);
+  const lit = 1 - smooth(-5, 1.5, el), lamp = 1 - smooth(-4, 2.5, el), dark = smooth(-4.2, -7.5, el);
   const phase = el > 28 ? 'day' : el > 12 ? 'afternoon' : el > 4 ? 'golden hour' : el > 0 ? 'sunset' : el > -6.5 ? 'dusk' : el > -12 ? 'blue hour' : 'night';
   const zenith = sky[0].clone(), horizon = sky[4].clone();
   return {
@@ -159,6 +162,6 @@ export function lightFor(t, w = { cloud: 10, rain: 0, code: 0 }) {
     hemiSky: c.hemi.clone(), hemiGround: c.hemiG.clone(), hemiI: num.hemiI * (1 + 0.11 * cloud),
     env: num.env * (1 + 0.11 * grey), envSat: num.envSat, exposure: num.ex + cloud * 0.15 * dayW,
     sky, zenith, horizon, haze: horizon.clone().lerp(zenith, 0.3).multiplyScalar(0.8),
-    sat: num.sat - 0.12 * dawnW, con: num.con, tint: raw(A.tint).lerp(raw(B.tint), f), cloudTint: c.cloud, lit, lamp,
+    sat: num.sat - 0.12 * dawnW, con: num.con, tint: raw(A.tint).lerp(raw(B.tint), f), cloudTint: c.cloud, lit, lamp, dark,
   };
 }

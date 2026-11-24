@@ -26,6 +26,7 @@ import { WIND, NEAR_CUT } from './landscape.js';
 import { Guide } from './guide.js';
 import { ImpactFX } from './fx.js';
 import { fetchWeather, applyWeather, relight } from './weather.js';
+import { GLOW } from './daylight.js';
 import { warm } from './warm.js';
 import * as SkeletonUtils from './vendor/SkeletonUtils.js';
 import { makeBullyMaterial, makeRunClip, makeStandClip, addArmSwing, ARMS, MODEL_H, PLAYER_H, BULLY_H } from './people.js';
@@ -327,7 +328,9 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   world.shadowBox = { dir: sun.userData.dir || new THREE.Vector3(-0.5, 0.8, 0.35), half: () => Math.max(sun.shadow.camera.right, sun.shadow.camera.top) };
   const car = new RunnerCar(route, 4);
   const signals = world.signals = new Signals({ route, nodes: city.signals, marks: city.streets.routeMarks, scene });
+  if (RL) RL.upgradeSignals(scene);   // the realistic look's night signal glow: soft and small (real.js signalGlowPatch; by day as before)
   const trams = world.trams = new Streetcars({ W, route, ground, surfAt, scene, props: props.scene, world, audio });
+  if (RL) RL.upgradeRails(scene.getObjectByName('tram_rails'));   // the realistic look: matte rails at night, no moonlit blue-white lines (real.js)
   const onRouteRoad = (x, y) => roadSurface.top(x, -y, ground(x, y) + 1.2)?.name === 'route_road';
   if (frozen()) await macrotask();
   // what people's feet stand on (the crowd, dogs, water sellers): the road surface, and the curbs along the route. (The curbs
@@ -741,6 +744,14 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const hazards = new THREE.Group();
   for (const [x, z] of [[-0.82, 2.15], [0.82, 2.15], [-0.8, -2.2], [0.8, -2.2]]) { const sp = new THREE.Sprite(hazardMat); sp.position.set(x, 0.78, z); sp.scale.setScalar(0.9); hazards.add(sp); }
   carRig.add(hazards); hazards.visible = !SKIPFOOT;
+  // the hazards' swell (0.8 a second, smooth). At night in the realistic look (GLOW.uDark) the lamps are under half the size and a little dimmer:
+  // the 0.9 m glow that reads by day was a big orange blob beside the camera at night
+  let hazK = -1;
+  const hazardGlow = (now) => {
+    const k = RL ? GLOW.uDark.value : 0;
+    hazardMat.opacity = (0.6 + 0.3 * Math.sin(now / 1000 * Math.PI * 1.6)) * (1 - 0.3 * k);
+    if (k !== hazK) { hazK = k; for (const sp of hazards.children) sp.scale.setScalar(0.9 * (1 - 0.55 * k)); }
+  };
   const youMarker = makeLabel('▼', '#ffd400'); youMarker.material.depthTest = false; youMarker.renderOrder = 5;
   const markerSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: youMarker.material.map, transparent: true, depthTest: false, toneMapped: false }));
   markerSprite.scale.set(1.3, 1.3, 1); markerSprite.position.set(0, 2.9, 0); markerSprite.renderOrder = 5; carRig.add(markerSprite); markerSprite.visible = !SKIPFOOT;
@@ -795,6 +806,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const me = await makePerson(false);
   if (frozen()) await macrotask();
   const him = await makePerson(true);
+  if (RL) RL.lightPeople([me.o, him.o]);   // the realistic look: you and the bully readable at night (real.js; nothing changes by day)
   if (frozen()) await macrotask();
 
   // ---------- the line you run along ----------
@@ -1390,7 +1402,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
         if (state === 'onfoot') updateFoot(FIXED); else updateHimLeft(FIXED);   // (getIn() may put you in the car mid-way)
       }
       const al = footAcc / FIXED;
-      if (state === 'onfoot') { posePerson(me, dt, al); focus.x = fly ? flyFocus.x : me.gx; focus.y = fly ? -flyFocus.z : me.gy; focus.z = fly ? flyFocus.y : me.zs; world.focus = crowd.focus = focus; hazardMat.opacity = 0.6 + 0.3 * Math.sin(now / 1000 * Math.PI * 1.6); markerSprite.position.y = 2.9 + Math.sin(now / 180) * 0.15; }
+      if (state === 'onfoot') { posePerson(me, dt, al); focus.x = fly ? flyFocus.x : me.gx; focus.y = fly ? -flyFocus.z : me.gy; focus.z = fly ? flyFocus.y : me.zs; world.focus = crowd.focus = focus; hazardGlow(now); markerSprite.position.y = 2.9 + Math.sin(now / 180) * 0.15; }
       if (him.o.visible) posePerson(him, dt, al);
     }
     if (race && state === 'driving') updateRace(dt);
