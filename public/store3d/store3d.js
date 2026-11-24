@@ -36,7 +36,7 @@ function guardRandom() {
 function withoutRandom(fn) { const real = Math.random; Math.random = isoRandom; try { return fn(); } finally { Math.random = real; } }
 const yieldNow = () => new Promise((r) => setTimeout(r, 0));
 const lap = (o, k) => { const t = performance.now(); o[k] = Math.round(t - (o._t || t)); o._t = t; };   // how long each build step held the page (init().timings)   // init() gives the page back between its big steps (the how-to-play stays responsive)
-const KEY_DIR = new THREE.Vector3(-0.42, 1.0, -0.62).normalize();        // toward the key light (north-west, high): shadows fall south-east
+const KEY_DIR = new THREE.Vector3(-0.3, 1.0, -0.45).normalize();         // toward the key light: high up like the ceiling lights, a little north-west so shadows are shorter than before but clearly there (Nov 23 2026, owner: overhead light with real shadows; was -0.42, 1.0, -0.62: long diagonal shadows)
 
 /** The store's light and colour, one line to edit. key / hemi / env: the ceiling light, the fill and the reflections; ex: exposure (overall
  *  brightness); lm: the light pools baked on the floor; bloom / bt: how much the brightest things glow and how bright they must be to glow;
@@ -108,7 +108,7 @@ export class Store3D {
     const key = this.key = new THREE.DirectionalLight(0xffe9c8, 2.0); key.castShadow = true; this.scene.add(key, key.target);
     const W = m(layout.board.w), Hh = m(layout.board.h), c = new THREE.Vector3(W / 2, 0, Hh / 2), sz = this.mobile ? 2048 : 4096;
     key.shadow.mapSize.set(sz, sz); Object.assign(key.shadow.camera, { left: -23, right: 23, top: 23, bottom: -23, near: 1, far: 160 });
-    key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03; key.shadow.radius = 2; key.shadow.intensity = 0.9;
+    key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03; key.shadow.radius = 2; key.shadow.intensity = 1.0;
     key.target.position.copy(c); key.position.copy(c).addScaledVector(KEY_DIR, 70); key.target.updateMatrixWorld(); key.updateMatrixWorld(); key.shadow.camera.updateProjectionMatrix();
     key.shadow.autoUpdate = false; key.shadow.needsUpdate = true;   // static: drawn on the first frame only
     lap(TM, 'structureLights'); await yieldNow(); this.buildSidewalk(concD, concN); lap(TM, 'sidewalk'); this.buildDecals(whiteUV); lap(TM, 'decals'); await yieldNow(); this.buildItems(); this.buildHighlight(); lap(TM, 'items');
