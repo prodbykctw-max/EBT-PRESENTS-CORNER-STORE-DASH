@@ -45,6 +45,89 @@ const KEY_DIR = new THREE.Vector3(-0.42, 1.0, -0.62).normalize();        // towa
 // (Nov 23 2026: the owner asked for the look of the first 3D sheets he was shown back, in place of the darker, richer grade of Nov 17.
 //  These are that preview's values. The bloom stays the store's own, 0.22 over a 1.9 threshold, so the floor does not wash out to white.)
 export const TUNE = { key: 1.9, hemi: 0.28, env: 0.5, ex: 0.85, lm: 1.0, bloom: 0.22, bt: 1.9, sat: 1.04, con: 0.1 };
+/**
+ * The store's lighting look, ONE line to edit: 'now' (today's look, exactly as before this switch existed), 'dusk', 'night' or 'blackout'.
+ * ?storelight=dusk|night|blackout on the page (the game or the preview) beats this; nothing else changes it. The three after-hours looks
+ * are the in-store "Dusk / Night / Blackout" passes the owner was shown over the painted store on Oct 15, rebuilt as real 3D light (LIGHT_LOOKS).
+ */
+export const STORE_LIGHT = 'now';
+/**
+ * The after-hours looks. tune: the store's TUNE for that look (lower ceiling key light, fill and reflections; the floor's baked "now" pools
+ * mostly off). strip: the ceiling strip lights over the aisles (how strong, how wide their pool is across the aisle, metres); pool: the soft
+ * light the player carries (strength, radius m), bpool the fainter one round the bully (he must read in the dark too); item / pay: the steady pools on the live pickup and on the PAY spots once the list is done;
+ * screen: the checkout screens' blue spill; glow: how much brighter the things that glow anyway are (screens, lamps, the pink aisle signs, the
+ * PAY panels, the tubes); fill: [player, bully] a light from the camera's side on the two people only, so they always read; vig: the dark edge of the picture (0..1); soft:
+ * how soft the parts of the picture far from the player go (0..1). Every light is STEADY: nothing here flickers, blinks or pulses.
+ */
+export const LIGHT_LOOKS = {
+  now: null,
+  dusk: { tune: { key: 0.8, hemi: 0.12, env: 0.2, ex: 0.85, lm: 0.12, bloom: 0.28, bt: 1.5, sat: 0.93, con: 0.12 }, strip: [1.35, 1.0], pool: [0.9, 2.2], bpool: [0.35, 1.5], item: 1.3, pay: 1.0, screen: 1.4, glow: 1.15, fill: [0.25, 0.6], vig: 0.32, soft: 0 },
+  night: { tune: { key: 0.22, hemi: 0.035, env: 0.06, ex: 0.85, lm: 0.0, bloom: 0.34, bt: 1.2, sat: 0.87, con: 0.14 }, strip: [1.35, 0.85], pool: [1.2, 2.0], bpool: [0.6, 1.5], item: 1.8, pay: 1.3, screen: 2.0, glow: 1.4, fill: [0.6, 1.4], vig: 0.48, soft: 0.4 },
+  blackout: { tune: { key: 0.035, hemi: 0.008, env: 0.016, ex: 0.85, lm: 0.0, bloom: 0.4, bt: 1.0, sat: 0.82, con: 0.16 }, strip: [0.85, 0.68], pool: [1.5, 1.9], bpool: [0.8, 1.5], item: 2.3, pay: 1.7, screen: 2.4, glow: 1.6, fill: [0.8, 1.9], vig: 0.62, soft: 0.5 },
+};
+/** which look this page asks for: ?storelight= beats the option, the option beats STORE_LIGHT */
+export function storeLightName(opt) {
+  let q = null; try { q = new URLSearchParams(location.search).get('storelight'); } catch (e) {}
+  const n = (q || opt || STORE_LIGHT || 'now').toLowerCase();
+  return n in LIGHT_LOOKS ? n : 'now';
+}
+/**
+ * The after-hours light sources, in board px (the painted store's own light rig, measured off the board art on Oct 15: the strips run down
+ * the walkways the pickups spawn in, so the aisle you are shopping is the aisle that is lit). [x, y, w, warm (1) or cool (0) white, strength]
+ */
+const STRIPS = [[430, 300, 620, 1, 1.0], [430, 520, 620, 1, 0.72], [430, 700, 620, 1, 1.0], [430, 890, 620, 1, 0.72], [430, 1075, 620, 1, 0.96], [430, 1262, 620, 1, 0.68], [430, 1450, 620, 1, 0.88], [420, 1580, 700, 0, 0.8]];
+const STRIP_Y = 2.6, NS = 8, NP = 11;
+/** the light's colour (linear) per kind */
+const SLC = { warm: new THREE.Color(1.0, 0.86, 0.66), cool: new THREE.Color(0.68, 0.8, 1.0), screen: new THREE.Color(0.25, 0.55, 1.0), exit: new THREE.Color(1.0, 0.3, 0.12), pool: new THREE.Color(1.0, 0.84, 0.62), item: new THREE.Color(1.0, 0.72, 0.25), pay: new THREE.Color(0.25, 1.0, 0.45) };
+/**
+ * The after-hours light, added to every lit material of the store (shelves, products, floor, walls, signs, the two people, the pickups):
+ * real per-pixel light from each ceiling strip (a line light: its pool falls off across the aisle and past the strip's ends, and it lights
+ * whatever faces it, so the shelf fronts under a strip are lit and the floor between the aisles goes dark) and from a few small sources
+ * (the player's pool, the bully's fainter one, the live pickup, the PAY spots, the checkout screens, the EXIT sign). The loop is a fixed 19 lights, all in one
+ * uniform block: no extra draw call, no texture, nothing rebuilt per frame. The floor's AO map shades it at the shelf feet.
+ */
+const SL_GLSL = `
+uniform vec4 uSLS[${NS}]; uniform vec4 uSLSC[${NS}]; uniform vec4 uSLP[${NP}]; uniform vec4 uSLPC[${NP}]; uniform float uSLGlow, uSLFill;
+vec3 slIrr(vec3 p, vec3 n) {
+  vec3 s = vec3(0.0);
+  for (int i = 0; i < ${NS}; i++) { vec4 L = uSLS[i], C = uSLSC[i]; if (C.w <= 0.0) continue;
+    vec3 d = vec3(clamp(p.x, L.x, L.y), L.w, L.z) - p; float h2 = d.x * d.x + d.z * d.z;
+    s += C.rgb * exp(-h2 / (C.w * C.w)) * clamp(dot(n, normalize(d)) * 0.8 + 0.2, 0.0, 1.0); }
+  for (int i = 0; i < ${NP}; i++) { vec4 P = uSLP[i], C = uSLPC[i]; if (P.w <= 0.0) continue;
+    vec3 d = P.xyz - p; float h2 = d.x * d.x + d.z * d.z;
+    s += C.rgb * exp(-h2 / (P.w * P.w)) * clamp(dot(n, normalize(d)) * 0.8 + 0.2, 0.0, 1.0); }
+  return s;
+}`;
+const SL_FRAG = `#include <aomap_fragment>
+{ vec3 slP = transpose(mat3(viewMatrix)) * (-vViewPosition - viewMatrix[3].xyz), slN = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
+  float slAO = 1.0;
+  #ifdef USE_AOMAP
+  slAO = ambientOcclusion;
+  #endif
+  vec3 slAlb = material.diffuseColor + 0.25 * material.specularColor;
+  reflectedLight.directDiffuse += (slIrr(slP, slN) * slAO + uSLFill * (0.35 + 0.65 * max(normal.z, 0.0))) * BRDF_Lambert(slAlb);
+  totalEmissiveRadiance *= uSLGlow; }`;
+/** the store's final pass (its own RealLook, not the drive's) gets a vignette and a soft focus away from the player, in the same pass */
+const SL_FIN = [
+  ['uniform vec3 uHaze', 'uniform float uSLVig, uSLSoft, uSLAsp; uniform vec2 uSLFocus, uSLPx;\n  uniform vec3 uHaze'],
+  ['vec3 col = texture2D(tColor, vUv).rgb;', `vec3 col = texture2D(tColor, vUv).rgb;
+    { vec2 fd = (vUv - uSLFocus) * vec2(uSLAsp, 1.0); float far = smoothstep(0.16, 0.5, length(fd * vec2(0.8, 1.0))) * uSLSoft;
+      if (far > 0.002) { vec2 o = uSLPx * (0.75 + 1.75 * far);
+        vec3 b = texture2D(tColor, vUv + vec2(o.x, o.y)).rgb + texture2D(tColor, vUv + vec2(-o.x, o.y)).rgb + texture2D(tColor, vUv + vec2(o.x, -o.y)).rgb + texture2D(tColor, vUv - o).rgb;
+        col = mix(col, b * 0.25, far); } }`],
+  ['if (uBloomOn > 0.5) col += texture2D(tBloom, vUv).rgb * uBloom;', `if (uBloomOn > 0.5) col += texture2D(tBloom, vUv).rgb * uBloom;
+    { vec2 vv = (vUv - 0.5) * vec2(uSLAsp, 1.0) * 2.0; col *= 1.0 - uSLVig * 0.62 * smoothstep(0.35, 1.25, length(vv)); }`],
+];
+/** a lit material takes the after-hours light (SL_GLSL): its own glow multiplier and fill, the shared light uniforms; its old shader patch runs first */
+function addStoreLight(mat, U, glow, fill) {
+  if (mat.userData.sl) return;
+  const own = mat.userData.sl = { uSLGlow: { value: glow }, uSLFill: { value: fill } }, prev = mat.onBeforeCompile, k0 = mat.customProgramCacheKey();
+  mat.onBeforeCompile = function (sh, r) {
+    prev.call(this, sh, r); Object.assign(sh.uniforms, U, own);
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + SL_GLSL).replace('#include <aomap_fragment>', SL_FRAG);
+  };
+  mat.customProgramCacheKey = () => k0 + '|store-light'; mat.needsUpdate = true;
+}
 /** The pickups' size: the pickups' own models (pickups.js) are held to ITEM_W m across; the gold ring is 1.3 m. */
 const ITEM_W = 1.05, ITEM_LOAD_MS = 15000;
 /**
@@ -61,11 +144,13 @@ const ITEM_MODELS = {
   'RICE & BEANS': { parts: [{ keep: 0, at: [-0.22, 0, 0] }, { glb: 'beans', s: 3.04, rot: [0, 0, 0], at: [0.34, 0, 0] }] },
 };
 export class Store3D {
-  constructor(canvas, { layout, base = new URL('../drive/', import.meta.url).href, mobile = false, pixelRatio } = {}) {
+  constructor(canvas, { layout, base = new URL('../drive/', import.meta.url).href, mobile = false, pixelRatio, light } = {}) {
     this._unguard = guardRandom();   // until init() is over (see guardRandom)
-    try { this._make(canvas, { layout, base, mobile, pixelRatio }); } catch (e) { this._unguard(); throw e; }
+    try { this._make(canvas, { layout, base, mobile, pixelRatio, light }); } catch (e) { this._unguard(); throw e; }
   }
-  _make(canvas, { layout, base, mobile, pixelRatio }) {
+  _make(canvas, { layout, base, mobile, pixelRatio, light }) {
+    this.lightName = storeLightName(light); this.lightLook = LIGHT_LOOKS[this.lightName];   // the lighting look (STORE_LIGHT; 'now' adds nothing at all)
+    this.tune0 = { ...TUNE, ...(this.lightLook ? this.lightLook.tune : {}) };              // the TUNE this look starts from (the preview's ?key= etc. override it)
     this.layout = layout; this.base = base; this.mobile = mobile; this.canvas = canvas; this.t = 0;
     const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     r.info.autoReset = false; r.setPixelRatio(pixelRatio ?? Math.min(devicePixelRatio, mobile ? 1.5 : 2));
@@ -113,13 +198,14 @@ export class Store3D {
     key.shadow.autoUpdate = false; key.shadow.needsUpdate = true;   // static: drawn on the first frame only
     lap(TM, 'structureLights'); await yieldNow(); this.buildSidewalk(concD, concN); lap(TM, 'sidewalk'); this.buildDecals(whiteUV); lap(TM, 'decals'); await yieldNow(); this.buildItems(); this.buildHighlight(); lap(TM, 'items');
     await Promise.all([this.loadPeople(), this.loadItemModels()]); lap(TM, 'people'); await yieldNow();
+    if (this.lightLook) this.buildLight();   // an after-hours look (STORE_LIGHT / ?storelight=): its strips, pools and glows
     this.applyTune();   // the store's light and colour (TUNE): the game uses exactly what the preview page shows
     this.resize(this.view.w, this.view.h);
     return this;
   }
 
-  applyTune(t = TUNE) {
-    t = { ...TUNE, ...t };
+  applyTune(t = this.tune0) {
+    t = { ...this.tune0, ...t };
     this.look.m.fin.uniforms.uSat.value = t.sat; this.look.m.fin.uniforms.uContrast.value = t.con;
     this.key.intensity = t.key; this.hemi.intensity = t.hemi; this.scene.environmentIntensity = t.env; this.renderer.toneMappingExposure = t.ex; this.mats.floor.lightMapIntensity = t.lm;
     this.look.m.fin.uniforms.uBloom.value = t.bloom; this.look.m.pre.uniforms.uThreshold.value = t.bt; this.look.m.pre.uniforms.uKnee.value = 0.5;
@@ -375,12 +461,64 @@ export class Store3D {
   project(x, y, z) { const v = new THREE.Vector3(x, y, z).project(this.camera); return [(v.x * 0.5 + 0.5) * this.view.w, (-v.y * 0.5 + 0.5) * this.view.h]; }
   /** draw a frame. dt advances the store's own clock; or pass t (the game's clock) to set it, so the 2D layers above can match the bob */
   render(dt = 0, motion = true, t = null) {
-    this.t = t == null ? this.t + dt : t;
+    const t0 = this.t; this.t = t == null ? this.t + dt : t;
+    if (this.lightLook) this.updateLight(Math.max(0, Math.min(0.25, this.t - t0)));
     // the pickups' ring: a slow smooth swell (0.5 a second, never a hard on/off); the product bobs gently. Reduced motion: both still.
     const sw = motion ? 0.5 + 0.5 * Math.sin(this.t * Math.PI) : 0.5;
     for (const g of this.items) if (g.visible) { g.userData.ring.material.opacity = 0.55 + 0.25 * sw; g.userData.inner.position.y = 0.32 + (motion ? 0.05 * Math.sin(this.t * Math.PI * 0.9) : 0); }
     this.renderer.info.reset();
     withoutRandom(() => { this.renderShadows(); this.look.render(); });
+  }
+  /**
+   * An after-hours look (LIGHT_LOOKS): the strip fixtures over the aisles (one mesh, they glow), the light sources' uniforms, every lit
+   * material of the store patched to take that light (addStoreLight), and the final pass's vignette and soft focus. Runs once, at the end
+   * of init(), before anything is compiled; 'now' never calls it, so 'now' is the store exactly as it was.
+   */
+  buildLight() {
+    const LK = this.lightLook, info = this.structure.info, w = this.atlas.cell('white'), wd = [(w[0] + w[2]) / 2, (w[1] + w[3]) / 2];
+    const v4 = (n) => Array.from({ length: n }, () => new THREE.Vector4());
+    const U = this.slU = { uSLS: { value: v4(NS) }, uSLSC: { value: v4(NS) }, uSLP: { value: v4(NP) }, uSLPC: { value: v4(NP) } };
+    const buf = new GeoBuf();
+    STRIPS.forEach(([bx, by, bw, warm, k], i) => {
+      const x0 = m(bx - bw / 2), x1 = m(bx + bw / 2), z = m(by), c = warm ? SLC.warm : SLC.cool, I = LK.strip[0] * k;
+      U.uSLS.value[i].set(x0, x1, z, STRIP_Y); U.uSLSC.value[i].set(c.r * I, c.g * I, c.b * I, LK.strip[1] * (warm ? 1 : 1.35));
+      // the fixture: a lit diffuser tube (it glows; seen from the camera's 45 degrees as a bright line over the aisle) with dark end caps
+      buf.box([warm ? '#fff0d8' : '#e4eeff', 0.4, 0, 1.35], x0 + 0.06, STRIP_Y - 0.02, z - 0.035, x1 - 0.06, STRIP_Y + 0.025, z + 0.035, { skip: '', white: wd });
+      for (const xe of [x0, x1 - 0.06]) buf.box(['#2a2d36', 0.5, 0.4], xe, STRIP_Y - 0.03, z - 0.05, xe + 0.06, STRIP_Y + 0.035, z + 0.05, { skip: '', white: wd });
+    });
+    const tubes = this.strips = new THREE.Mesh(buf.build(), paintMaterial(this.atlas.map, { envMapIntensity: 0.3 })); tubes.name = 'storelight:strips'; tubes.castShadow = false; tubes.receiveShadow = false; this.root.add(tubes);
+    // the fixed small sources: the three checkout screens (blue) and the EXIT sign over the north door (warm red)
+    const P = U.uSLP.value, C = U.uSLPC.value, put = (i, x, y, z, r, col, I) => { P[i].set(x, y, z, r); C[i].set(col.r * I, col.g * I, col.b * I, 0); };
+    info.fixtures.filter((f) => f.kind === 'checkout').slice(0, 3).forEach((f, i) => { const [, , x1, z1] = f.box; put(5 + i, x1 - 1.0, 1.7, z1 - 0.75, 1.5, SLC.screen, LK.screen); });
+    put(8, info.exit.x, 2.5, info.exit.z + 0.9, 1.5, SLC.exit, LK.screen * 0.55);
+    this.slState = { item: 0, itemId: null, old: 0, pay: 0 };
+    // every lit material: the people keep a little fill light of their own (they must always read), the glowing things glow more
+    const people = new Map(); for (const [who, a] of Object.entries(this.actors)) a.o.traverse((q) => { if (q.isMesh && q.name !== 'xray') (Array.isArray(q.material) ? q.material : [q.material]).forEach((mm) => people.set(mm, who === 'bully' ? LK.fill[1] : LK.fill[0])); });
+    this.scene.traverse((o) => { if (!o.isMesh) return; for (const mm of Array.isArray(o.material) ? o.material : [o.material]) if (mm && mm.isMeshStandardMaterial) addStoreLight(mm, U, people.has(mm) ? 1 : LK.glow, people.get(mm) || 0); });
+    const fin = this.look.m.fin;
+    for (const [a, b] of SL_FIN) { if (!fin.fragmentShader.includes(a)) throw new Error('store light: the final pass changed'); fin.fragmentShader = fin.fragmentShader.replace(a, b); }
+    Object.assign(fin.uniforms, { uSLVig: { value: LK.vig }, uSLSoft: { value: LK.soft }, uSLAsp: { value: 1 }, uSLFocus: { value: new THREE.Vector2(0.5, 0.45) }, uSLPx: { value: new THREE.Vector2(0.001, 0.001) } }); fin.needsUpdate = true;
+  }
+  /** per frame: the player's pool goes where he is (smoothly: he is drawn between steps), the pickup's and the PAY spots' pools ease in and out */
+  updateLight(dt) {
+    const LK = this.lightLook, U = this.slU, P = U.uSLP.value, C = U.uSLPC.value, S = this.slState, pl = this.actors.player;
+    const set = (i, x, y, z, r, col, I) => { P[i].set(x, y, z, I > 0.002 ? r : 0); C[i].set(col.r * I, col.g * I, col.b * I, 0); };
+    const ease = (v, to, tc) => v + (to - v) * (dt > 0 ? 1 - Math.exp(-dt / tc) : 0);
+    if (pl && pl.g.visible) { const p = pl.g.position; set(0, p.x, 2.4, p.z + 1.3, LK.pool[1], SLC.pool, LK.pool[0]); } else P[0].w = 0;
+    const bu = this.actors.bully; if (bu && bu.g.visible) { const p = bu.g.position; set(10, p.x, 2.4, p.z + 1.3, LK.bpool[1], SLC.pool, LK.bpool[0]); } else P[10].w = 0;
+    // the live pickup: when it changes, the old pool fades out where it was (slot 9) while the new one fades in (never a hard on/off)
+    const vis = this.items.filter((g) => g.visible), it = vis.length === 1 ? vis[0] : null, id = it ? it.userData.id : null;
+    if (id !== S.itemId) { if (S.itemPos && S.item > 0.002) { S.old = S.item; S.oldPos = S.itemPos; } S.item = 0; S.itemId = id; }
+    if (it) S.itemPos = it.position.clone();
+    S.item = ease(S.item, it ? 1 : 0, 0.3); S.old = ease(S.old, 0, 0.3);
+    if (S.itemPos) set(1, S.itemPos.x, 1.9, S.itemPos.z + 0.9, 1.25, SLC.item, LK.item * S.item); else P[1].w = 0;
+    if (S.oldPos) set(9, S.oldPos.x, 1.9, S.oldPos.z + 0.9, 1.25, SLC.item, LK.item * S.old); else P[9].w = 0;
+    S.pay = ease(S.pay, this.padMesh.visible ? 1 : 0, 0.4);
+    this.layout.PADS.slice(0, 3).forEach(([x0, y0, x1, y1], i) => set(2 + i, m((x0 + x1) / 2), 1.6, m((y0 + y1) / 2) + 0.6, 1.05, SLC.pay, LK.pay * S.pay));
+    // the final pass: where the player is on screen (the soft focus is centred there), the picture's shape
+    const fu = this.look.m.fin.uniforms, { w, h } = this.view, sz = this.look.size;
+    if (pl && pl.g.visible) { const [sx, sy] = this.project(pl.g.position.x, 0.9, pl.g.position.z); fu.uSLFocus.value.set(sx / w, 1 - sy / h); }
+    fu.uSLAsp.value = w / h; fu.uSLPx.value.set(1.6 / sz.x, 1.6 / sz.y);
   }
   stats() { const i = this.renderer.info; return { triangles: i.render.triangles, calls: i.render.calls, geometries: i.memory.geometries, textures: i.memory.textures, stock: this.structure.info.stockCount }; }
 }
