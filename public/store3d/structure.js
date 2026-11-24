@@ -10,6 +10,7 @@ import * as THREE from '../drive/vendor/three.module.min.js';
 import { mergeGeometries } from '../drive/vendor/BufferGeometryUtils.js';
 import { Stock, productGeometry } from './products.js';
 import { GeoBuf, PAINT } from './geobuf.js';
+import { MESS_ATL, dressAtl } from './atl.js';
 
 export const PX = 48;
 export const m = (b) => b / PX;
@@ -30,6 +31,8 @@ export const MESS = {
   yaw: 0.07, yawBig: 0.3, yawBigShare: 0.08, dx: 0.012, facing: 0.07, gapFront: 0.07, gapBack: 0.03, halfEmpty: 0.16, lean: 0.55, topple: 0.3, misplace: 0.015,
   levelVar: 0.03, frontVar: 0.035, sag: 0.012, bowedShare: 0.22, stripTilt: 0.012, crookedShare: 0.15, tagMiss: 0.14, tape: 0.4, stackSlop: 0.05,
 };
+/** the mess the build uses: MESS, or for the ATL look (?storelook=atl, atl.js) MESS with MESS_ATL over it; set by buildStructure */
+let M = MESS;
 const idNum = (id) => { let h = 7; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) | 0; return Math.abs(h) % 100000; };
 /** how high a product must be lifted so it rests on its shelf after being turned (rx, ry, rz) at scale s (products stand on their base at y 0) */
 const _e = new THREE.Euler(), _q = new THREE.Matrix4(), _v = new THREE.Vector3();
@@ -140,6 +143,7 @@ export class Builder {
 }
 
 export function buildStructure(layout, mats, opts = {}) {
+  const atl = opts.look === 'atl'; M = atl ? { ...MESS, ...MESS_ATL } : MESS;
   const B = new Builder(THREE, mats), root = new THREE.Group(), info = { fixtures: [], signs: [], doors: [] };
   const { mw, mh, cell } = layout.board, fieldAt = (cx, cy) => (cx < 0 || cy < 0 || cx >= mw || cy >= mh) ? 0 : layout.field[cy].charCodeAt(cx) - 48;
   const fixtures = resolveFixtures(layout);
@@ -204,6 +208,7 @@ export function buildStructure(layout, mats, opts = {}) {
       mm.makeRotationY(hj(2) * 0.07).setPosition(x0 + 0.65 + i * 0.3 + hj(3) * 0.03, 0.12 + i * 0.004, z); B.bufFor(z).geo(cg, mm, 'cart'); }
   }
   storefront(B, layout, info);
+  if (atl) dressAtl(B, info, layout, { hash, Stock: B.stock });   // the ATL look's set dressing (atl.js): nothing here when the param is off
   // ---- the exit door in the north pier (south face of the solid block between the dairy and the rice units)
   // (set 0.22 m into the pier: the walkable floor reaches the pier's face at y 232, and a door standing proud of it hid a player hugging the wall)
   { const zf = m(232) - 0.22, cxd = m(435); info.exit = { x: cxd, z: zf };
@@ -301,9 +306,9 @@ function gondola(B, f, x0, z0, x1, z1, stock, info, fid = 0) {
   B.box(cooler ? 'wornCoolerBase' : 'wornBase', x0 - 0.0015, 0.16, z1 - 0.035, x1 + 0.0015, 0.2015, z1 + 0.0015, { id: f.id, cast: false });
   for (const [a, b] of [[x0, x0 + side], [x1 - side, x1]]) B.box('wornGold', a - 0.0015, 0.16, z1 - 0.012, b + 0.0015, 0.3 + fh(40 + a) * 0.35, z1 + 0.0135, { id: f.id, cast: false });
   // shelf heights differ a little from unit to unit, and so does how far each shelf front comes out; each shelf bows a little in the middle
-  const levels = [0.72 + (fh(1) - 0.5) * 2 * MESS.levelVar, 1.24 + (fh(2) - 0.5) * 2 * MESS.levelVar];
-  const sx0 = x0 + side, sx1 = x1 - side, sags = levels.map((_, L) => MESS.sag * (0.4 + 1.2 * fh(5 + L)) * (fh(9 + L) < MESS.bowedShare ? 2.4 : 1));
-  const fronts = levels.map((_, L) => z1 - 0.02 - fh(3 + L) * MESS.frontVar);
+  const levels = [0.72 + (fh(1) - 0.5) * 2 * M.levelVar, 1.24 + (fh(2) - 0.5) * 2 * M.levelVar];
+  const sx0 = x0 + side, sx1 = x1 - side, sags = levels.map((_, L) => M.sag * (0.4 + 1.2 * fh(5 + L)) * (fh(9 + L) < M.bowedShare ? 2.4 : 1));
+  const fronts = levels.map((_, L) => z1 - 0.02 - fh(3 + L) * M.frontVar);
   const sagAt = (L, x) => { if (L < 0) return 0; const t = Math.min(1, Math.max(0, (x - sx0) / (sx1 - sx0))); return sags[L] * 4 * t * (1 - t); };
   if (produce) {
     // produce: wooden crates in two tiers, tilted toward the aisle (front edge low), on a stepped stand
@@ -317,16 +322,16 @@ function gondola(B, f, x0, z0, x1, z1, stock, info, fid = 0) {
     const zf = fronts[L], sag = sags[L];
     B.sagBox(cooler ? 'coolershelf' : 'shelf', sx0, y - 0.03, zb + 0.05, sx1, y, zf, sag, { solid: true, id: f.id });
     // the gold price strip follows the bow, and hangs a little off level (now and then well off: a clip gone)
-    const drop = fh(14 + L) < MESS.crookedShare ? (fh(16 + L) < 0.5 ? -1 : 1) * MESS.stripTilt * 3 : (fh(12 + L) - 0.5) * 2 * MESS.stripTilt, lean = (x) => drop * ((x - sx0) / (sx1 - sx0) - 0.5);
+    const drop = fh(14 + L) < M.crookedShare ? (fh(16 + L) < 0.5 ? -1 : 1) * M.stripTilt * 3 : (fh(12 + L) - 0.5) * 2 * M.stripTilt, lean = (x) => drop * ((x - sx0) / (sx1 - sx0) - 0.5);
     B.warped((x, yy, z) => [x, yy + lean(x), z], () => B.sagBox('trimGold', sx0, y - 0.065, zf - 0.01, sx1, y - 0.015, zf + 0.012, sag, { id: f.id }));
     // the tags: uneven spacing, some missing, each clipped on a little crooked
     for (let tx = sx0 + 0.1 + fh(18 + L) * 0.1, k = 0; tx < sx1 - 0.13; tx += 0.34 + (hash(fid, L * 100 + k, 311) - 0.5) * 0.14, k++) {
-      const th = (a) => hash(fid * 3 + L, k, 320 + a); if (th(1) < MESS.tagMiss) continue;
+      const th = (a) => hash(fid * 3 + L, k, 320 + a); if (th(1) < M.tagMiss) continue;
       const ty = y - sagAt(L, tx + 0.055) + lean(tx + 0.055) - (th(2) < 0.1 ? 0.012 : 0);
       B.tilted(tx + 0.055, ty - 0.041, zf, 0, 0, (th(3) - 0.5) * 0.18, () => B.box('tagwhite', tx, ty - 0.058, zf + 0.008, tx + 0.11, ty - 0.024, zf + 0.016, { id: f.id }));
     }
     // a strip of tape holding a loose bit of the strip (some units)
-    if (L === 1 && fh(22) < MESS.tape) { const tx = sx0 + 0.3 + fh(23) * (sx1 - sx0 - 0.6), ty = y - sagAt(L, tx) + lean(tx);
+    if (L === 1 && fh(22) < M.tape) { const tx = sx0 + 0.3 + fh(23) * (sx1 - sx0 - 0.6), ty = y - sagAt(L, tx) + lean(tx);
       B.tilted(tx, ty - 0.04, zf, 0, 0, (fh(24) - 0.5) * 0.5, () => B.box(fh(25) < 0.5 ? 'tape' : 'tapeTan', tx - 0.035, ty - 0.085, zf + 0.0125, tx + 0.035, ty + 0.002, zf + 0.0145, { id: f.id, cast: false })); }
   });
   if (f.trim) { B.box(f.trim === '#c1272d' ? 'trimRed' : 'trimBlue', x0, 0.2, z1 - 0.02, x1, 0.34, z1 + 0.008, { id: f.id, cast: false });
@@ -342,6 +347,7 @@ function gondola(B, f, x0, z0, x1, z1, stock, info, fid = 0) {
   B.box('chrome', sx - sw / 2 + 0.2, H + 0.06, z1 - 0.5, sx - sw / 2 + 0.26, H + 0.15, z1 - 0.44, { id: f.id, cast: false });
   B.box('chrome', sx + sw / 2 - 0.26, H + 0.06, z1 - 0.5, sx + sw / 2 - 0.2, H + 0.15, z1 - 0.44, { id: f.id, cast: false });
   info.signs.push({ text: f.sign, x: sx, y: H + 0.15 + 0.26, z: z1 - 0.47, w: sw, h: 0.52 });
+  (info.units = info.units || []).push({ id: f.id, kind: f.kind, x0, x1, z1, zb, H, sx0, sx1, levels: produce ? [] : levels.slice(), fronts: produce ? [] : fronts.slice(), sags: produce ? [] : sags.slice(), signX: sx, signW: sw });
   // stock
   if (produce) fillCrates(stock, f, x0 + side, x1 - side, z1, zb, fid);
   else fillShelves(stock, f, x0 + side + 0.08, x1 - side - 0.08, [z1, ...fronts.map((z) => z + 0.02)], [0.2, ...levels], (L, x) => sagAt(L - 1, x), fid);
@@ -362,31 +368,31 @@ function fillShelves(S, f, xa, xb, zfs, bases, sagAt = () => 0, fid = 0) {
   const R = (a, b, c) => hash(fid * 13 + a, b, 500 + c);
   // blocks: [[kind, opts, count], ...] repeated along the shelf; rows 2 deep
   const runBlocks = (L, y, blocks, off) => {
-    const zf = zfs[L], half = R(L, 0, 1) < MESS.halfEmpty, hs = xa + (xb - xa) * R(L, 1, 1) * 0.55, he = hs + (xb - xa) * (0.3 + R(L, 2, 1) * 0.3);
+    const zf = zfs[L], half = R(L, 0, 1) < M.halfEmpty, hs = xa + (xb - xa) * R(L, 1, 1) * 0.55, he = hs + (xb - xa) * (0.3 + R(L, 2, 1) * 0.3);
     for (let r = 0; r < 2; r++) {
       const slots = []; let x = xa, bi = off, left = blocks[bi % blocks.length][2];
       for (;;) {   // the planogram (where things should be) ...
         const [k, o] = blocks[bi % blocks.length], w = NAT[k] * SC[k] * GAP; if (x + w > xb + 1e-6) break;
         const i = slots.length, q = (c) => R(L * 1000 + r * 500 + i, c, 3), cx = x + w / 2;
-        const gone = q(1) < (r ? MESS.gapBack : MESS.gapFront) || (half && cx > hs && cx < he && (r === 0 || q(2) < 0.6));
+        const gone = q(1) < (r ? M.gapBack : M.gapFront) || (half && cx > hs && cx < he && (r === 0 || q(2) < 0.6));
         slots.push({ k, o, cx, w, gone, face: R(L * 10 + r, bi, 2) - 0.5, q }); x += w;
         if (--left <= 0) { bi++; left = blocks[bi % blocks.length][2]; x += 0.02; }
       }
       slots.forEach((sl, i) => {   // ... and how it actually looks
         const { q } = sl, yb = y - sagAt(L, sl.cx), zr = zf - 0.2 - r * 0.4;
         if (sl.gone) {
-          if (r === 0 && ROLLS.has(sl.k) && q(4) < MESS.topple) {   // one lying on its side, top toward the aisle
+          if (r === 0 && ROLLS.has(sl.k) && q(4) < M.topple) {   // one lying on its side, top toward the aisle
             const s = SC[sl.k], h = productH(sl.k, sl.o, s), ry = (q(5) - 0.5) * 0.5, rx = Math.PI / 2;
             S.add(sl.k, sl.o, sl.cx + (q(6) - 0.5) * 0.03, yb + restLift(sl.k, sl.o, s, rx, ry, 0), zf - 0.04 - h, ry, s, rx);
           }
           return;
         }
-        let k = sl.k, o = sl.o; if (q(7) < MESS.misplace) [k, o] = STRAYS[Math.floor(q(8) * STRAYS.length)];
-        const s = SC[k], big = q(9) < MESS.yawBigShare, ry = (q(10) - 0.5) * 2 * (big ? MESS.yawBig : MESS.yaw);
+        let k = sl.k, o = sl.o; if (q(7) < M.misplace) [k, o] = STRAYS[Math.floor(q(8) * STRAYS.length)];
+        const s = SC[k], big = q(9) < M.yawBigShare, ry = (q(10) - 0.5) * 2 * (big ? M.yawBig : M.yaw);
         const pl = slots[i - 1], nx = slots[i + 1], gapL = !pl || pl.gone, gapR = nx ? nx.gone : false;
-        let rz = 0; if (TALL.has(k) && (gapL || gapR) && !(gapL && gapR && !pl) && q(11) < MESS.lean) rz = (gapR && (!gapL || q(12) < 0.5) ? -1 : 1) * (0.12 + q(13) * 0.16);
-        const dz = (r === 0 ? sl.face * 2 * MESS.facing : (sl.face * 0.5) * MESS.facing) + (q(14) - 0.5) * 0.02;
-        const dx = (q(15) - 0.5) * 2 * MESS.dx + rz * -0.12;   // a leaning item's foot slides away from the gap
+        let rz = 0; if (TALL.has(k) && (gapL || gapR) && !(gapL && gapR && !pl) && q(11) < M.lean) rz = (gapR && (!gapL || q(12) < 0.5) ? -1 : 1) * (0.12 + q(13) * 0.16);
+        const dz = (r === 0 ? sl.face * 2 * M.facing : (sl.face * 0.5) * M.facing) + (q(14) - 0.5) * 0.02;
+        const dx = (q(15) - 0.5) * 2 * M.dx + rz * -0.12;   // a leaning item's foot slides away from the gap
         S.add(k, o, sl.cx + dx, yb + (rz ? restLift(k, o, s, 0, ry, rz) : 0), Math.min(zr + dz, zf - 0.06 - NAT[k] * s * 0.5), ry, s, 0, rz);
       });
     }
@@ -449,7 +455,7 @@ function overstock(S, f, xa, xb, zb, zf, y, sx, sw, fid = 0) {
     if (posts.some((p) => Math.abs(p - (x + w / 2)) < w / 2 + 0.06)) { x += 0.14; continue; }
     if (i % 5 === 3) { x += 0.28; i++; continue; }   // a gap now and then: overstock is never a solid wall
     const z = zb + 0.22 + ((i * 11) % 3) * 0.05, stack = 1 + ((i * 13) % 3 === 0 ? 1 : 0) + (hash(fid, i, 361) < 0.15 ? 1 : 0);
-    for (let k = 0; k < stack; k++) { const q = (n) => hash(fid * 5 + i, k * 10 + n, 363) - 0.5, sl = k ? MESS.stackSlop : MESS.stackSlop * 0.4;   // stacked by hand: no two cases line up
+    for (let k = 0; k < stack; k++) { const q = (n) => hash(fid * 5 + i, k * 10 + n, 363) - 0.5, sl = k ? M.stackSlop : M.stackSlop * 0.4;   // stacked by hand: no two cases line up
       const kw = k ? w * (0.85 + (q(4) + 0.5) * 0.15) : w, kd = k ? d * (0.85 + (q(5) + 0.5) * 0.15) : d, hh = k > 1 ? h * 0.8 : h;
       S.add('case', { label: k ? 'casetop' : lab, w: kw, h: hh, d: kd, color: (i + k) % 3 ? '#b88a5a' : '#a8794a' }, x + w / 2 + q(1) * 2 * sl, y + k * h, z + q(2) * 2 * sl, ((i * 3 + k) % 5 - 2) * 0.03 + q(3) * (k ? 0.35 : 0.1), 1); }
     x += w + 0.06; i++;

@@ -17,12 +17,12 @@ export const FLOOR_RGB = [164, 138, 88];   // Nov 23 2026: owner: darker again (
  *  tile edge sits off the next, width / widthVar = grout width and how much it varies. All zero = the old ruler-straight 3 px grout. */
 export const FLOOR_GROUT = { wander: 3.2, step: 2.0, width: 3.2, widthVar: 1.6 };
 /** cream floor tiles: 4 x 4 tiles per canvas (0.6 m each). Returns { map, normalMap, roughnessMap } (tileable). accent: gold / rose inlay tiles. */
-export function floorTextures(aniso) {
+export function floorTextures(aniso, { rgb = FLOOR_RGB } = {}) {   // rgb: the tile colour (the ATL look passes its own)
   const N = 512, T = N / 4, c = cv(N, N), g = c.getContext('2d'), hmap = new Float32Array(N * N), rough = cv(N, N), rg = rough.getContext('2d');
   const accent = (i, j) => { const r = hash(i, j, 7); return r < 0.075 ? 'gold' : r < 0.125 ? 'rose' : null; };
   for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) {
     const v = hash(i, j, 1), a = accent(i, j);
-    let base = a === 'gold' ? [226, 170, 52] : a === 'rose' ? [214, 112, 150] : [FLOOR_RGB[0] + v * 8 - 4, FLOOR_RGB[1] + v * 8 - 4, FLOOR_RGB[2] + v * 8 - 4];
+    let base = a === 'gold' ? [226, 170, 52] : a === 'rose' ? [214, 112, 150] : [rgb[0] + v * 8 - 4, rgb[1] + v * 8 - 4, rgb[2] + v * 8 - 4];
     g.fillStyle = `rgb(${base.map(Math.round).join(',')})`; g.fillRect(i * T, j * T, T, T);
     // terrazzo flecks
     for (let k = 0; k < 90; k++) { const x = i * T + hash(i * 100 + k, j, 3) * T, y = j * T + hash(i, j * 100 + k, 4) * T, r = 0.6 + hash(k, i + j, 5) * 1.5, tone = hash(k, j, 6);
@@ -194,7 +194,7 @@ export function padTexture(w = 256, h = 640) {
   return tex(c, { aniso: 8 });
 }
 /** the painted wall: lavender paint above, a pink band with a gold line at about 1.1 m, a navy wainscot below. u: along the wall (3 m per tile), v: 0..1 over the wall height */
-export function wallTexture(aniso = 8) {
+export function wallTexture(aniso = 8, { atl = false } = {}) {
   const W = 512, H = 1024, c = cv(W, H), g = c.getContext('2d');
   // v = 1 is the top of the wall (canvas y = 0)
   const y = (m) => H - (m / 3.4) * H;
@@ -216,6 +216,7 @@ export function wallTexture(aniso = 8) {
   for (let k = 0; k < 5; k++) { const x = hash(k, 11, 41) * W, w = 40 + hash(k, 12, 41) * 80, gg = g.createRadialGradient(x, y(1.1), 0, x, y(1.1), w); gg.addColorStop(0, 'rgba(255,225,235,0.18)'); gg.addColorStop(1, 'rgba(255,225,235,0)'); g.fillStyle = gg; g.fillRect(x - w, y(1.25), w * 2, y(0.95) - y(1.25)); }   // the band rubbed paler
   for (let k = 0; k < 6; k++) { const x = hash(k, 13, 43) * W, l = 30 + hash(k, 14, 43) * 120, gg = g.createLinearGradient(0, y(0.93), 0, y(0.93) + l); gg.addColorStop(0, 'rgba(60,45,20,0.28)'); gg.addColorStop(1, 'rgba(60,45,20,0)'); g.fillStyle = gg; g.fillRect(x, y(0.93), 2 + hash(k, 15, 43) * 3, l); }   // drips
   for (let k = 0; k < 7; k++) { const x = hash(k, 16, 47) * W; g.fillStyle = 'rgba(70,55,20,0.45)'; g.fillRect(x, y(1.27), 8 + hash(k, 17, 47) * 40, 5); }   // the gold rule dulled
+  if (atl) atlWall(g, W, H, y);
   return tex(c, { repeat: true, aniso });
 }
 
@@ -247,4 +248,32 @@ export function wearTexture() {
   for (let i = 0; i < N * N; i++) d[i * 4 + 3] = Math.round(A[i] * 255);
   const t = new THREE.DataTexture(d, N, N, THREE.RGBAFormat); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.NoColorSpace;
   t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.anisotropy = 4; t.needsUpdate = true; return t;
+}
+
+/**
+ * The ATL look's wall (?storelook=atl, store3d/atl.js), over the aged wall above: the stained drop-ceiling's edge along the top, brown water
+ * stains running down from it with tide-line rims, paint peeling off in ragged patches (an older pale-green coat and grey plaster under the
+ * lavender), greasy hand and shoulder smudges at lean height, and the whole wall a little yellowed. Steady, hash-based, tileable across u.
+ */
+function atlWall(g, W, H, y) {
+  g.fillStyle = 'rgba(150,140,70,0.12)'; g.fillRect(0, 0, W, H);   // nicotine-yellowed
+  // the ceiling tiles' edge: a pale band with dark grid lines and stains
+  g.fillStyle = '#c9c4b2'; g.fillRect(0, 0, W, y(3.22)); g.fillStyle = 'rgba(60,55,40,0.6)'; g.fillRect(0, y(3.22) - 3, W, 4);
+  for (let k = 0; k <= 4; k++) g.fillRect(k * W / 4 - 1, 0, 3, y(3.22));
+  for (let k = 0; k < 4; k++) { const x = hash(k, 1, 91) * W, r = 20 + hash(k, 2, 91) * 40, gg = g.createRadialGradient(x, y(3.3), 2, x, y(3.3), r); gg.addColorStop(0, 'rgba(120,85,35,0.55)'); gg.addColorStop(0.8, 'rgba(120,85,35,0.2)'); gg.addColorStop(1, 'rgba(120,85,35,0)'); g.fillStyle = gg; g.fillRect(x - r, 0, r * 2, y(3.22)); }
+  // water stains: brown runs from the ceiling, rimmed
+  for (let k = 0; k < 5; k++) {
+    const x = hash(k, 3, 91) * W, w = 26 + hash(k, 4, 91) * 60, l = 120 + hash(k, 5, 91) * 260, top = y(3.22);
+    for (let s = 0; s < 3; s++) { const gg = g.createLinearGradient(0, top, 0, top + l * (1 - s * 0.25)); gg.addColorStop(0, `rgba(110,78,34,${0.3 - s * 0.07})`); gg.addColorStop(0.85, `rgba(110,78,34,${0.16 - s * 0.04})`); gg.addColorStop(1, 'rgba(110,78,34,0)'); g.fillStyle = gg;
+      g.beginPath(); g.moveTo(x - w / 2 + s * 6, top); for (let t = 0; t <= 1.001; t += 0.1) g.lineTo(x - w / 2 * (1 - t * 0.6) + s * 6 + Math.sin(t * 9 + k) * 4, top + t * l * (1 - s * 0.25)); for (let t = 1; t >= -0.001; t -= 0.1) g.lineTo(x + w / 2 * (1 - t * 0.6) - s * 6 + Math.sin(t * 7 + k) * 4, top + t * l * (1 - s * 0.25)); g.closePath(); g.fill(); }
+    g.strokeStyle = 'rgba(90,60,25,0.35)'; g.lineWidth = 2; g.beginPath(); g.ellipse(x, top + l * 0.55, w * 0.42, l * 0.3, 0, 0.2, 2.9); g.stroke();
+  }
+  // peeling paint: ragged patches showing an older coat, with a lighter lifted edge
+  for (let k = 0; k < 8; k++) {
+    const cx = hash(k, 6, 93) * W, cy = y(0.4 + hash(k, 7, 93) * 2.4), r = 10 + hash(k, 8, 93) * 26, under = hash(k, 9, 93) < 0.5 ? '#b7c4a8' : '#a9a49a';
+    g.beginPath(); for (let a = 0; a < 6.3; a += 0.35) { const rr = r * (0.6 + 0.6 * hash(k, Math.round(a * 10), 95)); g.lineTo(cx + Math.cos(a) * rr * 1.4, cy + Math.sin(a) * rr); } g.closePath();
+    g.fillStyle = under; g.fill(); g.strokeStyle = 'rgba(245,240,230,0.55)'; g.lineWidth = 2; g.stroke(); g.strokeStyle = 'rgba(30,25,20,0.35)'; g.lineWidth = 1; g.stroke();
+  }
+  // greasy smudges at shoulder and hand height
+  for (let k = 0; k < 6; k++) { const x = hash(k, 10, 97) * W, yy = y(1.0 + hash(k, 11, 97) * 0.6), r = 20 + hash(k, 12, 97) * 30, gg = g.createRadialGradient(x, yy, 2, x, yy, r); gg.addColorStop(0, 'rgba(40,32,20,0.28)'); gg.addColorStop(1, 'rgba(40,32,20,0)'); g.fillStyle = gg; g.fillRect(x - r, yy - r, r * 2, r * 2); }
 }

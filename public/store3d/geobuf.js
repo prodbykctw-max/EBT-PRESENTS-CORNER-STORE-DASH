@@ -107,7 +107,7 @@ export class GeoBuf {
 
 /** the paint material: a MeshStandardMaterial whose roughness, metalness and glow come per vertex (aRM), colour per vertex, map = an atlas */
 export function paintMaterial(map, extra = {}) {
-  const { wear, ...rest } = extra;
+  const { wear, wearK, ...rest } = extra;   // wearK: { grime, rust, chips, scuffs } for this material (the ATL look's heavier wear); default WEAR
   const mat = new THREE.MeshStandardMaterial({ map, vertexColors: true, roughness: 1, metalness: 1, ...rest });
   mat.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec3 aRM;\nvarying vec3 vRM;' + (wear ? '\nvarying vec3 vWP;\nvarying vec3 vWN;' : ''))
@@ -117,7 +117,7 @@ export function paintMaterial(map, extra = {}) {
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor *= vRM.x;' + (wear ? '\nroughnessFactor = mix(roughnessFactor, wRough, wAmt);' : ''))
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor *= vRM.y;' + (wear ? '\nmetalnessFactor = mix(metalnessFactor, wMetal, wAmt);' : ''))
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * max(vRM.z, 0.0);');
-    if (wear) { sh.uniforms.uWear = { value: wear }; sh.uniforms.uWearK = { value: new THREE.Vector4(WEAR.grime, WEAR.rust, WEAR.chips, WEAR.scuffs) }; mat.userData.shader = sh; }
+    if (wear) { sh.uniforms.uWear = { value: wear }; const k = wearK || WEAR; sh.uniforms.uWearK = { value: new THREE.Vector4(k.grime, k.rust, k.chips, k.scuffs) }; mat.userData.shader = sh; }
   };
   mat.customProgramCacheKey = () => (wear ? 'store3d-paint-wear' : 'store3d-paint');
   return mat;
@@ -153,6 +153,7 @@ const WEAR_COLOR = `
     } else {                    // a worn edge: the paint rubbed through along most of it
       chip = smoothstep(0.56, 0.7, n2.g * 0.7 + n2.a * 0.3) * 0.75 * uWearK.z; bare *= 0.75; rs = smoothstep(0.84, 0.9, n2.r * 0.7 + n1.g * 0.3) * 0.6 * uWearK.y;
     }
+    chip = min(chip, 1.0); rs = min(rs, 1.0); sc = min(sc, 1.0); grime = min(grime, 1.0);   // (heavier knobs, the ATL look's, never overshoot; at the default WEAR these are all <= 1 already)
     c = mix(c, bare * (0.8 + 0.5 * n2.a), chip); if (chip > 0.0) { wRough = 0.42; wMetal = 0.8; wAmt = max(wAmt, chip); }
     c = mix(c, c * 0.55 + vec3(0.05, 0.045, 0.04) * n2.a, sc);
     c = mix(c, rust, rs); if (rs > 0.0) { wRough = 0.88; wMetal = 0.12; wAmt = max(wAmt, rs); }

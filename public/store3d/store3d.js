@@ -18,6 +18,10 @@ import { useAtlas, productGeometry } from './products.js';
 import { pickupGeometry, PICKUP_KINDS } from './pickups.js';
 import { buildStructure, PX, m } from './structure.js';
 import { GeoBuf, paintMaterial, withRM } from './geobuf.js';
+import { ATL, ATL_GRADE, atlCanvas, atlPlacements, writePlacements, ageBoard } from './atl.js';
+/** which look the store is built in: 'atl' with ?storelook=atl in the page's address (the ATL corner store, atl.js: an alternative to compare),
+ *  else 'default' (the live look, unchanged). The game page (/standalone.html?store=3d&storelook=atl) needs no code of its own: this reads its address. */
+export const STORE_LOOK = (() => { try { return /[?&]storelook=atl\b/i.test(location.search) ? 'atl' : 'default'; } catch (e) { return 'default'; } })();
 
 const ELEV = 45 * Math.PI / 180, DIST = 8000;   // camera elevation, distance (a very long lens: within 0.3 px of orthographic, so the floor lies under the 2D layers everywhere on screen)
 const FACE_YAW = { U: Math.PI, D: 0, L: -Math.PI / 2, R: Math.PI / 2 };   // character.glb faces +z (the camera) at yaw 0
@@ -69,11 +73,12 @@ const ITEM_MODELS = {
 const SIGN_TILT = { k: 0.022, crooked: 3, crookedBy: -0.045 };
 const signTilt = (i) => (i === SIGN_TILT.crooked ? SIGN_TILT.crookedBy : (T.hash(i, 1, 53) - 0.5) * 2 * SIGN_TILT.k);
 export class Store3D {
-  constructor(canvas, { layout, base = new URL('../drive/', import.meta.url).href, mobile = false, pixelRatio } = {}) {
+  constructor(canvas, { layout, base = new URL('../drive/', import.meta.url).href, mobile = false, pixelRatio, look = STORE_LOOK } = {}) {
     this._unguard = guardRandom();   // until init() is over (see guardRandom)
-    try { this._make(canvas, { layout, base, mobile, pixelRatio }); } catch (e) { this._unguard(); throw e; }
+    try { this._make(canvas, { layout, base, mobile, pixelRatio, look }); } catch (e) { this._unguard(); throw e; }
   }
-  _make(canvas, { layout, base, mobile, pixelRatio }) {
+  _make(canvas, { layout, base, mobile, pixelRatio, look }) {
+    this.look_ = look; this.atl = look === 'atl'; this.tuneBase = this.atl ? { ...TUNE, ...ATL.tune } : TUNE;   // (TUNE itself is never changed)
     this.layout = layout; this.base = base; this.mobile = mobile; this.canvas = canvas; this.t = 0;
     const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     r.info.autoReset = false; r.setPixelRatio(pixelRatio ?? Math.min(devicePixelRatio, mobile ? 1.5 : 2));
@@ -84,6 +89,12 @@ export class Store3D {
     this.look.fx.haze = false; this.look.m.ao.uniforms.uFade.value = 1e6;   // indoors: no aerial haze; the AO must not fade with the long lens's distance
     this.look.m.ao.uniforms.uRadius.value = 0.9; this.look.m.ao.uniforms.uPower.value = 1.5; this.look.m.fin.uniforms.uAoMix.value = 0.9;
     this.look.m.fin.uniforms.uSat.value = 1.04; this.look.m.fin.uniforms.uContrast.value = 0.1;
+    if (this.atl) {   // the ATL grade (atl.js ATL_GRADE): spliced into this store's own copy of the final pass only (the drive's is not touched)
+      const fm = this.look.m.fin, G = ATL.grade, line = 'gl_FragColor.rgb += (ign(gl_FragCoord.xy + uTime)';
+      if (!fm.fragmentShader.includes(line)) throw new Error('store3d: the final pass changed, the ATL grade cannot be spliced in');
+      fm.uniforms.uAtl = { value: new THREE.Vector4(G.lift, G.fog, G.vignette, G.grain) }; fm.uniforms.uAtlTint = { value: new THREE.Vector3(...G.tint) }; fm.uniforms.uAtlFog = { value: new THREE.Vector3(...G.fogCol) };
+      fm.fragmentShader = fm.fragmentShader.replace('void main() {', 'uniform vec4 uAtl; uniform vec3 uAtlTint, uAtlFog;\n  void main() {').replace(line, ATL_GRADE + '    ' + line);
+    }
     this.actors = {}; this.items = []; this.view = { w: 390, h: 844 };
   }
 
@@ -93,19 +104,19 @@ export class Store3D {
     const { layout } = this, aniso = this.mobile ? 4 : 8;
     const loader = new THREE.TextureLoader(), conc = (f, srgb) => loader.loadAsync(new URL('tex/real/' + f, this.base).href).then((t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; return t; });
     const [concD, concN] = await Promise.all([conc('conc_d.webp', true), conc('conc_n.webp', false)]);
-    lap(TM, 'concrete'); await yieldNow(); const wallT = T.wallTexture(aniso), floorT = T.floorTextures(aniso); lap(TM, 'wallFloorTex'); await yieldNow(); const atlas = T.labelAtlas(aniso); useAtlas(atlas); this.atlas = atlas;
+    lap(TM, 'concrete'); await yieldNow(); const wallT = T.wallTexture(aniso, { atl: this.atl }), floorT = T.floorTextures(aniso, this.atl ? { rgb: ATL.floorRGB } : undefined); lap(TM, 'wallFloorTex'); await yieldNow(); const atlas = T.labelAtlas(aniso); useAtlas(atlas); this.atlas = atlas;
     const white = atlas.cell('white'), whiteUV = [(white[0] + white[2]) / 2, (white[1] + white[3]) / 2];
     lap(TM, 'labelAtlas'); await yieldNow(); const { aoMap, lightMap, lampVis } = this.bakeFloorLight(); lap(TM, 'floorLight'); await yieldNow();
     const grime = this.bakeFloorGrime(); lap(TM, 'grime'); await yieldNow(); const wearTex = T.wearTexture(); lap(TM, 'wearTex'); await yieldNow();
     const mats = this.mats = {
       default: new THREE.MeshStandardMaterial({ color: 0x888888 }),
-      paint: paintMaterial(atlas.map, { envMapIntensity: 0.8, wear: wearTex }),
+      paint: paintMaterial(atlas.map, { envMapIntensity: 0.8, wear: wearTex, ...(this.atl ? { wearK: ATL.wear } : {}) }),
       floor: new THREE.MeshPhysicalMaterial({ clearcoat: 0.55, clearcoatRoughness: 0.22, map: floorT.map, normalMap: floorT.normalMap, normalScale: new THREE.Vector2(0.9, 0.9), roughnessMap: floorT.roughnessMap, roughness: 1, metalness: 0, aoMap, aoMapIntensity: 1.0, lightMap, lightMapIntensity: 1.0, envMapIntensity: 0.55 }),
       wall: new THREE.MeshStandardMaterial({ map: wallT, normalMap: concN, normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.82, metalness: 0 }),
       glass: new THREE.MeshStandardMaterial({ color: 0xcfe6f2, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.22, depthWrite: false, envMapIntensity: 2.2 }),
     };
     mats.floor.onBeforeCompile = (sh) => {   // the lamps' shadows (bakeLampShadows) darken the floor's finished colour where a shelf shades it
-      sh.uniforms.uLampVis = { value: lampVis }; sh.uniforms.uGrime = { value: grime }; sh.uniforms.uGrimeK = { value: new THREE.Vector3(FLOOR_WEAR.dirt, FLOOR_WEAR.marks, FLOOR_WEAR.tape) };
+      sh.uniforms.uLampVis = { value: lampVis }; sh.uniforms.uGrime = { value: grime }; const fw = this.atl ? ATL.floor : FLOOR_WEAR; sh.uniforms.uGrimeK = { value: new THREE.Vector3(fw.dirt, fw.marks, fw.tape) };
       // ...and the floor's years (bakeFloorGrime): r dirt (a brown-grey multiply), g sharp marks (cracks, chips, heel marks), b tape patches
       sh.fragmentShader = 'uniform sampler2D uLampVis;\nuniform sampler2D uGrime;\nuniform vec3 uGrimeK;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', [
         'outgoingLight *= texture2D( uLampVis, vAoMapUv ).r;',
@@ -116,8 +127,9 @@ export class Store3D {
         'outgoingLight = mix( outgoingLight, vec3( gLum ) * vec3( 0.95, 0.99, 1.05 ) * 1.12, gm.b * uGrimeK.z );',
         '#include <opaque_fragment>'].join('\n'));
     };
+    if (this.atl) { mats.glass.color.set(ATL.glass.color); mats.glass.opacity = ATL.glass.opacity; }   // dirtier glass
     lap(TM, 'materials'); this.scene.environment = this.makeEnvironment(); this.scene.environmentIntensity = 0.5; lap(TM, 'environment'); await yieldNow();
-    const S = this.structure = buildStructure(layout, mats, { white: whiteUV, defer: true }); lap(TM, 'structure');
+    const S = this.structure = buildStructure(layout, mats, { white: whiteUV, defer: true, look: this.look_ }); lap(TM, 'structure');
     { // the stock and the merged meshes, a slice at a time (the page gets a turn at least every ~30 ms)
       let t = performance.now(); const bf = (z) => S.builder.bufFor(z), pause = async () => { if (performance.now() - t > 30) { await yieldNow(); t = performance.now(); } };
       for (let i = 0; i < S.stock.list.length; i += 24) { S.stock.emit(bf, i, i + 24); await pause(); }
@@ -139,8 +151,8 @@ export class Store3D {
     return this;
   }
 
-  applyTune(t = TUNE) {
-    t = { ...TUNE, ...t };
+  applyTune(t = this.tuneBase) {
+    t = { ...this.tuneBase, ...t };
     this.look.m.fin.uniforms.uSat.value = t.sat; this.look.m.fin.uniforms.uContrast.value = t.con;
     this.key.intensity = t.key; this.hemi.intensity = t.hemi; this.scene.environmentIntensity = t.env; this.renderer.toneMappingExposure = t.ex; this.mats.floor.lightMapIntensity = t.lm;
     this.look.m.fin.uniforms.uBloom.value = t.bloom; this.look.m.pre.uniforms.uThreshold.value = t.bt; this.look.m.pre.uniforms.uKnee.value = 0.5;
@@ -167,7 +179,11 @@ export class Store3D {
     const sx = 214 / m(board.w), sz = 461 / m(board.h);
     for (let zi = 0; zi < 10; zi++) for (let xi = 0; xi < 4; xi++) {
       const x = 2.6 + xi * 4.5 + (zi % 2) * 2.0, z = 4.5 + zi * 4.2, gr = lg.createRadialGradient(x * sx, z * sz, 0, x * sx, z * sz, 3.4 * sx);
-      gr.addColorStop(0, 'rgba(255,226,170,0.62)'); gr.addColorStop(0.55, 'rgba(255,226,170,0.2)'); gr.addColorStop(1, 'rgba(255,238,205,0)'); lg.fillStyle = gr; lg.globalCompositeOperation = 'lighter'; lg.fillRect(0, 0, 214, 461);
+      if (this.atl) {   // the ATL look: greener tubes, and every fixture its own strength (old tubes, one or two nearly out): steady
+        const u = T.hash(xi, zi, 981), k = (1 - ATL.lamps.uneven * u * u) * (u > 0.9 ? 0.35 : 1), [cr, cg, cb] = ATL.lamps.col;
+        gr.addColorStop(0, `rgba(${cr},${cg},${cb},${0.62 * k})`); gr.addColorStop(0.55, `rgba(${cr},${cg},${cb},${0.2 * k})`); gr.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+      } else { gr.addColorStop(0, 'rgba(255,226,170,0.62)'); gr.addColorStop(0.55, 'rgba(255,226,170,0.2)'); gr.addColorStop(1, 'rgba(255,238,205,0)'); }
+      lg.fillStyle = gr; lg.globalCompositeOperation = 'lighter'; lg.fillRect(0, 0, 214, 461);
     }
     const lt = T.tex(l, { aniso: 1 }); lt.channel = 1;
     return { aoMap: ao, lightMap: lt, lampVis: this.bakeLampShadows() };
@@ -251,6 +267,17 @@ export class Store3D {
     for (let k = 0; k < 4; k++) { const cx = h(k, 16, 941) * W, cy = h(k, 17, 941) * H; if (!onFloor(cx, cy)) continue; const L = 0.22 / tw + h(k, 18, 941) * 0.3 / tw, Wd = 0.05 / tw, a = (h(k, 19, 941) - 0.5) * 1.2, ca = Math.cos(a), sa = Math.sin(a);
       for (let q = 0; q < 1 + (k % 2); q++) { const ox = q ? -sa * Wd * 0.8 : 0, oy = q ? ca * Wd * 0.8 : 0;
         for (let yy = -L; yy <= L; yy += 0.5) for (let xx = -L; xx <= L; xx += 0.5) { const u = xx * ca + yy * sa, v = -xx * sa + yy * ca; if (Math.abs(u) > L / 2 || Math.abs(v) > Wd / 2) continue; const X = Math.round(cx + xx + ox), Y = Math.round(cy + yy + oy); if (X >= 0 && Y >= 0 && X < W && Y < H) { Bt[Y * W + X] = 0.9; G[Y * W + X] *= 0.2; } } } }
+    if (this.atl) {   // the ATL look: paths worn into the tile down the middle of every lane (greyer, duller, a little darker), and two dried puddles
+      const F = ATL.floor;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { if (!floorAt(x, y)) continue; const cx = (x / K) | 0, cy = (y / K) | 0, tv = tight[(cy * K2) * W2 + cx * K2];
+        const lane = Math.min(1, Math.max(0, (tv - 0.965) / 0.035)), st = T.fbm(x / W * 3, y / H * 9, 6, 2, 971), worn = lane * (0.55 + 0.45 * st) * F.paths, i = y * W + x;
+        Bt[i] = Math.max(Bt[i], 0.3 * worn); R[i] = Math.min(1, R[i] + 0.12 * worn); }
+      const px = (xm) => xm * PX / board.cell * K;
+      for (const [xm, zm, rx, rz] of [[12.2, 30.6, 0.75, 0.45], [11.4, 32.75, 0.6, 0.4]]) { const X = px(xm), Y = px(zm), ax = px(rx), az = px(rz);
+        for (let y = Math.floor(Y - az * 1.3); y <= Y + az * 1.3; y++) for (let x = Math.floor(X - ax * 1.3); x <= X + ax * 1.3; x++) { if (x < 0 || y < 0 || x >= W || y >= H) continue;
+          const a = Math.atan2(y - Y, x - X), d = Math.hypot((x - X) / ax, (y - Y) / az) / (1 + 0.18 * Math.sin(a * 3 + xm) + 0.08 * Math.sin(a * 7)), i = y * W + x; if (d > 1.05) continue;
+          R[i] = Math.min(1, R[i] + (d > 0.85 ? 0.5 : 0.25) * F.puddles); G[i] *= 0.6; } }
+    }
     const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'), id = g.createImageData(W, H), d = id.data;
     for (let i = 0; i < W * H; i++) { d[i * 4] = R[i] * 255; d[i * 4 + 1] = G[i] * 255; d[i * 4 + 2] = Bt[i] * 255; d[i * 4 + 3] = 255; }
     g.putImageData(id, 0, 0); const t = T.tex(c, { srgb: false, aniso: 4 }); t.channel = 1; return t;
@@ -291,6 +318,7 @@ export class Store3D {
     for (const k of ['sale', 'fresh', 'cold', 'eat']) entries.push({ name: 'poster_' + k, w: 256, h: 340, draw: (g, w, h) => T.drawPoster(g, w, h, k) });
     entries.push({ name: 'matEntrance', w: 256, h: 240, draw: (g, w, h) => T.drawPlate(g, w, h, 'ENTRANCE', { bg: '#a82020', fg: '#f3c34a', border: '#f3c34a' }) });
     entries.push({ name: 'matExit', w: 256, h: 240, draw: (g, w, h) => T.drawPlate(g, w, h, 'EXIT', { bg: '#a82020', fg: '#f3c34a', border: '#f3c34a' }) });
+    if (this.atl) entries.forEach((e, i) => { const d = e.draw; e.draw = (g, w, h) => { d(g, w, h); ageBoard(g, w, h, i + 1, T.hash); }; });   // the ATL look: the same boards, aged
     const A = this.decalAtlas = T.decalAtlas(entries, this.mobile ? 4 : 8), wd = A.white, buf = new GeoBuf();
     // header signs: a pink board, the lettered face toward the camera (+z)
     // (hung by hand, Nov 24 2026: each board is a little off level, SIGN_TILT[i] radians about its centre, so the lettering stays where it was)
@@ -305,6 +333,7 @@ export class Store3D {
     // floor lettering: the two door mats' tops (the painted store's ENTRANCE mat in the east lane, by the registers, is left out: there is no door there)
     for (const mt of info.mats) { const [x0, z0, x1, z1, y] = mt.rect, c = A.cell(mt.name), e = 0.05; buf.quad([x0 + e, y, z1 - e], [x1 - e, y, z1 - e], [x1 - e, y, z0 + e], [x0 + e, y, z0 + e], [0, 1, 0], [[c[0], c[1]], [c[2], c[1]], [c[2], c[3]], [c[0], c[3]]], new THREE.Color(1, 1, 1), [0.95, 0, 0]); }
     const mesh = this.decals = new THREE.Mesh(buf.build(), paintMaterial(A.map, { envMapIntensity: 0.6 })); mesh.castShadow = true; mesh.receiveShadow = true; mesh.name = 'decals'; this.root.add(mesh);
+    if (this.atl) this.buildAtlSigns();
     // the PAY markings (shown when the list is done): one mesh, painted on the tile, steady
     const pb = new GeoBuf();
     for (const [x0, y0, x1, y1] of L.PADS) pb.quad([m(x0), 0.008, m(y1)], [m(x1), 0.008, m(y1)], [m(x1), 0.008, m(y0)], [m(x0), 0.008, m(y0)], [0, 1, 0], [[0, 0], [1, 0], [1, 1], [0, 1]], new THREE.Color(1, 1, 1), [0.55, 0, 0.12]);
@@ -313,6 +342,14 @@ export class Store3D {
     this.padMesh.visible = false; this.padMesh.receiveShadow = true; this.padMesh.renderOrder = 1; this.root.add(this.padMesh);
   }
 
+  /** the ATL look's taped paper, cardboard, neon, vinyl, fog and puddle (atl.js): one canvas, an opaque mesh and a see-through one */
+  buildAtlSigns() {
+    const list = atlPlacements(this.structure.info, T.hash); if (!list.length) return;
+    const AC = atlCanvas(T.hash), map = T.tex(AC.canvas, { aniso: this.mobile ? 4 : 8 }), op = new GeoBuf(), tr = new GeoBuf(); writePlacements(list, AC.cell, op, tr);
+    if (op.count) { const m = new THREE.Mesh(op.build(), paintMaterial(map, { envMapIntensity: 0.4 })); m.receiveShadow = true; m.name = 'atlSigns'; this.root.add(m); }
+    if (tr.count) { const m = new THREE.Mesh(tr.build(), paintMaterial(map, { transparent: true, depthWrite: false, envMapIntensity: 0.3 })); m.renderOrder = 1; m.name = 'atlSeeThrough'; this.root.add(m); }
+    this.atlSignCount = list.length;
+  }
   buildItems() {
     // the pickups on a soft gold ring, a little larger than life so they read from above. Built here first from procedural shapes
     // (pickups.js: CHIPS, CHICKEN, LEMONADE; products.js: the rest), then loadItemModels() swaps in the scanned models where it can.

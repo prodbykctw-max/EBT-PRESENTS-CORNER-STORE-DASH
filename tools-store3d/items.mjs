@@ -2,7 +2,7 @@
 // Renders each of the seven pickups in the 3D store preview (public/store3d/index.html?items=<ID>) from the game's own overhead
 // camera on a 390 x 844 phone (dpr 2), with the player standing beside it (no bully), and saves a crop around the item:
 // <outDir>/<tag>_<ID>.png. Prints per item: draw calls, triangles, the item's own triangle count, and the frame with every item shown.
-// S3D_ROOT=<checkout> serves another checkout (a before/after).
+// S3D_ROOT=<checkout> serves another checkout (a before/after). S3D_QUERY=storelook=atl adds to every page's address (the ATL look).
 import fs from 'fs'; import path from 'path'; import { spawn } from 'child_process'; import { fileURLToPath } from 'url';
 import { chromium } from 'playwright-core';
 const ROOT = process.env.S3D_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -18,7 +18,7 @@ try {
   p.on('request', (r) => { if (r.url().includes('/store3d/items/')) reqs.push(r.url().split('/store3d/')[1]); });
   for (const it of layout.items) {
     const q = `items=${encodeURIComponent(it.id)}&px=${it.x + 110}&py=${it.y + 40}&bully=0&face=L`;
-    await p.goto(`http://localhost:${PORT}/store3d/index.html?loop=0&${q}`);
+    await p.goto(`http://localhost:${PORT}/store3d/index.html?loop=0&${q}${process.env.S3D_QUERY ? '&' + process.env.S3D_QUERY : ''}`);
     await p.waitForFunction(() => window.__s3dReady || window.__s3dError, null, { timeout: 600000 });
     const r = await p.evaluate((id) => {
       if (window.__s3dError) return { error: window.__s3dError };
