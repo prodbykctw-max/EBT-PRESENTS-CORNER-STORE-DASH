@@ -171,12 +171,12 @@ const cache = new Map();
 export function productGeometry(kind, opts = {}) {
   const k = kind + JSON.stringify(opts); if (!cache.has(k)) { if (!KINDS[kind]) throw new Error('product ' + kind); cache.set(k, KINDS[kind](opts)); } return cache.get(k);
 }
-/** Static stock: add(kind, opts, x, y, z, rotY, scale[, tilt]) collects; emit(bufFor) writes every product into the merged buffers (geobuf.js) */
+/** Static stock: add(kind, opts, x, y, z, rotY, scale[, tilt (about x)[, roll (about z)]]) collects; emit(bufFor) writes every product into the merged buffers (geobuf.js) */
 export class Stock {
   constructor() { this.list = []; this.n = 0; }
-  add(kind, opts, x, y, z, ry = 0, s = 1, tilt = 0) { this.list.push([kind, opts, x, y, z, ry, s, tilt]); this.n++; }
+  add(kind, opts, x, y, z, ry = 0, s = 1, tilt = 0, roll = 0) { this.list.push([kind, opts, x, y, z, ry, s, tilt, roll]); this.n++; }
   emit(bufFor, from = 0, to = this.list.length) {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
-    for (const [kind, opts, x, y, z, ry, s, tilt] of this.list.slice(from, to)) { e.set(tilt, ry, 0, 'XYZ'); q.setFromEuler(e); m.compose(v.set(x, y, z), q, sc.set(s, s, s)); bufFor(z).geo(productGeometry(kind, opts), m); }
+    for (const [kind, opts, x, y, z, ry, s, tilt, roll = 0] of this.list.slice(from, to)) { e.set(tilt, ry, roll, 'XYZ'); q.setFromEuler(e); m.compose(v.set(x, y, z), q, sc.set(s, s, s)); bufFor(z).geo(productGeometry(kind, opts), m); }
   }
 }
