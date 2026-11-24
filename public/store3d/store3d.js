@@ -91,7 +91,7 @@ export class Store3D {
     const mats = this.mats = {
       default: new THREE.MeshStandardMaterial({ color: 0x888888 }),
       paint: paintMaterial(atlas.map, { envMapIntensity: 0.8 }),
-      floor: new THREE.MeshPhysicalMaterial({ clearcoat: 0.5, clearcoatRoughness: 0.24, map: floorT.map, normalMap: floorT.normalMap, normalScale: new THREE.Vector2(0.9, 0.9), roughnessMap: floorT.roughnessMap, roughness: 1, metalness: 0, aoMap, aoMapIntensity: 1.0, lightMap, lightMapIntensity: 1.0, envMapIntensity: 0.5 }),
+      floor: new THREE.MeshPhysicalMaterial({ clearcoat: 0.55, clearcoatRoughness: 0.22, map: floorT.map, normalMap: floorT.normalMap, normalScale: new THREE.Vector2(0.9, 0.9), roughnessMap: floorT.roughnessMap, roughness: 1, metalness: 0, aoMap, aoMapIntensity: 1.0, lightMap, lightMapIntensity: 1.0, envMapIntensity: 0.55 }),
       wall: new THREE.MeshStandardMaterial({ map: wallT, normalMap: concN, normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.82, metalness: 0 }),
       glass: new THREE.MeshStandardMaterial({ color: 0xcfe6f2, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.22, depthWrite: false, envMapIntensity: 2.2 }),
     };
@@ -104,8 +104,8 @@ export class Store3D {
     }
     lap(TM, 'stock'); this.scene.add(S.root); this.root = S.root;
     // lights: the sky/ground fill and one key light whose shadow map covers the whole store and is drawn once
-    const hemi = this.hemi = new THREE.HemisphereLight(0xe6ebff, 0xb0a296, 0.3); this.scene.add(hemi);
-    const key = this.key = new THREE.DirectionalLight(0xfff0e0, 2.0); key.castShadow = true; this.scene.add(key, key.target);
+    const hemi = this.hemi = new THREE.HemisphereLight(0xdfe6ff, 0xa89478, 0.3); this.scene.add(hemi);
+    const key = this.key = new THREE.DirectionalLight(0xffe9c8, 2.0); key.castShadow = true; this.scene.add(key, key.target);
     const W = m(layout.board.w), Hh = m(layout.board.h), c = new THREE.Vector3(W / 2, 0, Hh / 2), sz = this.mobile ? 2048 : 4096;
     key.shadow.mapSize.set(sz, sz); Object.assign(key.shadow.camera, { left: -23, right: 23, top: 23, bottom: -23, near: 1, far: 160 });
     key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03; key.shadow.radius = 2; key.shadow.intensity = 0.9;
@@ -125,7 +125,7 @@ export class Store3D {
     this.look.m.fin.uniforms.uBloom.value = t.bloom; this.look.m.pre.uniforms.uThreshold.value = t.bt; this.look.m.pre.uniforms.uKnee.value = 0.5;
   }
   // the floor's baked light: ambient occlusion from the mask (a soft contact shadow where shelves, counters and walls meet the tile)
-  // and the soft pools of the ceiling lights (neutral white, so the cream stays cream)
+  // and the soft pools of the ceiling lights (warm, as in the first 3D store the owner was shown)
   bakeFloorLight() {
     // (blurred in plain JS, three box blurs per axis ~ a gaussian: the canvas 'blur()' filter took 2.3 s here on a software-drawn canvas)
     const { board, field } = this.layout, mw = board.mw, mh = board.mh, K = 2, W = mw * K, H = mh * K, src = new Float32Array(W * H);
@@ -146,7 +146,7 @@ export class Store3D {
     const sx = 214 / m(board.w), sz = 461 / m(board.h);
     for (let zi = 0; zi < 10; zi++) for (let xi = 0; xi < 4; xi++) {
       const x = 2.6 + xi * 4.5 + (zi % 2) * 2.0, z = 4.5 + zi * 4.2, gr = lg.createRadialGradient(x * sx, z * sz, 0, x * sx, z * sz, 3.4 * sx);
-      gr.addColorStop(0, 'rgba(255,246,236,0.55)'); gr.addColorStop(0.55, 'rgba(255,246,236,0.18)'); gr.addColorStop(1, 'rgba(255,246,236,0)'); lg.fillStyle = gr; lg.globalCompositeOperation = 'lighter'; lg.fillRect(0, 0, 214, 461);
+      gr.addColorStop(0, 'rgba(255,226,170,0.62)'); gr.addColorStop(0.55, 'rgba(255,226,170,0.2)'); gr.addColorStop(1, 'rgba(255,238,205,0)'); lg.fillStyle = gr; lg.globalCompositeOperation = 'lighter'; lg.fillRect(0, 0, 214, 461);
     }
     const lt = T.tex(l, { aniso: 1 }); lt.channel = 1; return { aoMap: ao, lightMap: lt };
   }

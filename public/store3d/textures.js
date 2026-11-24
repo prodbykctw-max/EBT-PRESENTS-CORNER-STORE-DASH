@@ -10,24 +10,25 @@ export function tex(canvas, { srgb = true, repeat = false, aniso = 4 } = {}) {
   if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; return t;
 }
 
-/** the tile's own colour: a neutral, slightly pink cream like the painted store's floor (253,223,201 on screen), not yellow */
-export const FLOOR_RGB = [226, 206, 194];
+/** the tile's own colour: the warm sand of the first 3D store the owner was shown (Nov 24 2026: he asked for that pastel look back; from Nov 17 to
+ *  then it was a pinker cream, [226, 206, 194], with greyer flecks and grout and white light pools) */
+export const FLOOR_RGB = [206, 188, 158];
 /** cream floor tiles: 4 x 4 tiles per canvas (0.6 m each). Returns { map, normalMap, roughnessMap } (tileable). accent: gold / rose inlay tiles. */
 export function floorTextures(aniso) {
   const N = 512, T = N / 4, c = cv(N, N), g = c.getContext('2d'), hmap = new Float32Array(N * N), rough = cv(N, N), rg = rough.getContext('2d');
   const accent = (i, j) => { const r = hash(i, j, 7); return r < 0.075 ? 'gold' : r < 0.125 ? 'rose' : null; };
   for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) {
     const v = hash(i, j, 1), a = accent(i, j);
-    let base = a === 'gold' ? [226, 170, 52] : a === 'rose' ? [214, 112, 150] : [FLOOR_RGB[0] + v * 6 - 3, FLOOR_RGB[1] + v * 6 - 3, FLOOR_RGB[2] + v * 6 - 3];
+    let base = a === 'gold' ? [226, 170, 52] : a === 'rose' ? [214, 112, 150] : [FLOOR_RGB[0] + v * 8 - 4, FLOOR_RGB[1] + v * 8 - 4, FLOOR_RGB[2] + v * 8 - 4];
     g.fillStyle = `rgb(${base.map(Math.round).join(',')})`; g.fillRect(i * T, j * T, T, T);
     // terrazzo flecks
     for (let k = 0; k < 90; k++) { const x = i * T + hash(i * 100 + k, j, 3) * T, y = j * T + hash(i, j * 100 + k, 4) * T, r = 0.6 + hash(k, i + j, 5) * 1.5, tone = hash(k, j, 6);
-      g.fillStyle = tone < 0.5 ? 'rgba(150,128,118,0.16)' : tone < 0.8 ? 'rgba(255,255,255,0.3)' : 'rgba(120,104,100,0.14)'; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill(); }
+      g.fillStyle = tone < 0.5 ? 'rgba(150,120,90,0.22)' : tone < 0.8 ? 'rgba(255,255,255,0.35)' : 'rgba(110,90,80,0.2)'; g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill(); }
     // soft wear
-    const gr = g.createRadialGradient(i * T + T / 2, j * T + T / 2, T * 0.1, i * T + T / 2, j * T + T / 2, T * 0.75); gr.addColorStop(0, 'rgba(255,252,250,0.08)'); gr.addColorStop(1, 'rgba(120,104,96,0.08)'); g.fillStyle = gr; g.fillRect(i * T, j * T, T, T);
+    const gr = g.createRadialGradient(i * T + T / 2, j * T + T / 2, T * 0.1, i * T + T / 2, j * T + T / 2, T * 0.75); gr.addColorStop(0, 'rgba(255,250,240,0.10)'); gr.addColorStop(1, 'rgba(120,100,70,0.10)'); g.fillStyle = gr; g.fillRect(i * T, j * T, T, T);
   }
   // grout: 3 px, darker, with a bevelled height profile
-  g.fillStyle = 'rgba(176,156,146,0.95)';
+  g.fillStyle = 'rgba(150,132,104,0.95)';
   for (let k = 0; k < 4; k++) { g.fillRect(k * T - 1.5, 0, 3, N); g.fillRect(0, k * T - 1.5, N, 3); }
   g.fillRect(N - 1.5, 0, 1.5, N); g.fillRect(0, N - 1.5, N, 1.5);
   for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const dx = Math.min(x % T, T - (x % T)), dy = Math.min(y % T, T - (y % T)), d = Math.min(dx, dy); hmap[y * N + x] = Math.min(1, d / 5); }
