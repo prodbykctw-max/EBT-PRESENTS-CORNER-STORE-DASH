@@ -13,6 +13,9 @@ export function tex(canvas, { srgb = true, repeat = false, aniso = 4 } = {}) {
 /** the tile's own colour: the warm sand of the first 3D store the owner was shown (Nov 24 2026: he asked for that pastel look back; from Nov 17 to
  *  then it was a pinker cream, [226, 206, 194], with greyer flecks and grout and white light pools) */
 export const FLOOR_RGB = [164, 138, 88];   // Nov 23 2026: owner: darker again (was [188, 162, 108]; the first sand was [206, 188, 158])
+/** the grout's unevenness in px of the 512 px floor canvas (128 px a tile): wander = how far a line drifts along its length, step = how far one
+ *  tile edge sits off the next, width / widthVar = grout width and how much it varies. All zero = the old ruler-straight 3 px grout. */
+export const FLOOR_GROUT = { wander: 3.2, step: 2.0, width: 3.2, widthVar: 1.6 };
 /** cream floor tiles: 4 x 4 tiles per canvas (0.6 m each). Returns { map, normalMap, roughnessMap } (tileable). accent: gold / rose inlay tiles. */
 export function floorTextures(aniso) {
   const N = 512, T = N / 4, c = cv(N, N), g = c.getContext('2d'), hmap = new Float32Array(N * N), rough = cv(N, N), rg = rough.getContext('2d');
@@ -27,13 +30,22 @@ export function floorTextures(aniso) {
     // soft wear
     const gr = g.createRadialGradient(i * T + T / 2, j * T + T / 2, T * 0.1, i * T + T / 2, j * T + T / 2, T * 0.75); gr.addColorStop(0, 'rgba(255,250,240,0.10)'); gr.addColorStop(1, 'rgba(120,100,70,0.10)'); g.fillStyle = gr; g.fillRect(i * T, j * T, T, T);
   }
-  // grout: 3 px, darker, with a bevelled height profile
-  g.fillStyle = 'rgba(116,94,58,0.95)';
-  for (let k = 0; k < 4; k++) { g.fillRect(k * T - 1.5, 0, 3, N); g.fillRect(0, k * T - 1.5, N, 3); }
-  g.fillRect(N - 1.5, 0, 1.5, N); g.fillRect(0, N - 1.5, N, 1.5);
-  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const dx = Math.min(x % T, T - (x % T)), dy = Math.min(y % T, T - (y % T)), d = Math.min(dx, dy); hmap[y * N + x] = Math.min(1, d / 5); }
+  // grout: about 3 px, darker, with a bevelled height profile. Not ruler-straight (Nov 24 2026, owner: "less refined ... without so many
+  // straight lines"): every grout line wanders a little along its length, each tile edge sits a pixel or so off its neighbour (hand-set tile),
+  // the width varies and so does how dirty it is. Tileable: the wander is periodic over the canvas.
+  const GW = FLOOR_GROUT;
+  const line = (k, along) => { k = ((k % 4) + 4) % 4; const seg = Math.floor(along / T) & 3; return (vnoise(along / N, k / 4, 6, 71 + k) - 0.5) * GW.wander + (hash(k, seg, 73) - 0.5) * GW.step; };
+  const gwid = (along, k) => GW.width + (vnoise(along / N, ((k % 4) + 4) % 4 / 4, 10, 79) - 0.5) * GW.widthVar;
+  const gimg = g.getImageData(0, 0, N, N), gd = gimg.data, groutM = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const kx = Math.round(x / T), ky = Math.round(y / T), dx = Math.abs(x + 0.5 - (kx * T + line(kx, y))), dy = Math.abs(y + 0.5 - (ky * T + line(ky + 10, x)));
+    const ex = dx - gwid(y, kx) / 2, ey = dy - gwid(x, ky + 10) / 2, e = Math.min(ex, ey), a = 1 - Math.min(1, Math.max(0, (e + 0.7) / 1.4)), i = y * N + x, o = i * 4;
+    groutM[i] = a; hmap[i] = Math.min(1, Math.max(0, e) / 5);
+    if (a > 0) { const dirt = 0.82 + 0.3 * vnoise(x / N, y / N, 16, 83); for (let c = 0; c < 3; c++) gd[o + c] = gd[o + c] * (1 - a * 0.95) + [116, 94, 58][c] * dirt * a * 0.95; }
+  }
+  g.putImageData(gimg, 0, 0);
   rg.fillStyle = 'rgb(66,66,66)'; rg.fillRect(0, 0, N, N);   // polished tile (roughness ~0.26)
-  rg.fillStyle = 'rgb(214,214,214)'; for (let k = 0; k < 4; k++) { rg.fillRect(k * T - 2, 0, 4, N); rg.fillRect(0, k * T - 2, N, 4); }
+  { const ri = rg.getImageData(0, 0, N, N); for (let i = 0; i < N * N; i++) { const v = 66 + (214 - 66) * Math.min(1, groutM[i] * 1.3); ri.data[i * 4] = ri.data[i * 4 + 1] = ri.data[i * 4 + 2] = v; } rg.putImageData(ri, 0, 0); }
   const nc = cv(N, N), ng = nc.getContext('2d'), img = ng.createImageData(N, N), S = 2.2;
   for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
     const h = (xx, yy) => hmap[((yy + N) % N) * N + ((xx + N) % N)], dx = (h(x + 1, y) - h(x - 1, y)) * S, dy = (h(x, y + 1) - h(x, y - 1)) * S, l = Math.hypot(dx, dy, 1), o = (y * N + x) * 4;
@@ -193,5 +205,46 @@ export function wallTexture(aniso = 8) {
   g.strokeStyle = 'rgba(10,14,40,0.35)'; g.lineWidth = 2; for (let k = 0; k <= 4; k++) { g.beginPath(); g.moveTo(k * W / 4, y(0.95)); g.lineTo(k * W / 4, H); g.stroke(); }   // wainscot panel seams
   g.fillStyle = 'rgba(255,255,255,0.06)'; for (let k = 0; k < 4; k++) g.fillRect(k * W / 4 + 6, y(0.9), W / 4 - 12, 8);
   gr = g.createLinearGradient(0, 0, 0, 200); gr.addColorStop(0, 'rgba(20,24,60,0.38)'); gr.addColorStop(1, 'rgba(20,24,60,0)'); g.fillStyle = gr; g.fillRect(0, 0, W, 200);   // darker up to the ceiling
+  // the years on it (Nov 24 2026): grime rising from the floor joint, cart and shoe scrapes on the wainscot, the pink band rubbed paler
+  // where shoulders lean, a few drip stains under the gold rule, and the gold rule itself dulled in places. Steady, hash-based.
+  gr = g.createLinearGradient(0, y(0.16), 0, H); gr.addColorStop(0, 'rgba(30,22,12,0)'); gr.addColorStop(0.6, 'rgba(30,22,12,0.35)'); gr.addColorStop(1, 'rgba(22,16,8,0.7)'); g.fillStyle = gr; g.fillRect(0, y(0.16), W, H - y(0.16));
+  for (let k = 0; k < 9; k++) { const x = hash(k, 1, 31) * W, w = 30 + hash(k, 2, 31) * 90, h = 18 + hash(k, 3, 31) * 40; const gg = g.createRadialGradient(x, H, 0, x, H, w); gg.addColorStop(0, 'rgba(25,18,10,0.35)'); gg.addColorStop(1, 'rgba(25,18,10,0)'); g.fillStyle = gg; g.fillRect(x - w, H - h * 2, w * 2, h * 2); }   // dirt splashed up the base
+  for (let k = 0; k < 70; k++) {   // scrapes: short light strokes, mostly level, at cart and shoe height
+    const x = hash(k, 4, 37) * W, yy = y(0.08 + hash(k, 5, 37) * 0.55), len = 8 + hash(k, 6, 37) * 50, ang = (hash(k, 7, 37) - 0.5) * 0.25, a = 0.08 + hash(k, 8, 37) * 0.2;
+    g.strokeStyle = hash(k, 9, 37) < 0.75 ? `rgba(190,190,200,${a})` : `rgba(10,10,20,${a + 0.1})`; g.lineWidth = 1 + hash(k, 10, 37) * 2; g.beginPath(); g.moveTo(x, yy); g.lineTo(x + Math.cos(ang) * len, yy + Math.sin(ang) * len); g.stroke();
+  }
+  for (let k = 0; k < 5; k++) { const x = hash(k, 11, 41) * W, w = 40 + hash(k, 12, 41) * 80, gg = g.createRadialGradient(x, y(1.1), 0, x, y(1.1), w); gg.addColorStop(0, 'rgba(255,225,235,0.18)'); gg.addColorStop(1, 'rgba(255,225,235,0)'); g.fillStyle = gg; g.fillRect(x - w, y(1.25), w * 2, y(0.95) - y(1.25)); }   // the band rubbed paler
+  for (let k = 0; k < 6; k++) { const x = hash(k, 13, 43) * W, l = 30 + hash(k, 14, 43) * 120, gg = g.createLinearGradient(0, y(0.93), 0, y(0.93) + l); gg.addColorStop(0, 'rgba(60,45,20,0.28)'); gg.addColorStop(1, 'rgba(60,45,20,0)'); g.fillStyle = gg; g.fillRect(x, y(0.93), 2 + hash(k, 15, 43) * 3, l); }   // drips
+  for (let k = 0; k < 7; k++) { const x = hash(k, 16, 47) * W; g.fillStyle = 'rgba(70,55,20,0.45)'; g.fillRect(x, y(1.27), 8 + hash(k, 17, 47) * 40, 5); }   // the gold rule dulled
   return tex(c, { repeat: true, aniso });
+}
+
+/** tileable value noise on an n-cell lattice (hash-based, no Math.random), sampled at u, v in 0..1 */
+export function vnoise(u, v, n, seed) {
+  const x = u * n, y = v * n, i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j, sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const h = (a, b) => hash(((a % n) + n) % n, ((b % n) + n) % n, seed);
+  return (h(i, j) * (1 - sx) + h(i + 1, j) * sx) * (1 - sy) + (h(i, j + 1) * (1 - sx) + h(i + 1, j + 1) * sx) * sy;
+}
+export function fbm(u, v, n0, oct, seed) { let s = 0, a = 0.5, t = 0; for (let o = 0; o < oct; o++) { s += a * vnoise(u, v, n0 << o, seed + o * 17); t += a; a *= 0.5; } return s / t; }
+/**
+ * The wear noise (geobuf.js WEAR_COLOR samples it in world space): 256 x 256, tileable, four kinds of noise in the four channels.
+ * r: soft blotches, g: tight spots (paint chips, rust pits), b: streaks running down (v is up on a wall), a: fine scratches and scuffs.
+ * A DataTexture (not a canvas: a canvas would premultiply the alpha channel and lose it).
+ */
+export function wearTexture() {
+  const N = 256, d = new Uint8Array(N * N * 4), A = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const u = x / N, v = y / N, o = (y * N + x) * 4;
+    const r = fbm(u, v, 4, 3, 101), g = fbm(u, v, 8, 3, 202), st = 0.65 * vnoise(u, v * 0.125 + 0.5 * vnoise(u, v, 4, 9), 32, 303) + 0.35 * fbm(u, v, 4, 2, 404);
+    d[o] = Math.round(Math.min(1, Math.max(0, (r - 0.5) * 1.8 + 0.5)) * 255); d[o + 1] = Math.round(Math.min(1, Math.max(0, (g - 0.5) * 2.2 + 0.5)) * 255);
+    d[o + 2] = Math.round(st * 255); A[y * N + x] = 0.35 * fbm(u, v, 16, 2, 505);
+  }
+  // scratches: short thin strokes, mostly along one direction (wiped / kicked), wrapping at the edges
+  for (let k = 0; k < 260; k++) {
+    const x0 = hash(k, 1, 611) * N, y0 = hash(k, 2, 611) * N, ang = (hash(k, 3, 611) < 0.7 ? 0.1 : 1.4) + (hash(k, 4, 611) - 0.5) * 0.7, len = 6 + hash(k, 5, 611) * 34, a = 0.55 + hash(k, 6, 611) * 0.45;
+    for (let t = 0; t < len; t += 0.5) { const x = Math.floor(x0 + Math.cos(ang) * t) & (N - 1), y = Math.floor(y0 + Math.sin(ang) * t) & (N - 1); A[y * N + x] = Math.max(A[y * N + x], a * (1 - Math.abs(t / len - 0.5) * 0.8)); }
+  }
+  for (let i = 0; i < N * N; i++) d[i * 4 + 3] = Math.round(A[i] * 255);
+  const t = new THREE.DataTexture(d, N, N, THREE.RGBAFormat); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.NoColorSpace;
+  t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.anisotropy = 4; t.needsUpdate = true; return t;
 }

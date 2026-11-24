@@ -8,13 +8,37 @@
 // north part) is a low stock plinth nobody can see. Every cell of the mask is therefore still a solid thing in 3D (see align.mjs).
 import * as THREE from '../drive/vendor/three.module.min.js';
 import { mergeGeometries } from '../drive/vendor/BufferGeometryUtils.js';
-import { Stock } from './products.js';
+import { Stock, productGeometry } from './products.js';
 import { GeoBuf, PAINT } from './geobuf.js';
 
 export const PX = 48;
 export const m = (b) => b / PX;
 const W_H = 3.4;           // wall height
 const SHELF_H = 1.9, FRONT_D = 1.0;   // tall front gondola: height and depth
+/**
+ * The mess (Nov 24 2026, owner: "The store looks too neat ... micro realism in the sense of item placement on shelves", then "less refined
+ * and neat and more real and natural, without so many straight lines"). One-line knobs, all distances in metres, angles in radians; 0 turns
+ * a thing off. Every choice is a hash of the fixture, level, row and slot (never Math.random), so the store is the same on every load.
+ *  stock:  yaw (everyday twist), yawBig / yawBigShare (some turned well off), dx (sideways slop), facing (how far a facing is pulled forward or
+ *          pushed back), gapFront / gapBack (empty slots), halfEmpty (share of shelves sold half out), lean (share of tall items next to a gap
+ *          that lean into it), topple (share of front gaps where the item lies on its side instead), misplace (an item from another aisle)
+ *  shelves: levelVar (shelf heights differ between units), frontVar (shelf fronts not flush), sag (mid-span bow), bowedShare (properly bowed
+ *          shelves), stripTilt (price strips off level), crookedShare (a strip hanging well off), tagMiss (missing price tags), tape (share of units
+ *          with a tape repair), stackSlop (overstock cases that don't line up)
+ */
+export const MESS = {
+  yaw: 0.07, yawBig: 0.3, yawBigShare: 0.08, dx: 0.012, facing: 0.07, gapFront: 0.07, gapBack: 0.03, halfEmpty: 0.16, lean: 0.55, topple: 0.3, misplace: 0.015,
+  levelVar: 0.03, frontVar: 0.035, sag: 0.012, bowedShare: 0.22, stripTilt: 0.012, crookedShare: 0.15, tagMiss: 0.14, tape: 0.4, stackSlop: 0.05,
+};
+const idNum = (id) => { let h = 7; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) | 0; return Math.abs(h) % 100000; };
+/** how high a product must be lifted so it rests on its shelf after being turned (rx, ry, rz) at scale s (products stand on their base at y 0) */
+const _e = new THREE.Euler(), _q = new THREE.Matrix4(), _v = new THREE.Vector3();
+function restLift(kind, opts, s, rx, ry, rz) {
+  const g = productGeometry(kind, opts); if (!g.boundingBox) g.computeBoundingBox(); const b = g.boundingBox; _q.makeRotationFromEuler(_e.set(rx, ry, rz)); let mn = Infinity;
+  for (let i = 0; i < 8; i++) { _v.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).multiplyScalar(s).applyMatrix4(_q); mn = Math.min(mn, _v.y); }
+  return -mn;
+}
+const productH = (kind, opts, s) => { const g = productGeometry(kind, opts); if (!g.boundingBox) g.computeBoundingBox(); return g.boundingBox.max.y * s; };
 
 /** which painted fixture is which (centres read off the board), with the stock each carries */
 const FIXTURES = [
@@ -92,6 +116,17 @@ export class Builder {
     }
     this.bufFor(zc).box(mat, x0, y0, z0, x1, y1, z1, { skip: o.skip || 'ny', white: this.white });
   }
+  /** a long box that sags mid-span by `sag` m (a bowed shelf); collision (solid) keeps the straight box */
+  sagBox(mat, x0, y0, z0, x1, y1, z1, sag, o = {}, n = 6) {
+    if (o.solid) this.solids.push({ x0, y0, z0, x1, y1, z1, id: o.id || '' }); this.boxes.push([x0, y0, z0, x1, y1, z1]);
+    this.bufFor((z0 + z1) / 2).sagBox(mat, x0, y0, z0, x1, y1, z1, sag, { skip: o.skip || 'ny', white: this.white }, n);
+  }
+  _mark() { return new Map([...this.chunks].map(([k, b]) => [k, b.count])); }
+  _since(mark) { return [...this.chunks].map(([k, b]) => [b, mark.has(k) ? mark.get(k) : 0]).filter(([b, n0]) => b.count > n0); }
+  /** run fn (which writes boxes), then turn what it wrote by small angles about (px, py, pz): a crooked tag, a crate set down askew */
+  tilted(px, py, pz, rx, ry, rz, fn) { const mk = this._mark(); fn(); for (const [b, n0] of this._since(mk)) b.tilt(n0, px, py, pz, rx, ry, rz); }
+  /** run fn, then move every vertex it wrote by w(x, y, z) -> [x, y, z] (a strip hanging off level, a dented edge) */
+  warped(w, fn) { const mk = this._mark(); fn(); for (const [b, n0] of this._since(mk)) b.warp(n0, w); }
   /** finish() a mesh at a time, calling pause() between them (it may return a promise) */
   async finishAsync(pause) { const grp = new THREE.Group(); grp.name = 'static'; for (const m of this._meshes()) { grp.add(m); await pause(); } return grp; }
   finish() { const grp = new THREE.Group(); grp.name = 'static'; for (const m of this._meshes()) grp.add(m); return grp; }
@@ -154,8 +189,8 @@ export function buildStructure(layout, mats, opts = {}) {
     const rec = { id: f.id, kind: f.kind, rect: f.rect, core: fc.core, sign: f.sign, box: [x0, z0, x1, z1] };
     // the plinth under the whole blocked region, cell for cell (solid), dark
     for (const [a, b, c, d] of fc.exact) B.box('base', m(a * cell), 0, m(b * cell), m(c * cell), 0.16, m(d * cell), { solid: true, id: f.id });
-    if (f.kind === 'checkout') checkout(B, f, x0, z0, x1, z1, mats, info);
-    else gondola(B, f, x0, z0, x1, z1, stock, info);
+    if (f.kind === 'checkout') checkout(B, f, x0, z0, x1, z1, mats, info, idNum(f.id));
+    else gondola(B, f, x0, z0, x1, z1, stock, info, idNum(f.id));
     info.fixtures.push(rec);
   }
   // ---- cart corrals: a low grey platform, a rail round it, and two calm rows of nested carts (solid basket sides, chrome rims, red grips)
@@ -165,7 +200,8 @@ export function buildStructure(layout, mats, opts = {}) {
     for (const [a, b, c, d] of [[x0, z0, x1, z0 + 0.04], [x0, z1 - 0.04, x1, z1], [x0, z0, x0 + 0.04, z1], [x1 - 0.04, z0, x1, z1]]) { B.box('steel', a, 0.12, b, c, 0.9, d, { id: 'corral' }); B.box('trimGold', a, 0.9, b, c, 0.94, d, { id: 'corral' }); }
     info.corrals = (info.corrals || []).concat([[x0, z0, x1, z1]]);
     const cg = cartGeometry(), mm = new THREE.Matrix4(), rows = 2, gap = (z1 - z0 - 0.2) / rows, n = Math.floor((x1 - x0 - 0.3 - 0.95) / 0.3) + 1;
-    for (let row = 0; row < rows; row++) for (let i = 0; i < n; i++) { const z = z0 + 0.1 + gap * (row + 0.5); mm.makeRotationY(0).setPosition(x0 + 0.65 + i * 0.3, 0.12 + i * 0.004, z); B.bufFor(z).geo(cg, mm, 'cart'); }
+    for (let row = 0; row < rows; row++) for (let i = 0; i < n; i++) { const hj = (k) => hash(row * 50 + i, k, 77 + Math.round(x0)) - 0.5, z = z0 + 0.1 + gap * (row + 0.5) + hj(1) * 0.05;   // nested by hand: never quite in line
+      mm.makeRotationY(hj(2) * 0.07).setPosition(x0 + 0.65 + i * 0.3 + hj(3) * 0.03, 0.12 + i * 0.004, z); B.bufFor(z).geo(cg, mm, 'cart'); }
   }
   storefront(B, layout, info);
   // ---- the exit door in the north pier (south face of the solid block between the dairy and the rice units)
@@ -204,8 +240,8 @@ function cartGeometry() {
   if (CART) return CART;
   const B = new GeoBuf(), Lb = 0.95, Wd = 0.56;
   B.box('cart', -Lb / 2, 0.45, -Wd / 2, Lb / 2, 0.47, Wd / 2, { skip: '' });                 // basket floor
-  for (const z of [-Wd / 2, Wd / 2 - 0.012]) B.box(['#7d8491', 0.5, 0.6], -Lb / 2, 0.47, z, Lb / 2, 0.84, z + 0.012, { skip: 'ny' });   // the sides
-  B.box(['#7d8491', 0.5, 0.6], -Lb / 2, 0.47, -Wd / 2, -Lb / 2 + 0.012, 0.84, Wd / 2, { skip: 'ny' }); B.box(['#7d8491', 0.5, 0.6], Lb / 2 - 0.012, 0.47, -Wd / 2, Lb / 2, 0.84, Wd / 2, { skip: 'ny' });
+  for (const z of [-Wd / 2, Wd / 2 - 0.012]) B.box('cartWire', -Lb / 2, 0.47, z, Lb / 2, 0.84, z + 0.012, { skip: 'ny' });   // the sides
+  B.box('cartWire', -Lb / 2, 0.47, -Wd / 2, -Lb / 2 + 0.012, 0.84, Wd / 2, { skip: 'ny' }); B.box('cartWire', Lb / 2 - 0.012, 0.47, -Wd / 2, Lb / 2, 0.84, Wd / 2, { skip: 'ny' });
   for (const z of [-Wd / 2 - 0.006, Wd / 2 - 0.006]) B.box('chrome', -Lb / 2, 0.84, z, Lb / 2, 0.86, z + 0.024);   // the rim
   B.box('chrome', -Lb / 2 - 0.006, 0.84, -Wd / 2, -Lb / 2 + 0.018, 0.86, Wd / 2); B.box('chrome', Lb / 2 - 0.018, 0.84, -Wd / 2, Lb / 2 + 0.006, 0.86, Wd / 2);
   B.box('cartRed', Lb / 2 + 0.03, 0.94, -Wd / 2 - 0.02, Lb / 2 + 0.1, 0.99, Wd / 2 + 0.02, { skip: '' });            // the handle grip
@@ -249,7 +285,8 @@ function storefront(B, layout, info) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-function gondola(B, f, x0, z0, x1, z1, stock, info) {
+function gondola(B, f, x0, z0, x1, z1, stock, info, fid = 0) {
+  const fh = (k) => hash(fid, k, 301);
   const Wd = x1 - x0, zb = z1 - FRONT_D, cooler = f.kind === 'cooler', produce = f.kind === 'produce';
   const body = cooler ? 'coolerbody' : 'steel', side = 0.07, H = SHELF_H;
   // end caps, back panel, top, plank shelves with a lip
@@ -260,19 +297,41 @@ function gondola(B, f, x0, z0, x1, z1, stock, info) {
   if (cooler) B.box('coolerlight', x0 + side + 0.05, H - 0.1, zb + 0.06, x1 - side - 0.05, H - 0.05, z1 - 0.1, { id: f.id, cast: false });   // the light strip under the cooler's canopy
   B.box('cap', x0, H, zb, x1, H + 0.06, z1, { solid: true, id: f.id });
   B.box(cooler ? 'coolerbase' : 'base', x0, 0.16, z1 - 0.34, x1, 0.2, z1, { solid: true, id: f.id });   // the kick plate
-  const levels = [0.72, 1.24];
+  // worn edges: the kick plate's front edge (carts and shoes) and the bottom of the end caps' gold edging, rubbed toward bare steel (class 7)
+  B.box(cooler ? 'wornCoolerBase' : 'wornBase', x0 - 0.0015, 0.16, z1 - 0.035, x1 + 0.0015, 0.2015, z1 + 0.0015, { id: f.id, cast: false });
+  for (const [a, b] of [[x0, x0 + side], [x1 - side, x1]]) B.box('wornGold', a - 0.0015, 0.16, z1 - 0.012, b + 0.0015, 0.3 + fh(40 + a) * 0.35, z1 + 0.0135, { id: f.id, cast: false });
+  // shelf heights differ a little from unit to unit, and so does how far each shelf front comes out; each shelf bows a little in the middle
+  const levels = [0.72 + (fh(1) - 0.5) * 2 * MESS.levelVar, 1.24 + (fh(2) - 0.5) * 2 * MESS.levelVar];
+  const sx0 = x0 + side, sx1 = x1 - side, sags = levels.map((_, L) => MESS.sag * (0.4 + 1.2 * fh(5 + L)) * (fh(9 + L) < MESS.bowedShare ? 2.4 : 1));
+  const fronts = levels.map((_, L) => z1 - 0.02 - fh(3 + L) * MESS.frontVar);
+  const sagAt = (L, x) => { if (L < 0) return 0; const t = Math.min(1, Math.max(0, (x - sx0) / (sx1 - sx0))); return sags[L] * 4 * t * (1 - t); };
   if (produce) {
     // produce: wooden crates in two tiers, tilted toward the aisle (front edge low), on a stepped stand
     for (const [y, za, zb2] of [[0.42, z1 - 0.62, z1 - 0.04], [0.95, zb + 0.1, z1 - 0.62]]) {
       B.box('woodDark', x0 + side, 0.16, za, x1 - side, y - 0.02, zb2, { solid: true, id: f.id });   // the stand under the tier
       const n = Math.max(1, Math.round((Wd - 2 * side) / 0.62)), cw = (Wd - 2 * side) / n;
-      for (let i = 0; i < n; i++) crate(B, x0 + side + i * cw + 0.02, x0 + side + (i + 1) * cw - 0.02, y, za, zb2, f.id);
+      for (let i = 0; i < n; i++) { const ch = (k) => hash(fid + i, k + (y > 0.6 ? 10 : 0), 331) - 0.5, xa = x0 + side + i * cw + 0.02, xb = x0 + side + (i + 1) * cw - 0.02, dx = ch(1) * 0.025;   // each crate set down by hand: a little off line and askew
+        B.tilted((xa + xb) / 2, y, (za + zb2) / 2, 0, ch(2) * 0.05, ch(3) * 0.02, () => crate(B, xa + dx, xb + dx, y, za, zb2, f.id)); }
     }
-  } else for (const y of levels) {
-    B.box(cooler ? 'coolershelf' : 'shelf', x0 + side, y - 0.03, zb + 0.05, x1 - side, y, z1 - 0.02, { solid: true, id: f.id });
-    B.box('trimGold', x0 + side, y - 0.065, z1 - 0.03, x1 - side, y - 0.015, z1 - 0.008, { id: f.id }); for (let tx = x0 + side + 0.15; tx < x1 - side - 0.1; tx += 0.34) B.box('tagwhite', tx, y - 0.058, z1 - 0.012, tx + 0.11, y - 0.024, z1 - 0.004, { id: f.id });   // the gold price strip with its tags
-  }
-  if (f.trim) B.box(f.trim === '#c1272d' ? 'trimRed' : 'trimBlue', x0, 0.2, z1 - 0.02, x1, 0.34, z1 + 0.008, { id: f.id, cast: false });
+  } else levels.forEach((y, L) => {
+    const zf = fronts[L], sag = sags[L];
+    B.sagBox(cooler ? 'coolershelf' : 'shelf', sx0, y - 0.03, zb + 0.05, sx1, y, zf, sag, { solid: true, id: f.id });
+    // the gold price strip follows the bow, and hangs a little off level (now and then well off: a clip gone)
+    const drop = fh(14 + L) < MESS.crookedShare ? (fh(16 + L) < 0.5 ? -1 : 1) * MESS.stripTilt * 3 : (fh(12 + L) - 0.5) * 2 * MESS.stripTilt, lean = (x) => drop * ((x - sx0) / (sx1 - sx0) - 0.5);
+    B.warped((x, yy, z) => [x, yy + lean(x), z], () => B.sagBox('trimGold', sx0, y - 0.065, zf - 0.01, sx1, y - 0.015, zf + 0.012, sag, { id: f.id }));
+    // the tags: uneven spacing, some missing, each clipped on a little crooked
+    for (let tx = sx0 + 0.1 + fh(18 + L) * 0.1, k = 0; tx < sx1 - 0.13; tx += 0.34 + (hash(fid, L * 100 + k, 311) - 0.5) * 0.14, k++) {
+      const th = (a) => hash(fid * 3 + L, k, 320 + a); if (th(1) < MESS.tagMiss) continue;
+      const ty = y - sagAt(L, tx + 0.055) + lean(tx + 0.055) - (th(2) < 0.1 ? 0.012 : 0);
+      B.tilted(tx + 0.055, ty - 0.041, zf, 0, 0, (th(3) - 0.5) * 0.18, () => B.box('tagwhite', tx, ty - 0.058, zf + 0.008, tx + 0.11, ty - 0.024, zf + 0.016, { id: f.id }));
+    }
+    // a strip of tape holding a loose bit of the strip (some units)
+    if (L === 1 && fh(22) < MESS.tape) { const tx = sx0 + 0.3 + fh(23) * (sx1 - sx0 - 0.6), ty = y - sagAt(L, tx) + lean(tx);
+      B.tilted(tx, ty - 0.04, zf, 0, 0, (fh(24) - 0.5) * 0.5, () => B.box(fh(25) < 0.5 ? 'tape' : 'tapeTan', tx - 0.035, ty - 0.085, zf + 0.0125, tx + 0.035, ty + 0.002, zf + 0.0145, { id: f.id, cast: false })); }
+  });
+  if (f.trim) { B.box(f.trim === '#c1272d' ? 'trimRed' : 'trimBlue', x0, 0.2, z1 - 0.02, x1, 0.34, z1 + 0.008, { id: f.id, cast: false });
+    const tx = x0 + 0.5 + fh(26) * (Wd - 1.0);   // a taped-over crack in the cooler's kick trim
+    B.tilted(tx, 0.27, z1, 0, 0, (fh(27) - 0.5) * 0.4, () => B.box('tape', tx - 0.09, 0.225, z1 + 0.0085, tx + 0.09, 0.3, z1 + 0.011, { id: f.id, cast: false })); }
   if (f.glass) { // glass doors: thin panes with mullions (no collision of their own: inside the footprint)
     const n = Math.round(Wd / 0.9);
     for (let i = 0; i <= n; i++) B.box('chrome', x0 + side + (Wd - 2 * side) * i / n - 0.02, 0.2, z1, x0 + side + (Wd - 2 * side) * i / n + 0.02, H, z1 + 0.05, { id: f.id });
@@ -284,9 +343,9 @@ function gondola(B, f, x0, z0, x1, z1, stock, info) {
   B.box('chrome', sx + sw / 2 - 0.26, H + 0.06, z1 - 0.5, sx + sw / 2 - 0.2, H + 0.15, z1 - 0.44, { id: f.id, cast: false });
   info.signs.push({ text: f.sign, x: sx, y: H + 0.15 + 0.26, z: z1 - 0.47, w: sw, h: 0.52 });
   // stock
-  if (produce) fillCrates(stock, f, x0 + side, x1 - side, z1, zb);
-  else fillShelves(stock, f, x0 + side + 0.08, x1 - side - 0.08, z1, [0.2, ...levels]);
-  if (!cooler) overstock(stock, f, x0 + side, x1 - side, zb, z1, H + 0.06, sx, sw);
+  if (produce) fillCrates(stock, f, x0 + side, x1 - side, z1, zb, fid);
+  else fillShelves(stock, f, x0 + side + 0.08, x1 - side - 0.08, [z1, ...fronts.map((z) => z + 0.02)], [0.2, ...levels], (L, x) => sagAt(L - 1, x), fid);
+  if (!cooler) overstock(stock, f, x0 + side, x1 - side, zb, z1, H + 0.06, sx, sw, fid);
   // (the north part of the blocked region is the plinth, already placed)
 }
 
@@ -294,21 +353,45 @@ function gondola(B, f, x0, z0, x1, z1, stock, info) {
 const SC = { jug: 1.75, carton: 2.1, eggs: 1.6, yogurt: 2.0, sack: 1.65, can: 2.8, pasta: 1.75, cereal: 1.6, loaf: 2.05, bagels: 1.9, bottle: 2.4, juicejug: 1.75, soda: 1.45, chips: 1.9, cookies: 1.9, box: 1.9, tub: 2.0, jugL: 1.7, spray: 2.0, towels: 1.35, apple: 2.3, orange: 2.2, lemon: 2.2, pepper: 2.0, banana: 2.0, grapes: 2.2, cabbage: 1.4, broccoli: 1.6, carrot: 2.0, potato: 2.0, onion: 2.0, tomato: 2.2, tray: 2.0, drumsticks: 2.0, tissue: 1.6, pack: 1.5, case: 1 };
 const NAT = { jug: 0.15, carton: 0.075, eggs: 0.3, yogurt: 0.14, sack: 0.2, can: 0.078, pasta: 0.17, cereal: 0.19, loaf: 0.3, bagels: 0.24, bottle: 0.066, juicejug: 0.1, soda: 0.105, chips: 0.2, cookies: 0.2, box: 0.17, tub: 0.146, jugL: 0.15, spray: 0.066, towels: 0.34, apple: 0.082, orange: 0.088, lemon: 0.09, pepper: 0.07, banana: 0.13, grapes: 0.08, cabbage: 0.17, broccoli: 0.13, carrot: 0.07, potato: 0.11, onion: 0.1, tomato: 0.08, tray: 0.2, drumsticks: 0.2, tissue: 0.22, pack: 0.29 };
 const GAP = 1.1;
-/** stock on the shelves: each shelf level is a run of "facings" (blocks of the same product, 2 deep), the way a real shelf is faced */
-function fillShelves(S, f, xa, xb, zf, bases) {
-  const jit = (i, k) => (((i * 37 + k * 101) % 17) / 17 - 0.5);
+/** stock on the shelves: each shelf level is a run of "facings" (blocks of the same product, 2 deep), the way a real shelf is faced, and then
+ *  shopped: facings pulled forward or pushed back, items twisted, gaps, a shelf sold half out, tall things leaning into a gap, now and then one
+ *  lying on its side or something left from another aisle (MESS). zfs[L] / bases[L]: the front and the height of level L; sagAt(L, x): the bow */
+const TALL = new Set(['bottle', 'soda', 'spray', 'jugL', 'juicejug', 'jug', 'carton', 'cereal', 'pasta']), ROLLS = new Set(['bottle', 'soda', 'spray', 'can', 'juicejug']);
+const STRAYS = [['chips', { label: 'chips', body: '#e8a42b' }], ['soda', { label: 'soda2', body: '#a8231f', cap: '#f4f4f0' }], ['can', { label: 'beans', body: '#b3322b' }], ['bottle', { label: 'juice', body: '#e8892a' }], ['cookies', { label: 'cookies', body: '#3a6ed6' }]];
+function fillShelves(S, f, xa, xb, zfs, bases, sagAt = () => 0, fid = 0) {
+  const R = (a, b, c) => hash(fid * 13 + a, b, 500 + c);
   // blocks: [[kind, opts, count], ...] repeated along the shelf; rows 2 deep
-  const runBlocks = (y, blocks, off) => {
+  const runBlocks = (L, y, blocks, off) => {
+    const zf = zfs[L], half = R(L, 0, 1) < MESS.halfEmpty, hs = xa + (xb - xa) * R(L, 1, 1) * 0.55, he = hs + (xb - xa) * (0.3 + R(L, 2, 1) * 0.3);
     for (let r = 0; r < 2; r++) {
-      let x = xa, i = 0, bi = off, left = blocks[bi % blocks.length][2];
-      for (;;) {
+      const slots = []; let x = xa, bi = off, left = blocks[bi % blocks.length][2];
+      for (;;) {   // the planogram (where things should be) ...
         const [k, o] = blocks[bi % blocks.length], w = NAT[k] * SC[k] * GAP; if (x + w > xb + 1e-6) break;
-        S.add(k, o, x + w / 2 + jit(i, 1) * 0.01, y, zf - 0.2 - r * 0.4 + jit(i, 2) * 0.012, jit(i + r, 3) * 0.12, SC[k]); x += w; i++;
+        const i = slots.length, q = (c) => R(L * 1000 + r * 500 + i, c, 3), cx = x + w / 2;
+        const gone = q(1) < (r ? MESS.gapBack : MESS.gapFront) || (half && cx > hs && cx < he && (r === 0 || q(2) < 0.6));
+        slots.push({ k, o, cx, w, gone, face: R(L * 10 + r, bi, 2) - 0.5, q }); x += w;
         if (--left <= 0) { bi++; left = blocks[bi % blocks.length][2]; x += 0.02; }
       }
+      slots.forEach((sl, i) => {   // ... and how it actually looks
+        const { q } = sl, yb = y - sagAt(L, sl.cx), zr = zf - 0.2 - r * 0.4;
+        if (sl.gone) {
+          if (r === 0 && ROLLS.has(sl.k) && q(4) < MESS.topple) {   // one lying on its side, top toward the aisle
+            const s = SC[sl.k], h = productH(sl.k, sl.o, s), ry = (q(5) - 0.5) * 0.5, rx = Math.PI / 2;
+            S.add(sl.k, sl.o, sl.cx + (q(6) - 0.5) * 0.03, yb + restLift(sl.k, sl.o, s, rx, ry, 0), zf - 0.04 - h, ry, s, rx);
+          }
+          return;
+        }
+        let k = sl.k, o = sl.o; if (q(7) < MESS.misplace) [k, o] = STRAYS[Math.floor(q(8) * STRAYS.length)];
+        const s = SC[k], big = q(9) < MESS.yawBigShare, ry = (q(10) - 0.5) * 2 * (big ? MESS.yawBig : MESS.yaw);
+        const pl = slots[i - 1], nx = slots[i + 1], gapL = !pl || pl.gone, gapR = nx ? nx.gone : false;
+        let rz = 0; if (TALL.has(k) && (gapL || gapR) && !(gapL && gapR && !pl) && q(11) < MESS.lean) rz = (gapR && (!gapL || q(12) < 0.5) ? -1 : 1) * (0.12 + q(13) * 0.16);
+        const dz = (r === 0 ? sl.face * 2 * MESS.facing : (sl.face * 0.5) * MESS.facing) + (q(14) - 0.5) * 0.02;
+        const dx = (q(15) - 0.5) * 2 * MESS.dx + rz * -0.12;   // a leaning item's foot slides away from the gap
+        S.add(k, o, sl.cx + dx, yb + (rz ? restLift(k, o, s, 0, ry, rz) : 0), Math.min(zr + dz, zf - 0.06 - NAT[k] * s * 0.5), ry, s, 0, rz);
+      });
     }
   };
-  const levels = (perLevel) => bases.forEach((y, L) => runBlocks(y, perLevel(L), L * 2));
+  const levels = (perLevel) => bases.forEach((y, L) => runBlocks(L, y, perLevel(L), L * 2));
   const D = {
     dairy: (L) => L === 0 ? [['eggs', {}, 2], ['yogurt', { lid: '#d6402f', label: 'yogurt' }, 3], ['box', { label: 'butter', body: '#f7e9a8', w: 0.16, h: 0.07, d: 0.09 }, 3], ['yogurt', { lid: '#7b4aa8', label: 'yogurt2' }, 3]]
       : [['jug', { label: 'milk', cap: '#2f6fd6' }, 4], ['jug', { label: 'milk2', cap: '#d6402f' }, 4], ['carton', { label: 'carton' }, 5], ['carton', { label: 'carton', body: '#fff7c8' }, 4]],
@@ -340,21 +423,24 @@ function crate(B, xa, xb, y, za, zb, id) {
   B.box('lip', xa + 0.04, y + 0.065, zb, xa + 0.2, y + 0.11, zb + 0.004, { id });        // a price card on the front
 }
 /** fruit and vegetables piled in the crates, following the tilt */
-function fillCrates(S, f, xa, xb, zf, zbk) {
+function fillCrates(S, f, xa, xb, zf, zbk, fid = 0) {
   const fr = f.stock === 'fruit', secs = fr ? [['banana', {}], ['apple', { body: '#6fb23a' }], ['apple', { body: '#c8282b' }], ['orange', {}], ['lemon', {}], ['grapes', {}], ['pepper', { body: '#d9382b' }]] : [['cabbage', {}], ['broccoli', {}], ['carrot', {}], ['tomato', {}], ['potato', {}], ['onion', {}], ['pepper', { body: '#2f9e44' }]];
   const tiers = [[0.42, zf - 0.62, zf - 0.04], [0.95, zbk + 0.1, zf - 0.62]];
   tiers.forEach(([y, za, zb], T) => {
     const d = zb - za, rise = Math.tan(TILT) * d, Wd = xb - xa, n = Math.max(1, Math.round(Wd / 0.62)), cw = Wd / n;
     for (let c = 0; c < n; c++) {
       const [k, o] = secs[(c + T * 3) % secs.length], st = NAT[k] * SC[k] * 0.95, a = xa + c * cw + 0.05, b = a + cw - 0.1;
-      for (let L = 0; L < 2; L++) for (let z = za + 0.05 + st / 2; z < zb - 0.04 - st / 2 * 0.6; z += st * 0.92) for (let x = a + st / 2 + (L ? st / 2 : 0), i = 0; x < b - st / 2; x += st, i++) {
-        const yy = y + (zb - z) / d * rise + 0.005 + L * st * 0.45; S.add(k, o, x + ((i * 7 + L) % 5 - 2) * 0.006, yy, z, (i * 1.7 + z * 9 + L) % 6.28, SC[k], TILT);
+      const low = hash(fid + c, T, 341) < 0.3, fill = low ? 0.55 : 0.92;   // some crates picked over: the top layer thins out toward the front
+      for (let L = 0; L < 2; L++) for (let z = za + 0.05 + st / 2, j = 0; z < zb - 0.04 - st / 2 * 0.6; z += st * 0.92, j++) for (let x = a + st / 2 + (L ? st / 2 : 0), i = 0; x < b - st / 2; x += st, i++) {
+        const q = (n) => hash(fid * 7 + c * 31 + L, j * 40 + i, 350 + n); if (L && q(1) > fill * (low ? 1 - (z - za) / d * 0.6 : 1)) continue;
+        const yy = y + (zb - z) / d * rise + 0.005 + L * st * 0.45; S.add(k, o, x + ((i * 7 + L) % 5 - 2) * 0.006 + (q(2) - 0.5) * st * 0.3, yy, z + (q(3) - 0.5) * st * 0.25, (i * 1.7 + z * 9 + L) % 6.28, SC[k], TILT);
       }
+      if (hash(fid + c, T, 343) < 0.35) { const q = (n) => hash(fid + c, T * 9 + n, 345); S.add(k, o, a + q(1) * (b - a), y + 0.07, zb + 0.01, q(2) * 6.28, SC[k], 0); }   // a stray rolled onto the front board
     }
   });
 }
 /** overstock on the unit's top: cardboard cases and shrink-wrapped trays, in short stacks, clear of the sign posts */
-function overstock(S, f, xa, xb, zb, zf, y, sx, sw) {
+function overstock(S, f, xa, xb, zb, zf, y, sx, sw, fid = 0) {
   const lab = { dairy: 'milk', rice: 'rice', bread: 'bread', juice: 'juice', snack: 'chips', house: 'soap', bev: 'soda2', frozen: 'frozen' }[f.stock] || 'casetop';
   const posts = [sx - sw / 2 + 0.23, sx + sw / 2 - 0.23];
   let x = xa + 0.1, i = 0;
@@ -362,21 +448,27 @@ function overstock(S, f, xa, xb, zb, zf, y, sx, sw) {
     const w = 0.38 + ((i * 5) % 3) * 0.06, h = 0.24 + ((i * 7) % 4) * 0.04, d = 0.34 + ((i * 3) % 2) * 0.08;
     if (posts.some((p) => Math.abs(p - (x + w / 2)) < w / 2 + 0.06)) { x += 0.14; continue; }
     if (i % 5 === 3) { x += 0.28; i++; continue; }   // a gap now and then: overstock is never a solid wall
-    const z = zb + 0.22 + ((i * 11) % 3) * 0.05, stack = 1 + ((i * 13) % 3 === 0 ? 1 : 0);
-    for (let k = 0; k < stack; k++) S.add('case', { label: k ? 'casetop' : lab, w, h, d, color: (i + k) % 3 ? '#b88a5a' : '#a8794a' }, x + w / 2, y + k * h, z, ((i * 3 + k) % 5 - 2) * 0.03, 1);
+    const z = zb + 0.22 + ((i * 11) % 3) * 0.05, stack = 1 + ((i * 13) % 3 === 0 ? 1 : 0) + (hash(fid, i, 361) < 0.15 ? 1 : 0);
+    for (let k = 0; k < stack; k++) { const q = (n) => hash(fid * 5 + i, k * 10 + n, 363) - 0.5, sl = k ? MESS.stackSlop : MESS.stackSlop * 0.4;   // stacked by hand: no two cases line up
+      const kw = k ? w * (0.85 + (q(4) + 0.5) * 0.15) : w, kd = k ? d * (0.85 + (q(5) + 0.5) * 0.15) : d, hh = k > 1 ? h * 0.8 : h;
+      S.add('case', { label: k ? 'casetop' : lab, w: kw, h: hh, d: kd, color: (i + k) % 3 ? '#b88a5a' : '#a8794a' }, x + w / 2 + q(1) * 2 * sl, y + k * h, z + q(2) * 2 * sl, ((i * 3 + k) % 5 - 2) * 0.03 + q(3) * (k ? 0.35 : 0.1), 1); }
     x += w + 0.06; i++;
   }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-function checkout(B, f, x0, z0, x1, z1, mats, info) {
-  const Wd = x1 - x0, top = 0.92, bx0 = x0 + 0.2, bx1 = x1 - 1.55;
+function checkout(B, f, x0, z0, x1, z1, mats, info, fid = 0) {
+  const Wd = x1 - x0, top = 0.92, bx0 = x0 + 0.2, bx1 = x1 - 1.55, fh = (k) => hash(fid, k, 371);
+  const wave = (a, ph) => (x, y, z) => [x, y + a * Math.sin(x * 1.7 + ph) + a * 0.6 * Math.sin(x * 4.3 + ph * 2), z];   // a gold edge pushed out of true over the years
   const solid = { solid: true, id: f.id };
   // the cabinet: a laminate body, the counter top in two bands, the belt between them
   B.box('lam', x0, 0.1, z0, x1, top - 0.04, z1, solid);
-  B.box('trimGold', x0, 0.16, z1 - 0.012, x1, 0.22, z1 + 0.008, { id: f.id, cast: false });
+  B.warped(wave(0.004, fh(1) * 6), () => B.sagBox('trimGold', x0, 0.16, z1 - 0.012, x1, 0.22, z1 + 0.008, 0, { id: f.id, cast: false }, 8));
   B.box('top', x0, top - 0.04, z1 - 0.62, x1, top, z1, solid);            // customer side counter (south)
-  B.box('trimGold', x0, top - 0.005, z1 - 0.012, x1, top + 0.012, z1 + 0.014, { id: f.id, cast: false });   // gold counter edge
+  B.warped(wave(0.0025, fh(2) * 6), () => B.sagBox('trimGold', x0, top - 0.005, z1 - 0.012, x1, top + 0.012, z1 + 0.014, 0, { id: f.id, cast: false }, 8));   // gold counter edge
+  B.box('wornLam', x0 - 0.0015, top - 0.015, z1 - 0.06, x1 + 0.0015, top + 0.0015, z1 - 0.012, { id: f.id, cast: false });   // the counter's front edge, rubbed by every elbow and bag
+  { const tx = x0 + 0.6 + fh(3) * (Wd - 1.6), ty = 0.32 + fh(4) * 0.25;   // a taped-over gash in the cabinet front, and the tape's second strip
+    B.tilted(tx, ty, z1, 0, 0, (fh(5) - 0.5) * 0.5, () => { B.box('tape', tx - 0.16, ty - 0.03, z1, tx + 0.16, ty + 0.03, z1 + 0.003, { id: f.id, cast: false }); if (fh(6) < 0.6) B.box('tape', tx - 0.12, ty - 0.085, z1, tx + 0.13, ty - 0.03, z1 + 0.0035, { id: f.id, cast: false }); }); }
   B.box('top', x0, top - 0.04, z0, x1, top, z1 - 1.6, solid);              // the cashier's desk (north)
   B.box('belt', bx0, top - 0.05, z1 - 1.6, bx1, top + 0.02, z1 - 0.62, { id: f.id });   // the conveyor
   for (let x = bx0 + 0.1; x < bx1 - 0.05; x += 0.22) B.box('chrome', x, top + 0.021, z1 - 1.6, x + 0.015, top + 0.03, z1 - 0.62, { id: f.id, cast: false });
@@ -394,7 +486,7 @@ function checkout(B, f, x0, z0, x1, z1, mats, info) {
   B.box('chrome', x1 - 0.55, top, z1 - 1.12, x1 - 0.3, top + 0.1, z1 - 0.9, { id: f.id });                          // receipt printer
   // bagging rack and a stack of baskets at the west end of the cashier's desk
   B.box('lip', x0 + 0.25, top, z0 + 0.2, x0 + 1.0, top + 0.18, z0 + 0.6, { id: f.id });
-  B.box('lip', x0 + 0.25, top + 0.18, z0 + 0.2, x0 + 1.0, top + 0.36, z0 + 0.6, { id: f.id });
+  B.tilted(x0 + 0.62, top + 0.18, z0 + 0.4, 0, (fh(7) - 0.5) * 0.2, (fh(8) - 0.5) * 0.04, () => B.box('lip', x0 + 0.25 + (fh(9) - 0.5) * 0.06, top + 0.18, z0 + 0.2 + (fh(10) - 0.5) * 0.05, x0 + 1.0, top + 0.36, z0 + 0.6, { id: f.id }));   // the second basket set on askew
   // the lane light pole at the west end (a steady green lamp)
   B.box('chrome', x0 + 0.1, top, z1 - 0.55, x0 + 0.17, 1.85, z1 - 0.48, { id: f.id });
   B.box('lamp', x0 + 0.03, 1.85, z1 - 0.62, x0 + 0.24, 2.1, z1 - 0.43, { id: f.id, cast: false });

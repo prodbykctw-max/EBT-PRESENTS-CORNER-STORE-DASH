@@ -46,6 +46,9 @@ const KEY_DIR = new THREE.Vector3(-0.3, 1.0, -0.45).normalize();         // towa
 //  These are that preview's values. The bloom stays the store's own, 0.22 over a 1.9 threshold, so the floor does not wash out to white.)
 /** the ceiling lamps' shadows on the floor (bakeLampShadows): h = lamp height (m), occ = height of what blocks them (a shelf), reach = how far a lamp lights (m), ambient = light that is not from a lamp (1 = the lamps add about as much again), strength = how dark a full shadow goes (0 none .. 1 black) */
 export const LAMP = { h: 3.2, occ: 1.9, reach: 5.5, ambient: 0.8, strength: 0.6 };
+/** the floor's wear, one line to edit (bakeFloorGrime; 0 = none): dirt (along walls and shelf bases, patches that cross the tiles, old spills),
+ *  marks (cracks, chipped tile corners, heel marks), tape (grey tape patches over a crack) */
+export const FLOOR_WEAR = { dirt: 1, marks: 1, tape: 1 };
 export const TUNE = { key: 1.6, hemi: 0.36, env: 0.5, ex: 0.76, lm: 0.85, bloom: 0.22, bt: 1.9, sat: 0.9, con: 0.0 };   // Nov 23 2026: the softer, more pastel 'A' the owner picked (was key 1.9, hemi 0.28, ex 0.85, lm 1.0, sat 1.04, con 0.1)
 /** The pickups' size: the pickups' own models (pickups.js) are held to ITEM_W m across; the gold ring is 1.3 m. */
 const ITEM_W = 1.05, ITEM_LOAD_MS = 15000;
@@ -62,6 +65,9 @@ const ITEM_MODELS = {
   LEMONADE: { parts: [{ keep: 0 }, { glb: 'lemon', s: 2.6, rot: [0, 0, Math.PI / 2], at: [0.2, 0, 0.12] }] },
   'RICE & BEANS': { parts: [{ keep: 0, at: [-0.22, 0, 0] }, { glb: 'beans', s: 3.04, rot: [0, 0, 0], at: [0.34, 0, 0] }] },
 };
+/** how far each header sign hangs off level (radians; + = the right end up). Small, so every aisle name still reads; one is properly crooked */
+const SIGN_TILT = { k: 0.022, crooked: 3, crookedBy: -0.045 };
+const signTilt = (i) => (i === SIGN_TILT.crooked ? SIGN_TILT.crookedBy : (T.hash(i, 1, 53) - 0.5) * 2 * SIGN_TILT.k);
 export class Store3D {
   constructor(canvas, { layout, base = new URL('../drive/', import.meta.url).href, mobile = false, pixelRatio } = {}) {
     this._unguard = guardRandom();   // until init() is over (see guardRandom)
@@ -90,16 +96,25 @@ export class Store3D {
     lap(TM, 'concrete'); await yieldNow(); const wallT = T.wallTexture(aniso), floorT = T.floorTextures(aniso); lap(TM, 'wallFloorTex'); await yieldNow(); const atlas = T.labelAtlas(aniso); useAtlas(atlas); this.atlas = atlas;
     const white = atlas.cell('white'), whiteUV = [(white[0] + white[2]) / 2, (white[1] + white[3]) / 2];
     lap(TM, 'labelAtlas'); await yieldNow(); const { aoMap, lightMap, lampVis } = this.bakeFloorLight(); lap(TM, 'floorLight'); await yieldNow();
+    const grime = this.bakeFloorGrime(); lap(TM, 'grime'); await yieldNow(); const wearTex = T.wearTexture(); lap(TM, 'wearTex'); await yieldNow();
     const mats = this.mats = {
       default: new THREE.MeshStandardMaterial({ color: 0x888888 }),
-      paint: paintMaterial(atlas.map, { envMapIntensity: 0.8 }),
+      paint: paintMaterial(atlas.map, { envMapIntensity: 0.8, wear: wearTex }),
       floor: new THREE.MeshPhysicalMaterial({ clearcoat: 0.55, clearcoatRoughness: 0.22, map: floorT.map, normalMap: floorT.normalMap, normalScale: new THREE.Vector2(0.9, 0.9), roughnessMap: floorT.roughnessMap, roughness: 1, metalness: 0, aoMap, aoMapIntensity: 1.0, lightMap, lightMapIntensity: 1.0, envMapIntensity: 0.55 }),
       wall: new THREE.MeshStandardMaterial({ map: wallT, normalMap: concN, normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.82, metalness: 0 }),
       glass: new THREE.MeshStandardMaterial({ color: 0xcfe6f2, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.22, depthWrite: false, envMapIntensity: 2.2 }),
     };
     mats.floor.onBeforeCompile = (sh) => {   // the lamps' shadows (bakeLampShadows) darken the floor's finished colour where a shelf shades it
-      sh.uniforms.uLampVis = { value: lampVis };
-      sh.fragmentShader = 'uniform sampler2D uLampVis;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', 'outgoingLight *= texture2D( uLampVis, vAoMapUv ).r;\n#include <opaque_fragment>');
+      sh.uniforms.uLampVis = { value: lampVis }; sh.uniforms.uGrime = { value: grime }; sh.uniforms.uGrimeK = { value: new THREE.Vector3(FLOOR_WEAR.dirt, FLOOR_WEAR.marks, FLOOR_WEAR.tape) };
+      // ...and the floor's years (bakeFloorGrime): r dirt (a brown-grey multiply), g sharp marks (cracks, chips, heel marks), b tape patches
+      sh.fragmentShader = 'uniform sampler2D uLampVis;\nuniform sampler2D uGrime;\nuniform vec3 uGrimeK;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', [
+        'outgoingLight *= texture2D( uLampVis, vAoMapUv ).r;',
+        'vec3 gm = texture2D( uGrime, vAoMapUv ).rgb;',
+        'outgoingLight *= mix( vec3( 1.0 ), vec3( 0.62, 0.53, 0.40 ), gm.r * uGrimeK.x );',
+        'outgoingLight *= 1.0 - 0.62 * gm.g * uGrimeK.y;',
+        'float gLum = dot( outgoingLight, vec3( 0.3, 0.59, 0.11 ) );',
+        'outgoingLight = mix( outgoingLight, vec3( gLum ) * vec3( 0.95, 0.99, 1.05 ) * 1.12, gm.b * uGrimeK.z );',
+        '#include <opaque_fragment>'].join('\n'));
     };
     lap(TM, 'materials'); this.scene.environment = this.makeEnvironment(); this.scene.environmentIntensity = 0.5; lap(TM, 'environment'); await yieldNow();
     const S = this.structure = buildStructure(layout, mats, { white: whiteUV, defer: true }); lap(TM, 'structure');
@@ -143,7 +158,7 @@ export class Store3D {
       return o;
     };
     const gauss = (a, sigma) => { const r = Math.max(1, Math.round(sigma * 0.93)); return boxBlur(boxBlur(boxBlur(a, r), r), r); };
-    const wide = gauss(src, 9), tight = gauss(src, 2.5), b = document.createElement('canvas'); b.width = W; b.height = H;
+    const wide = gauss(src, 9), tight = this._tight = gauss(src, 2.5), b = document.createElement('canvas'); b.width = W; b.height = H;
     const bg = b.getContext('2d'), id = bg.createImageData(W, H), d = id.data;
     for (let i = 0; i < W * H; i++) { const v = wide[i] * tight[i], a = 0.4 + 0.6 * Math.pow(v, 0.9), q = a * 255; d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = q; d[i * 4 + 3] = 255; }
     bg.putImageData(id, 0, 0);
@@ -188,6 +203,59 @@ export class Store3D {
     bg.putImageData(id, 0, 0); const t = T.tex(b, { srgb: false, aniso: 1 }); t.channel = 1; return t;
   }
 
+  /**
+   * The floor's years (Nov 24 2026, owner: "too neat ... the look of a tried and true corner store in the inner city of ATL", and "soften the
+   * gridded floor ... uneven grout, cracked or chipped tiles, and dirt patches that cross the grid"). Baked once on the floor's second UV set
+   * (the whole board, 2.8 cm a texel), so none of it repeats with the 2.4 m tile texture: r = dirt (along every wall and shelf base, from
+   * the floor's own mask, plus patches that cross the tile grid, plus old spills), g = sharp marks (hairline cracks across tiles, chipped tile
+   * corners, black heel marks), b = grey tape patches. Every random choice is a hash of the index: nothing draws Math.random.
+   */
+  bakeFloorGrime() {
+    const { board, field } = this.layout, mw = board.mw, mh = board.mh, K = 3, W = mw * K, H = mh * K, tw = m(board.cell) / K, h = T.hash;
+    const tight = this._tight, K2 = 2, W2 = mw * K2;
+    const floorAt = (x, y) => { const cx = (x / K) | 0, cy = (y / K) | 0; return cx >= 0 && cy >= 0 && cx < mw && cy < mh && field[cy][cx] !== '0'; };
+    // the smooth dirt on the mask's cell grid, then spread over the fine grid
+    const coarse = new Float32Array(mw * mh);
+    for (let cy = 0; cy < mh; cy++) for (let cx = 0; cx < mw; cx++) {
+      if (field[cy][cx] === '0') { coarse[cy * mw + cx] = 0.8; continue; }
+      const tv = tight[(cy * K2) * W2 + cx * K2], u = cx / mw, v = cy / mh, n = T.fbm(u, v * mh / mw, 40, 3, 901), p = T.fbm(u, v * mh / mw, 14, 3, 907);
+      const edge = Math.min(1, Math.max(0, (0.97 - tv) / 0.42)) * (0.55 + 0.75 * n);   // along walls and shelf bases, uneven
+      const patch = Math.min(1, Math.max(0, (p - 0.54) / 0.2)) * 0.6;                   // patches that cross the grid
+      coarse[cy * mw + cx] = Math.min(1, edge * 0.9 + patch + n * 0.08);
+    }
+    const R = new Float32Array(W * H), G = new Float32Array(W * H), Bt = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const fx = Math.min(mw - 1.001, Math.max(0, (x + 0.5) / K - 0.5)), fy = Math.min(mh - 1.001, Math.max(0, (y + 0.5) / K - 0.5)), ix = fx | 0, iy = fy | 0, ax = fx - ix, ay = fy - iy;
+      R[y * W + x] = (coarse[iy * mw + ix] * (1 - ax) + coarse[iy * mw + ix + 1] * ax) * (1 - ay) + (coarse[(iy + 1) * mw + ix] * (1 - ax) + coarse[(iy + 1) * mw + ix + 1] * ax) * ay;
+    }
+    const stamp = (A, x, y, r, val, soft = true) => { const x0 = Math.floor(x - r - 1), x1 = Math.ceil(x + r + 1), y0 = Math.floor(y - r - 1), y1 = Math.ceil(y + r + 1);
+      for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) { if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue; const d = Math.hypot(xx + 0.5 - x, yy + 0.5 - y), a = soft ? Math.max(0, 1 - d / Math.max(0.5, r)) : (d <= r ? 1 : 0); if (a > 0) A[yy * W + xx] = Math.max(A[yy * W + xx], val * a); } };
+    const tpx = 0.6 / tw, onFloor = (x, y) => floorAt(x, y) && floorAt(x + 4, y) && floorAt(x - 4, y) && floorAt(x, y + 4) && floorAt(x, y - 4);
+    // old spills: soft blots with a darker dried rim
+    for (let k = 0; k < 26; k++) { const x = h(k, 1, 911) * W, y = h(k, 2, 911) * H; if (!onFloor(x, y)) continue; const r = 4 + h(k, 3, 911) * 12, sq = 0.6 + h(k, 4, 911) * 0.8;
+      for (let yy = -r * 1.6; yy <= r * 1.6; yy++) for (let xx = -r * 1.6; xx <= r * 1.6; xx++) { const X = Math.round(x + xx), Y = Math.round(y + yy * sq); if (X < 0 || Y < 0 || X >= W || Y >= H) continue; const d = Math.hypot(xx, yy) / r, wob = 1 + 0.25 * Math.sin(Math.atan2(yy, xx) * 3 + k); if (d > wob * 1.1) continue; const i = Y * W + X; R[i] = Math.min(1, R[i] + (d > wob * 0.85 ? 0.38 : 0.2)); } }
+    // hairline cracks: a wandering line from a tile corner or edge, across one or two tiles
+    for (let k = 0; k < 22; k++) {
+      let x = Math.round(h(k, 5, 913) * W / tpx) * tpx, y = (h(k, 6, 913) * H); if (h(k, 7, 913) < 0.5) y = Math.round(y / tpx) * tpx; if (!onFloor(x, y)) continue;
+      let a = h(k, 8, 913) * 6.283; const len = tpx * (0.5 + h(k, 9, 913) * 1.3);
+      for (let t = 0; t < len; t += 0.5) { a += (h(k, Math.floor(t * 2), 917) - 0.5) * 0.35; x += Math.cos(a) * 0.5; y += Math.sin(a) * 0.5; stamp(G, x, y, 0.55, 0.7 * (1 - t / len * 0.5), false);
+        if (h(k, Math.floor(t), 919) < 0.04) { let bx = x, by = y, ba = a + (h(k, t | 0, 921) < 0.5 ? 0.9 : -0.9); for (let q = 0; q < 8 + h(k, t | 0, 923) * 14; q += 0.5) { bx += Math.cos(ba) * 0.5; by += Math.sin(ba) * 0.5; stamp(G, bx, by, 0.5, 0.5, false); } } }
+    }
+    // chipped tile corners: a small ragged notch where four tiles meet
+    for (let j = 0; j * tpx < H; j++) for (let i = 0; i * tpx < W; i++) { if (h(i, j, 925) > 0.05) continue; const x = i * tpx + (h(i, j, 927) - 0.5) * 1.5, y = j * tpx + (h(i, j, 929) - 0.5) * 1.5; if (!onFloor(x, y)) continue;
+      for (let q = 0; q < 4; q++) stamp(G, x + (h(i + q, j, 931) - 0.5) * 2.2, y + (h(i, j + q, 933) - 0.5) * 2.2, 0.8 + h(q, i + j, 935) * 0.9, 0.42, false); }
+    // heel and cart-wheel marks: short dark arcs, most in the aisles people use
+    for (let k = 0; k < 520; k++) { let x = h(k, 10, 937) * W, y = h(k, 11, 937) * H; if (!onFloor(x, y)) continue; let a = h(k, 12, 937) * 6.283; const len = 2 + h(k, 13, 937) * 7, cv = (h(k, 14, 937) - 0.5) * 0.3, v = 0.22 + h(k, 15, 937) * 0.3;
+      for (let t = 0; t < len; t += 0.5) { a += cv * 0.5; x += Math.cos(a) * 0.5; y += Math.sin(a) * 0.5; stamp(G, x, y, 0.6, v * (1 - Math.abs(t / len - 0.5)), false); } }
+    // grey tape over a few cracks and chips (somebody's fix)
+    for (let k = 0; k < 4; k++) { const cx = h(k, 16, 941) * W, cy = h(k, 17, 941) * H; if (!onFloor(cx, cy)) continue; const L = 0.22 / tw + h(k, 18, 941) * 0.3 / tw, Wd = 0.05 / tw, a = (h(k, 19, 941) - 0.5) * 1.2, ca = Math.cos(a), sa = Math.sin(a);
+      for (let q = 0; q < 1 + (k % 2); q++) { const ox = q ? -sa * Wd * 0.8 : 0, oy = q ? ca * Wd * 0.8 : 0;
+        for (let yy = -L; yy <= L; yy += 0.5) for (let xx = -L; xx <= L; xx += 0.5) { const u = xx * ca + yy * sa, v = -xx * sa + yy * ca; if (Math.abs(u) > L / 2 || Math.abs(v) > Wd / 2) continue; const X = Math.round(cx + xx + ox), Y = Math.round(cy + yy + oy); if (X >= 0 && Y >= 0 && X < W && Y < H) { Bt[Y * W + X] = 0.9; G[Y * W + X] *= 0.2; } } } }
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'), id = g.createImageData(W, H), d = id.data;
+    for (let i = 0; i < W * H; i++) { d[i * 4] = R[i] * 255; d[i * 4 + 1] = G[i] * 255; d[i * 4 + 2] = Bt[i] * 255; d[i * 4 + 3] = 255; }
+    g.putImageData(id, 0, 0); const t = T.tex(c, { srgb: false, aniso: 4 }); t.channel = 1; return t;
+  }
+
   makeEnvironment() {
     const room = new THREE.Scene(), box = new THREE.Mesh(new THREE.BoxGeometry(30, 12, 30), new THREE.MeshBasicMaterial({ color: 0xcdd3dc, side: THREE.BackSide })); room.add(box);
     for (let i = -2; i <= 2; i++) { const s = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 18), new THREE.MeshBasicMaterial({ color: new THREE.Color(7, 6.8, 6.4), side: THREE.DoubleSide })); s.rotation.x = Math.PI / 2; s.position.set(i * 5, 5.8, 0); room.add(s); }
@@ -225,12 +293,15 @@ export class Store3D {
     entries.push({ name: 'matExit', w: 256, h: 240, draw: (g, w, h) => T.drawPlate(g, w, h, 'EXIT', { bg: '#a82020', fg: '#f3c34a', border: '#f3c34a' }) });
     const A = this.decalAtlas = T.decalAtlas(entries, this.mobile ? 4 : 8), wd = A.white, buf = new GeoBuf();
     // header signs: a pink board, the lettered face toward the camera (+z)
-    info.signs.forEach((s, i) => buf.box(['#ffffff', 0.4, 0, 0.55], s.x - s.w / 2, s.y - s.h / 2, s.z - 0.03, s.x + s.w / 2, s.y + s.h / 2, s.z + 0.03, { skip: '', white: wd, uv: { pz: A.cell('sign' + i) } }));
-    info.signs.forEach((s) => { const p = ['#9a1a4d', 0.5, 0]; buf.box(p, s.x - s.w / 2 - 0.004, s.y - s.h / 2, s.z - 0.031, s.x + s.w / 2 + 0.004, s.y + s.h / 2 + 0.004, s.z + 0.029, { skip: 'pz', white: wd }); });
+    // (hung by hand, Nov 24 2026: each board is a little off level, SIGN_TILT[i] radians about its centre, so the lettering stays where it was)
+    info.signs.forEach((s, i) => { const from = buf.count;
+      buf.box(['#ffffff', 0.4, 0, 0.55], s.x - s.w / 2, s.y - s.h / 2, s.z - 0.03, s.x + s.w / 2, s.y + s.h / 2, s.z + 0.03, { skip: '', white: wd, uv: { pz: A.cell('sign' + i) } });
+      buf.box(['#9a1a4d', 0.5, 0], s.x - s.w / 2 - 0.004, s.y - s.h / 2, s.z - 0.031, s.x + s.w / 2 + 0.004, s.y + s.h / 2 + 0.004, s.z + 0.029, { skip: 'pz', white: wd });
+      buf.tilt(from, s.x, s.y, s.z, 0, (T.hash(i, 3, 57) - 0.5) * 0.03, signTilt(i)); });
     // the EXIT sign over the door
     { const ex = info.exit; buf.box(['#ffffff', 0.4, 0, 0.9], ex.x - 0.45, 2.45, ex.z + 0.05, ex.x + 0.45, 2.79, ex.z + 0.13, { skip: '', white: wd, uv: { pz: A.cell('exit') } }); }
     // posters on the north wall (the wall's south face is at board y 100)
-    [[1.4, 'sale'], [3.6, 'fresh'], [5.8, 'cold'], [7.6, 'eat']].forEach(([x, k]) => buf.box(['#ffffff', 0.6, 0, 0.12], x - 0.31, 1.94, m(100), x + 0.31, 2.76, m(100) + 0.012, { skip: '', white: wd, uv: { pz: A.cell('poster_' + k) } }));
+    [[1.4, 'sale'], [3.6, 'fresh'], [5.8, 'cold'], [7.6, 'eat']].forEach(([x, k], i) => { const from = buf.count; buf.box(['#ffffff', 0.6, 0, 0.12], x - 0.31, 1.94, m(100), x + 0.31, 2.76, m(100) + 0.012, { skip: '', white: wd, uv: { pz: A.cell('poster_' + k) } }); buf.tilt(from, x, 2.35, m(100), 0, 0, (T.hash(i, 5, 59) - 0.5) * 0.09); });   // taped up by hand, never quite level
     // floor lettering: the two door mats' tops (the painted store's ENTRANCE mat in the east lane, by the registers, is left out: there is no door there)
     for (const mt of info.mats) { const [x0, z0, x1, z1, y] = mt.rect, c = A.cell(mt.name), e = 0.05; buf.quad([x0 + e, y, z1 - e], [x1 - e, y, z1 - e], [x1 - e, y, z0 + e], [x0 + e, y, z0 + e], [0, 1, 0], [[c[0], c[1]], [c[2], c[1]], [c[2], c[3]], [c[0], c[3]]], new THREE.Color(1, 1, 1), [0.95, 0, 0]); }
     const mesh = this.decals = new THREE.Mesh(buf.build(), paintMaterial(A.map, { envMapIntensity: 0.6 })); mesh.castShadow = true; mesh.receiveShadow = true; mesh.name = 'decals'; this.root.add(mesh);
