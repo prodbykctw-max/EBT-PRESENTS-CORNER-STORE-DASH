@@ -4,7 +4,7 @@
 <style>html,body{margin:0;height:100%;background:#0d1020;overflow:hidden}canvas{display:block;position:fixed;left:0;top:0}#hud{position:fixed;left:6px;bottom:6px;color:#fff;font:11px ui-monospace,monospace;opacity:.7;pointer-events:none;white-space:pre}</style></head>
 <body><canvas id="c"></canvas><div id="hud"></div>
 <script type="module">
-// Phase-1 preview (not linked from the game). ?px=&py= player (board px), ?bx=&by= bully, ?face=U|D|L|R, ?items=all|MILK|none, ?pay=1, ?walk=1, ?mobile=1, ?dpr=3
+// Phase-1 preview (not linked from the game). ?px=&py= player (board px), ?bx=&by= bully, ?face=U|D|L|R, ?items=all|MILK|none, ?pay=1, ?walk=1, ?mobile=1, ?dpr=3, ?storelook=atl
 import { Store3D, TUNE } from './store3d.js';
 const q = new URLSearchParams(location.search), num = (k, d) => (q.has(k) ? +q.get(k) : d);
 window.addEventListener('error', (e) => { window.__s3dError = String(e.message); });
@@ -16,7 +16,7 @@ const P = { x: num('px', layout.spawnPlayer.x), y: num('py', layout.spawnPlayer.
 const face = q.get('face') || 'U', bface = q.get('bface') || 'D', mv = q.get('walk') === '1' ? 1 : 0;
 s.setActor('player', P.x, P.y, face, mv, 0.3); if (q.get('bully') !== '0') s.setActor('bully', Bu.x, Bu.y, bface, mv, 0.1); else s.hideActor('bully');
 s.setXray(q.get('xray') !== '0'); s.setItems(q.get('items') || 'all'); s.setItemScale(1); s.setPay(q.get('pay') === '1');
-{ const t = s.tune = Object.fromEntries(Object.entries(TUNE).map(([k, v]) => [k, num(k, v)])); s.applyTune(t); }   // ?key= ?ex= ?sat= ... try other values
+{ const t = s.tune = Object.fromEntries(Object.entries(s.tuneBase || TUNE).map(([k, v]) => [k, num(k, v)])); s.applyTune(t); }   // ?key= ?ex= ?sat= ... try other values (on top of this look's own: ?storelook=atl has its own)
 if (q.get('ao') === '0') s.look.fx.ao = false; if (q.get('shadow') === '0') { s.key.castShadow = false; }
 s.setCamera(P.x, P.y); s.resize(innerWidth, innerHeight);
 s.setCamera(P.x, P.y);

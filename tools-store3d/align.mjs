@@ -9,7 +9,8 @@ import { buildStructure, m, resolveFixtures } from '../public/store3d/structure.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const file = process.argv[2] || path.join(ROOT, 'public/store3d/layout.json'), L = JSON.parse(fs.readFileSync(file, 'utf8'));
 useAtlas({ cell: () => [0, 0, 1, 1] });
-const S = buildStructure(L, {}); const solids = S.info.solids.filter((b) => b.y1 - b.y0 >= 0.1 || b.y1 >= 0.1);
+const S = buildStructure(L, {}, { look: process.env.STORELOOK });   // STORELOOK=atl checks the ATL look (store3d/atl.js)
+const solids = S.info.solids.filter((b) => b.y1 - b.y0 >= 0.1 || b.y1 >= 0.1);
 const { mw, mh, cell } = L.board, fixtures = resolveFixtures(L);
 // spatial hash of solid boxes on the 4 px grid
 const grid = new Map(); const key = (x, y) => x + ',' + y;
