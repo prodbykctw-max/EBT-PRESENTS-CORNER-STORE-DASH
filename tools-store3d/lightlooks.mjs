@@ -4,9 +4,10 @@
 //  shots: the same three moments in every look (A: by the dairy aisle at the top, the bully in view; B: mid-store by the checkouts, PAY on;
 //         C: at the front doors), HUD included, as <look>_<A|B|C>.png; plus each frame with the player hidden and with the bully hidden
 //         (the difference is exactly the person, for the readability numbers: compose_lightlooks.py), the 3D draw calls and triangles, and
-//         with [mainRoot] (a checkout of main) the same 'now' frames from main, to be compared pixel for pixel.
+//         with [mainRoot] (a checkout of main) the same 'now' frames from main, twice (main, main2: what two loads of the same code differ
+//         by), to be compared pixel for pixel. LOOKS may name main / main2 to run them on their own.
 //  run:   one scripted run per look (7 items, caught once + CONTINUE, pay) with the same seeded Math.random; score parts and payload.
-//  flash: LOOKS' last look, ~3 s of frames at 30 fps with the player running about: flash_###.png.
+//  flash: FLASH=now,blackout (default LOOKS' last look), ~3 s of frames at 30 fps with the player running about: flash_<look>/f###.png.
 // Writes <outDir>/lightlooks.json.
 import fs from 'fs'; import path from 'path'; import { spawn } from 'child_process'; import { fileURLToPath } from 'url';
 import { chromium } from 'playwright-core';
@@ -67,7 +68,8 @@ const hideShot = (p, who, file) => p.evaluate((who) => { const c = window.__csd,
 try {
   if (ONLY.includes('shots')) {
     R.shots = R.shots || {};
-    const sets = LOOKS.map((L) => [L, S1.port, `&storelight=${L}`]); if (S2) sets.push(['main', S2.port, '']);
+    // (LOOKS may name main / main2: the 'now' frames from the [mainRoot] checkout, twice, to show what two loads of the SAME code differ by)
+    const sets = LOOKS.map((L) => (/^main/.test(L) ? [L, S2.port, ''] : [L, S1.port, `&storelight=${L}`])); if (S2 && !process.env.LOOKS) sets.push(['main', S2.port, ''], ['main2', S2.port, '']);
     for (const [look, port, q] of sets) {
       const { p, st } = await open(port, q); R.shots[look] = { start: st, at: {} };
       for (const [k, s] of Object.entries(POS)) {
@@ -82,7 +84,7 @@ try {
   }
   if (ONLY.includes('run')) {
     R.run = R.run || {};
-    const sets = LOOKS.map((L) => [L, S1.port, `&storelight=${L}`]); if (S2) sets.push(['main', S2.port, '']);
+    const sets = LOOKS.map((L) => (/^main/.test(L) ? [L, S2.port, ''] : [L, S1.port, `&storelight=${L}`])); if (S2 && !process.env.LOOKS) sets.push(['main', S2.port, '']);
     for (const [look, port, q] of sets) {
       const { p, st } = await open(port, q);
       await p.evaluate(async () => {
@@ -106,14 +108,17 @@ try {
     }
   }
   if (ONLY.includes('flash')) {
-    const look = LOOKS[LOOKS.length - 1], { p, st } = await open(S1.port, `&storelight=${look}`), dir = path.join(out, 'flash_' + look); fs.mkdirSync(dir, { recursive: true });
-    await place(p, { px: 330, py: 330, bx: 640, by: 560 });
-    const N = 90, moves = [[1, 0], [1, 0.3], [0, 1], [-1, 0.2], [-1, -0.4], [0, -1]];
-    for (let i = 0; i < N; i++) {
-      await p.evaluate((v) => { const c = window.__csd; c.setInput(v[0], v[1]); c.step(1 / 120, 4); }, moves[Math.floor(i / 15) % moves.length]);   // 4 steps of 1/120 s = one 30 fps frame
-      await p.screenshot({ path: path.join(dir, `f${String(i).padStart(3, '0')}.png`), type: 'png' });
+    // FLASH=now,blackout (default: LOOKS' last look): the same 3 s in each, so a look's own light can be told apart from the picture scrolling
+    for (const look of (process.env.FLASH || LOOKS[LOOKS.length - 1]).split(',')) {
+      const { p, st } = await open(S1.port, `&storelight=${look}`), dir = path.join(out, 'flash_' + look); fs.mkdirSync(dir, { recursive: true });
+      await place(p, { px: 330, py: 330, bx: 640, by: 560 });
+      const N = 90, moves = [[1, 0], [1, 0.3], [0, 1], [-1, 0.2], [-1, -0.4], [0, -1]];
+      for (let i = 0; i < N; i++) {
+        await p.evaluate((v) => { const c = window.__csd; c.setInput(v[0], v[1]); c.step(1 / 120, 4); }, moves[Math.floor(i / 15) % moves.length]);   // 4 steps of 1/120 s = one 30 fps frame
+        await p.screenshot({ path: path.join(dir, `f${String(i).padStart(3, '0')}.png`), type: 'png' });
+      }
+      R['flash_' + look] = { look, frames: N, fps: 30, start: st, errs: p.errs, player: await p.evaluate(() => [window.__csd.player.x, window.__csd.player.y]) }; await p.close(); save();
     }
-    R.flash = { look, frames: N, fps: 30, start: st, errs: p.errs, player: await p.evaluate(() => [window.__csd.player.x, window.__csd.player.y]) }; await p.close(); save();
   }
 } finally { save(); await b.close(); S1.p.kill(); if (S2) S2.p.kill(); }
 console.log(JSON.stringify(R, (k, v) => (k === 'order' ? undefined : v)).slice(0, 3000));

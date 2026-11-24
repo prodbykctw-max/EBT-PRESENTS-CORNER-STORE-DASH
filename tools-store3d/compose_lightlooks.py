@@ -39,6 +39,12 @@ for k, _ in ROWS:
     if os.path.exists(a) and os.path.exists(b):
         A, B = load(a), load(b); d = np.abs(A - B).max(axis=2)
         out['nowVsMain'][k] = {'differingPixels': int((d > 0).sum()), 'of': int(d.size), 'maxChannelDiff': int(d.max())}
+        for suf in ('', '_still'):
+            c = os.path.join(D, f'main2_{k}{suf}.png'); a2 = os.path.join(D, f'now_{k}{suf}.png'); b2 = os.path.join(D, f'main_{k}{suf}.png')
+            if os.path.exists(c):
+                d2 = np.abs(load(b2) - load(c)).max(axis=2); d3 = np.abs(load(a2) - load(b2)).max(axis=2)
+                out['nowVsMain'][k]['mainVsMain2' + suf] = {'differingPixels': int((d2 > 0).sum()), 'maxChannelDiff': int(d2.max())}
+                out['nowVsMain'][k]['nowVsMain' + suf] = {'differingPixels': int((d3 > 0).sum()), 'maxChannelDiff': int(d3.max())}
 # ---- readability: the person = where hiding them changed the frame (above their feet); the floor = a ring round their feet
 for look, _ in LOOKS:
     sh = R.get('shots', {}).get(look); 
