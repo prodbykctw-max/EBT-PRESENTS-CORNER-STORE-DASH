@@ -82,7 +82,8 @@ for look, _ in LOOKS:
         out['stats'][f'{look}_{k}'] = at.get('stats')
 # ---- flashing: 3 s of frames; per 1/16 x 1/16 block of the screen (and the whole screen), the largest change in mean luminance
 for fd in sorted(glob.glob(os.path.join(D, 'flash_*'))):
-    fs_ = sorted(glob.glob(os.path.join(fd, 'f*.png')))
+  for pre, tag in (('f', ''), ('g', '_3d_only')):
+    fs_ = sorted(glob.glob(os.path.join(fd, pre + '*.png')))
     if len(fs_) < 2: continue
     prev = None; worst = {'blockDeltaY': 0, 'blockDeltaL': 0, 'frameDeltaL': 0}; nb = 16; series = []
     for f in fs_:
@@ -91,6 +92,6 @@ for fd in sorted(glob.glob(os.path.join(D, 'flash_*'))):
         if prev is not None:
             worst['blockDeltaY'] = max(worst['blockDeltaY'], float(np.abs(by - prev[0]).max())); worst['blockDeltaL'] = max(worst['blockDeltaL'], float(np.abs(bl - prev[1]).max())); worst['frameDeltaL'] = max(worst['frameDeltaL'], abs(fl - prev[2]))
         prev = (by, bl, fl); series.append(round(fl, 2))
-    out['flash_' + os.path.basename(fd)] = {'frames': len(fs_), 'blockArea': f'1/{nb} x 1/{nb} of the screen ({W // nb} x {H // nb} px)', **{k: round(v, 4) for k, v in worst.items()}, 'frameMeanL': series}
+    out['flash_' + os.path.basename(fd) + tag] = {'frames': len(fs_), 'blockArea': f'1/{nb} x 1/{nb} of the screen ({W // nb} x {H // nb} px)', **{k: round(v, 4) for k, v in worst.items()}, 'frameMeanL': series}
 json.dump(out, open(os.path.join(D, 'numbers.json'), 'w'), indent=1)
 print(json.dumps({k: v for k, v in out.items() if k not in ('frames',)}, indent=1)[:6000])

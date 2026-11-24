@@ -114,7 +114,9 @@ try {
       await place(p, { px: 330, py: 330, bx: 640, by: 560 });
       const N = 90, moves = [[1, 0], [1, 0.3], [0, 1], [-1, 0.2], [-1, -0.4], [0, -1]];
       for (let i = 0; i < N; i++) {
-        await p.evaluate((v) => { const c = window.__csd; c.setInput(v[0], v[1]); c.step(1 / 120, 4); }, moves[Math.floor(i / 15) % moves.length]);   // 4 steps of 1/120 s = one 30 fps frame
+        // 4 steps of 1/120 s = one 30 fps frame; the 3D canvas alone is read back in the same task it was drawn in (g###: no HUD, no bubbles)
+        const g = await p.evaluate((v) => { const c = window.__csd; c.setInput(v[0], v[1]); c.step(1 / 120, 4); return c.store3d.st.canvas.toDataURL('image/png'); }, moves[Math.floor(i / 15) % moves.length]);
+        fs.writeFileSync(path.join(dir, `g${String(i).padStart(3, '0')}.png`), Buffer.from(g.split(',')[1], 'base64'));
         await p.screenshot({ path: path.join(dir, `f${String(i).padStart(3, '0')}.png`), type: 'png' });
       }
       R['flash_' + look] = { look, frames: N, fps: 30, start: st, errs: p.errs, player: await p.evaluate(() => [window.__csd.player.x, window.__csd.player.y]) }; await p.close(); save();
