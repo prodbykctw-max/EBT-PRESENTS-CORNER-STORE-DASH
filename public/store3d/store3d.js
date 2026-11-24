@@ -44,6 +44,8 @@ const KEY_DIR = new THREE.Vector3(-0.3, 1.0, -0.45).normalize();         // towa
  *  bloom, 0.55 at a 0.9 threshold, which washed the cream floor out to white.) */
 // (Nov 23 2026: the owner asked for the look of the first 3D sheets he was shown back, in place of the darker, richer grade of Nov 17.
 //  These are that preview's values. The bloom stays the store's own, 0.22 over a 1.9 threshold, so the floor does not wash out to white.)
+/** the ceiling lamps' shadows on the floor (bakeLampShadows): h = lamp height (m), occ = height of what blocks them (a shelf), reach = how far a lamp lights (m), ambient = light that is not from a lamp (1 = the lamps add about as much again), strength = how dark a full shadow goes (0 none .. 1 black) */
+export const LAMP = { h: 3.2, occ: 1.9, reach: 5.5, ambient: 0.8, strength: 0.6 };
 export const TUNE = { key: 1.6, hemi: 0.36, env: 0.5, ex: 0.76, lm: 0.85, bloom: 0.22, bt: 1.9, sat: 0.9, con: 0.0 };   // Nov 23 2026: the softer, more pastel 'A' the owner picked (was key 1.9, hemi 0.28, ex 0.85, lm 1.0, sat 1.04, con 0.1)
 /** The pickups' size: the pickups' own models (pickups.js) are held to ITEM_W m across; the gold ring is 1.3 m. */
 const ITEM_W = 1.05, ITEM_LOAD_MS = 15000;
@@ -87,13 +89,17 @@ export class Store3D {
     const [concD, concN] = await Promise.all([conc('conc_d.webp', true), conc('conc_n.webp', false)]);
     lap(TM, 'concrete'); await yieldNow(); const wallT = T.wallTexture(aniso), floorT = T.floorTextures(aniso); lap(TM, 'wallFloorTex'); await yieldNow(); const atlas = T.labelAtlas(aniso); useAtlas(atlas); this.atlas = atlas;
     const white = atlas.cell('white'), whiteUV = [(white[0] + white[2]) / 2, (white[1] + white[3]) / 2];
-    lap(TM, 'labelAtlas'); await yieldNow(); const { aoMap, lightMap } = this.bakeFloorLight(); lap(TM, 'floorLight'); await yieldNow();
+    lap(TM, 'labelAtlas'); await yieldNow(); const { aoMap, lightMap, lampVis } = this.bakeFloorLight(); lap(TM, 'floorLight'); await yieldNow();
     const mats = this.mats = {
       default: new THREE.MeshStandardMaterial({ color: 0x888888 }),
       paint: paintMaterial(atlas.map, { envMapIntensity: 0.8 }),
       floor: new THREE.MeshPhysicalMaterial({ clearcoat: 0.55, clearcoatRoughness: 0.22, map: floorT.map, normalMap: floorT.normalMap, normalScale: new THREE.Vector2(0.9, 0.9), roughnessMap: floorT.roughnessMap, roughness: 1, metalness: 0, aoMap, aoMapIntensity: 1.0, lightMap, lightMapIntensity: 1.0, envMapIntensity: 0.55 }),
       wall: new THREE.MeshStandardMaterial({ map: wallT, normalMap: concN, normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.82, metalness: 0 }),
       glass: new THREE.MeshStandardMaterial({ color: 0xcfe6f2, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.22, depthWrite: false, envMapIntensity: 2.2 }),
+    };
+    mats.floor.onBeforeCompile = (sh) => {   // the lamps' shadows (bakeLampShadows) darken the floor's finished colour where a shelf shades it
+      sh.uniforms.uLampVis = { value: lampVis };
+      sh.fragmentShader = 'uniform sampler2D uLampVis;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', 'outgoingLight *= texture2D( uLampVis, vAoMapUv ).r;\n#include <opaque_fragment>');
     };
     lap(TM, 'materials'); this.scene.environment = this.makeEnvironment(); this.scene.environmentIntensity = 0.5; lap(TM, 'environment'); await yieldNow();
     const S = this.structure = buildStructure(layout, mats, { white: whiteUV, defer: true }); lap(TM, 'structure');
@@ -148,7 +154,38 @@ export class Store3D {
       const x = 2.6 + xi * 4.5 + (zi % 2) * 2.0, z = 4.5 + zi * 4.2, gr = lg.createRadialGradient(x * sx, z * sz, 0, x * sx, z * sz, 3.4 * sx);
       gr.addColorStop(0, 'rgba(255,226,170,0.62)'); gr.addColorStop(0.55, 'rgba(255,226,170,0.2)'); gr.addColorStop(1, 'rgba(255,238,205,0)'); lg.fillStyle = gr; lg.globalCompositeOperation = 'lighter'; lg.fillRect(0, 0, 214, 461);
     }
-    const lt = T.tex(l, { aniso: 1 }); lt.channel = 1; return { aoMap: ao, lightMap: lt };
+    const lt = T.tex(l, { aniso: 1 }); lt.channel = 1;
+    return { aoMap: ao, lightMap: lt, lampVis: this.bakeLampShadows() };
+  }
+
+  /** The shadows the ceiling lamps throw on the floor (Nov 23 2026, owner: overhead lighting with real shadows). Every lamp of the light pools
+   *  above sits LAMP_H up; for each floor texel the ray to the lamp (5 points across the lamp so the edge is soft) is walked over the mask and
+   *  is cut where a blocked cell (shelf, counter, wall: OCC_H high) stands in front of it. The texel's light is (ambient + sum of lamp falloff x
+   *  how much of the lamp it sees) over (ambient + sum of lamp falloff): 1 in the open, lower in a shelf's shade. Static, so baked once.
+   *  Returns a texture (red = 1 lit .. lower = shaded) on the floor's second UV set, multiplied into the floor's colour in the shader. */
+  bakeLampShadows() {
+    const { board, field } = this.layout, mw = board.mw, mh = board.mh, K = 2, W = mw * K, H = mh * K, bw = m(board.w), bh = m(board.h), LAMP_H = LAMP.h, OCC_H = LAMP.occ, R = LAMP.reach;
+    const blocked = new Uint8Array(W * H); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) blocked[y * W + x] = field[(y / K) | 0][(x / K) | 0] === '0' ? 1 : 0;
+    const lamps = []; for (let zi = 0; zi < 10; zi++) for (let xi = 0; xi < 4; xi++) lamps.push([2.6 + xi * 4.5 + (zi % 2) * 2.0, 4.5 + zi * 4.2]);
+    const E = new Float32Array(W * H), N = new Float32Array(W * H), px = W / bw, pz = H / bh, off = [[0, 0], [0.55, 0], [-0.55, 0], [0, 0.55], [0, -0.55]];
+    for (const [lx, lz] of lamps) {
+      const x0 = Math.max(0, Math.floor((lx - R) * px)), x1 = Math.min(W - 1, Math.ceil((lx + R) * px)), z0 = Math.max(0, Math.floor((lz - R) * pz)), z1 = Math.min(H - 1, Math.ceil((lz + R) * pz));
+      for (let zt = z0; zt <= z1; zt++) for (let xt = x0; xt <= x1; xt++) {
+        const wx = (xt + 0.5) / px, wz = (zt + 0.5) / pz, d = Math.hypot(wx - lx, wz - lz); if (d >= R) continue;
+        const f = 1 - (d / R) * (d / R), w = f * f, i = zt * W + xt; N[i] += w;
+        if (blocked[i]) { E[i] += w; continue; }   // under a fixture: not seen, left unshaded
+        let vis = 0;
+        for (const [ox, oz] of off) {
+          const tx = lx + ox, tz = lz + oz, steps = Math.max(4, Math.ceil(Math.hypot(tx - wx, tz - wz) * 6)); let seen = 1;
+          for (let k = 1; k < steps; k++) { const t = k / steps; if (t * LAMP_H > OCC_H) break; const cx = Math.floor((wx + (tx - wx) * t) * px), cz = Math.floor((wz + (tz - wz) * t) * pz); if (cx >= 0 && cz >= 0 && cx < W && cz < H && blocked[cz * W + cx]) { seen = 0; break; } }
+          vis += seen;
+        }
+        E[i] += w * vis / off.length;
+      }
+    }
+    const b = document.createElement('canvas'); b.width = W; b.height = H; const bg = b.getContext('2d'), id = bg.createImageData(W, H), d = id.data;
+    for (let i = 0; i < W * H; i++) { const lit = N[i] > 0 ? (LAMP.ambient + E[i]) / (LAMP.ambient + N[i]) : 1, q = (1 - LAMP.strength * (1 - lit)) * 255; d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = q; d[i * 4 + 3] = 255; }
+    bg.putImageData(id, 0, 0); const t = T.tex(b, { srgb: false, aniso: 1 }); t.channel = 1; return t;
   }
 
   makeEnvironment() {

@@ -145,7 +145,7 @@ export function buildStructure(layout, mats, opts = {}) {
     for (let i = 0; i < p.count; i++) { uv.setXY(i, p.getX(i) / FS, p.getZ(i) / FS); uv1[i * 2] = p.getX(i) / m(layout.board.w); uv1[i * 2 + 1] = p.getZ(i) / m(layout.board.h); }
     g.setAttribute('uv1', new THREE.BufferAttribute(uv1, 2)); floorG.push(g);
   }
-  const floor = new THREE.Mesh(mergeGeometries(floorG, false), mats.floor || mats.default); floor.receiveShadow = true; floor.name = 'floor'; floor.frustumCulled = false; root.add(floor);
+  const floor = new THREE.Mesh(mergeGeometries(floorG, false), mats.floor || mats.default); floor.receiveShadow = false; floor.name = 'floor'; floor.frustumCulled = false; root.add(floor);
 
   // ---- fixtures
   const stock = new Stock(); B.stock = stock;
