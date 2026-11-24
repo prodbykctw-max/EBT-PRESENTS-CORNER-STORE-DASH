@@ -34,13 +34,13 @@ function lampHeads(city) {
 // (real-post.js) rebuilds every pixel's world position from the depth buffer, looks it up and brightens that pixel by its own colour (so asphalt
 // stays asphalt, lane paint catches more light than the road, and the runner, the bully, cars and cards under a lamp are lit like the road under
 // them). No geometry, so no floating plane, no hard edge where a decal cuts into a slope or a curb, nothing that can sit under the camera.
-//   R: lamp light (soft: a 6.5 m gaussian core and a faint tail out to 14 m), G: shop spill, B: the lamp heads' height (light only falls below
+//   R: lamp light (soft: a 6.5 m gaussian core and a wide 16 m gaussian spread out to 34 m, so the street between two lamps is dim, not black), G: shop spill, B: the lamp heads' height (light only falls below
 //   the head), A: the ground's height (the spill only lights the first few metres up). Steady: nothing here moves or changes over time.
-export const LAMP_LIGHT = { core: 6.5, tail: 14, shop: 0.5 };
+export const LAMP_LIGHT = { core: 6.5, spread: 16, reach: 34, shop: 0.5 };
 export function lampLight(city, spots = []) {
   const heads = lampHeads(city);
   if (!heads.length) return null;
-  const R = LAMP_LIGHT.tail + 2;
+  const R = LAMP_LIGHT.reach + 2;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, yLo = Infinity, yHi = -Infinity;
   const shops = spots.map(([x, z, w]) => ({ x, y: -z, r: w / 2 + 3, g: city.ground(x, -z) }));
   for (const p of [...heads, ...shops]) { x0 = Math.min(x0, p.x - R); y0 = Math.min(y0, p.y - R); x1 = Math.max(x1, p.x + R); y1 = Math.max(y1, p.y + R); yLo = Math.min(yLo, p.g); yHi = Math.max(yHi, p.h ?? p.g); }
@@ -56,8 +56,8 @@ export function lampLight(city, spots = []) {
       const e = fn(r), k = j * W + i; acc[k] += e; if (hv) { hs[k] += e * hv[0]; gs[k] += e * hv[1]; }
     }
   };
-  const { core, tail } = LAMP_LIGHT;
-  for (const p of heads) splat(p, tail, (r) => 0.85 * Math.exp(-((r / core) ** 2)) + 0.15 * (1 - r / tail) ** 2, lamp, [p.h, p.g]);
+  const { core, spread, reach } = LAMP_LIGHT;
+  for (const p of heads) splat(p, reach, (r) => 0.68 * Math.exp(-((r / core) ** 2)) + 0.4 * Math.exp(-((r / spread) ** 2)), lamp, [p.h, p.g]);
   for (const p of shops) splat(p, p.r, (r) => (1 - (r / p.r) ** 2) ** 2, shop, [p.g + 3, p.g]);
   const wsum = new Float32Array(W * H); for (let k = 0; k < W * H; k++) wsum[k] = lamp[k] + shop[k];
   const data = new Uint8Array(W * H * 4), span = yHi - yLo, q = (v) => Math.max(0, Math.min(255, Math.round(v * 255)));

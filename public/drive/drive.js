@@ -806,6 +806,7 @@ export async function startDrive({ mount = document.body, muted = false, onDone 
   const me = await makePerson(false);
   if (frozen()) await macrotask();
   const him = await makePerson(true);
+  if (RL) RL.lightPeople([me.o, him.o]);   // the realistic look: you and the bully readable at night (real.js; nothing changes by day)
   if (frozen()) await macrotask();
 
   // ---------- the line you run along ----------

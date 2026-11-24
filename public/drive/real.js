@@ -235,7 +235,11 @@ function wallPatch(T) {
         // night: whole floors of the tower are lit, with the odd dark panel (steady, hashed from the panel's place)
         vec2 tid = floor(vFac / vec2(3.1, 3.9)); float tfl = h21(vec2(tid.y, seed * 13.0 + 1.0)), tpc = h21(tid + seed * 91.0);
         float far = smoothstep(1.0, 4.0, max(fwidth(vFac.x), fwidth(vFac.y)));   // a pixel that covers several rooms shows the average, not noise
-        wEm += mix(vec3(1.0, 0.8, 0.52), vec3(0.78, 0.88, 1.0), step(0.6, h21(tid + 9.0 + seed))) * mix(step(0.36, tfl) * step(0.14, tpc), 0.55, far) * pm * (1.0 - band) * 0.7;
+        // at night (uDark) fewer floors are lit (offices empty out), each lit panel at its own level instead of one flat cream band, and a pixel that
+        // covers more than about half a panel already shows the average: the full-strength bands sparkled into noisy white blocks on a phone
+        float farN = mix(far, smoothstep(0.35, 1.5, max(fwidth(vFac.x), fwidth(vFac.y))), uDark);
+        float tLit = step(mix(0.36, 0.55, uDark), tfl) * step(0.14, tpc) * mix(1.0, 0.5 + 0.5 * h21(tid * 1.7 + seed * 7.0 + 3.1), uDark);
+        wEm += mix(vec3(1.0, 0.8, 0.52), vec3(0.78, 0.88, 1.0), step(0.6, h21(tid + 9.0 + seed))) * mix(tLit, mix(0.55, 0.3, uDark), farN) * mix(pm, 0.8, max(farN, 0.7) * uDark) * (1.0 - band) * 0.7;
       } else {
         float bay = isTower ? 1.55 : (style > 1.5 ? 2.4 : 3.0), floorH = style > 2.5 ? 3.9 : 3.6;
         vec2 cell = vec2(fract(vFac.x / bay), fract(vFac.y / floorH)), id = vec2(floor(vFac.x / bay), floor(vFac.y / floorH));
@@ -263,7 +267,7 @@ function wallPatch(T) {
         float grd = 1.0 - step(0.5, id.y);
         float roomR = h21(id * 1.31 + seed * 53.0 + 4.7), roomC = h21(id.yx * 2.17 + seed * 29.0 + 1.3);
         vec3 wc = roomC < 0.55 ? vec3(1.0, 0.7, 0.36) : (roomC < 0.85 ? vec3(0.95, 0.88, 0.7) : vec3(0.55, 0.65, 1.0));   // warm bulbs, white, and the odd TV blue
-        float farR = smoothstep(1.0, 4.0, max(fwidth(vFac.x), fwidth(vFac.y)));
+        float farR = mix(smoothstep(1.0, 4.0, max(fwidth(vFac.x), fwidth(vFac.y))), smoothstep(0.35, 1.5, max(fwidth(vFac.x), fwidth(vFac.y))), uDark);   // (at night the average sooner: see the towers above)
         wEm += wc * win * (1.0 - rim) * mix(step(grd > 0.5 ? 0.12 : 0.5, roomR), grd > 0.5 ? 0.88 : 0.5, farR) * mix(0.6, 1.5, roomR) * (grd > 0.5 ? 1.4 : 1.0);
         if (grd > 0.5 && style < 2.5) {
           float bw = bay * 2.0, sid = floor(vFac.x / bw);
@@ -485,6 +489,24 @@ export function upgradeCar(carModel, T) {
 }
 
 /** the bully is made from the player's material by cloning it (drive.js makePerson), so anything the player's look needs goes here, first */
+/** you and the bully at night (uDark): their own albedo lifted a little and a cool rim where the body turns away from the camera, so a runner on a dark
+ *  road reads as a figure and not a black cut-out (the on-foot camera looks down on them from behind, mostly at the unlit side). Steady; by day
+ *  and through the pink dusk (uDark 0) nothing changes. Call after the bully's recolour material exists (chain keeps it). */
+export const PEOPLE_NIGHT = { lift: 0.14, rim: 1.1, cool: 0.03 };
+export function lightPeople(roots) {
+  const seen = new Set();
+  for (const root of roots) root.traverse((o) => {
+    const m = o.isMesh && o.material; if (!m || seen.has(m)) return; seen.add(m);
+    chain(m, (sh) => {
+      sh.uniforms.uDark = GLOW.uDark;
+      let f = rep(sh.fragmentShader, '#include <common>', 'uniform float uDark;');
+      sh.fragmentShader = rep(f, '#include <emissivemap_fragment>', `
+        { float fr = 1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0); fr *= fr;
+          totalEmissiveRadiance += uDark * ((diffuseColor.rgb * (${PEOPLE_NIGHT.lift.toFixed(3)} + ${PEOPLE_NIGHT.rim.toFixed(3)} * fr)) * vec3(0.8, 0.86, 1.0) + ${PEOPLE_NIGHT.cool.toFixed(3)} * fr * vec3(0.6, 0.7, 1.0)); }`);
+    }, 'people_night');
+  });
+}
+
 export function upgradeCharacter(root) {
   root.traverse((o) => { if (o.isMesh && o.material?.isMeshStandardMaterial) { o.material.roughness = 0.82; o.material.envMapIntensity = 0.85; } });
 }
