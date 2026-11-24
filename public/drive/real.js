@@ -211,6 +211,10 @@ function wallPatch(T) {
       float wRough = 0.8, wMetal = 0.0, wAO = 1.0; vec3 wNr = vec3(0.5, 0.5, 1.0); vec2 wTilt = vec2(0.0), wUv = vec2(0.0);`);
     f = rep(f, '#include <color_fragment>', `
       float style = vInfo.x, height = vInfo.y, seed = vInfo.z;
+      // (at night, uDark, the building's seed is snapped to a 1/4096 grid: it is one value per building, but its interpolation wobbles in the last bits from
+      // pixel to pixel, and the window hashes below (sin of ~1e4) turn that wobble into a different answer per pixel: every lit facade was a field of
+      // per-pixel speckle. The light is set once per drive, so this never switches while you play; by day and at dusk the seed is as it was)
+      if (uDark > 0.5) seed = floor(seed * 4096.0 + 0.5) / 4096.0;
       vec3 tint = diffuseColor.rgb;
       bool isBrick = style < 0.5, isTower = style > 2.5;
       tint = mix(vec3(rLum(tint)), tint, isTower ? 0.4 : 0.75);     // the comic palette is candy: pull it toward real brick, stucco and glass (glass most), same colour family
@@ -239,7 +243,7 @@ function wallPatch(T) {
         // covers more than about half a panel already shows the average: the full-strength bands sparkled into noisy white blocks on a phone
         float farN = mix(far, smoothstep(0.35, 1.5, max(fwidth(vFac.x), fwidth(vFac.y))), uDark);
         float tLit = step(mix(0.36, 0.55, uDark), tfl) * step(0.14, tpc) * mix(1.0, 0.5 + 0.5 * h21(tid * 1.7 + seed * 7.0 + 3.1), uDark);
-        wEm += mix(vec3(1.0, 0.8, 0.52), vec3(0.78, 0.88, 1.0), step(0.6, h21(tid + 9.0 + seed))) * mix(tLit, mix(0.55, 0.3, uDark), farN) * mix(pm, 0.8, max(farN, 0.7) * uDark) * (1.0 - band) * 0.7;
+        wEm += mix(mix(vec3(1.0, 0.8, 0.52), vec3(0.78, 0.88, 1.0), step(0.6, h21(tid + 9.0 + seed))), vec3(0.93, 0.83, 0.67), farN * uDark) * mix(tLit, mix(0.55, 0.3, uDark), farN) * mix(pm, 0.8, farN * uDark) * (1.0 - band) * 0.7;
       } else {
         float bay = isTower ? 1.55 : (style > 1.5 ? 2.4 : 3.0), floorH = style > 2.5 ? 3.9 : 3.6;
         vec2 cell = vec2(fract(vFac.x / bay), fract(vFac.y / floorH)), id = vec2(floor(vFac.x / bay), floor(vFac.y / floorH));
@@ -268,7 +272,10 @@ function wallPatch(T) {
         float roomR = h21(id * 1.31 + seed * 53.0 + 4.7), roomC = h21(id.yx * 2.17 + seed * 29.0 + 1.3);
         vec3 wc = roomC < 0.55 ? vec3(1.0, 0.7, 0.36) : (roomC < 0.85 ? vec3(0.95, 0.88, 0.7) : vec3(0.55, 0.65, 1.0));   // warm bulbs, white, and the odd TV blue
         float farR = mix(smoothstep(1.0, 4.0, max(fwidth(vFac.x), fwidth(vFac.y))), smoothstep(0.35, 1.5, max(fwidth(vFac.x), fwidth(vFac.y))), uDark);   // (at night the average sooner: see the towers above)
-        wEm += wc * win * (1.0 - rim) * mix(step(grd > 0.5 ? 0.12 : 0.5, roomR), grd > 0.5 ? 0.88 : 0.5, farR) * mix(0.6, 1.5, roomR) * (grd > 0.5 ? 1.4 : 1.0);
+        // (at night, uDark, a pixel that covers a room or more gets the rooms' average colour, level and window area: per-room colours and levels
+        // at a pixel or two a room sparkled warm / white / blue across every far facade)
+        float fN = farR * uDark, winA = (hi.x - lo.x) * (hi.y - lo.y);
+        wEm += mix(wc, vec3(0.93, 0.78, 0.55), fN) * mix(win * (1.0 - rim), winA * 0.8, fN) * mix(step(grd > 0.5 ? 0.12 : 0.5, roomR), grd > 0.5 ? 0.88 : 0.5, farR) * mix(mix(0.6, 1.5, roomR), 1.05, fN) * (grd > 0.5 ? 1.4 : 1.0);
         if (grd > 0.5 && style < 2.5) {
           float bw = bay * 2.0, sid = floor(vFac.x / bw);
           vec2 q = (vec2(fract(vFac.x / bw), cell.y) - vec2(0.5, 0.9)) / vec2(0.42, 0.075);
