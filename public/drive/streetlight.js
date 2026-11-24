@@ -65,7 +65,7 @@ export function lampLight(city, spots = []) {
     const k = j * W + i, w = wsum[k], g = w > 1e-4 ? gs[k] / w : city.ground(x0 + i * tx, y0 + j * tx), h = w > 1e-4 ? hs[k] / w : g + HEAD.y;
     data[k * 4] = q(lamp[k]); data[k * 4 + 1] = q(shop[k]); data[k * 4 + 2] = q((h - yLo) / span); data[k * 4 + 3] = q((g - yLo) / span);
   }
-  const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.UnsignedByteType);
+  const tex = quiet(() => new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.UnsignedByteType));   // (quiet: its uuids would draw from the shared Math.random)
   tex.minFilter = tex.magFilter = THREE.LinearFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
   // box: world x0, y0 and 1 / the map's size in metres; y: the height code's origin and span
   return { tex, box: new THREE.Vector4(x0, y0, 1 / (W * tx), 1 / (H * tx)), y: new THREE.Vector2(yLo, span), lamps: heads.length, size: [W, H], texel: tx };
