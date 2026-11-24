@@ -44,7 +44,7 @@ const KEY_DIR = new THREE.Vector3(-0.42, 1.0, -0.62).normalize();        // towa
  *  bloom, 0.55 at a 0.9 threshold, which washed the cream floor out to white.) */
 // (Nov 23 2026: the owner asked for the look of the first 3D sheets he was shown back, in place of the darker, richer grade of Nov 17.
 //  These are that preview's values. The bloom stays the store's own, 0.22 over a 1.9 threshold, so the floor does not wash out to white.)
-export const TUNE = { key: 1.9, hemi: 0.28, env: 0.5, ex: 0.85, lm: 1.0, bloom: 0.22, bt: 1.9, sat: 1.04, con: 0.1 };
+export const TUNE = { key: 1.6, hemi: 0.36, env: 0.5, ex: 0.76, lm: 0.85, bloom: 0.22, bt: 1.9, sat: 0.9, con: 0.0 };   // Nov 23 2026: the softer, more pastel 'A' the owner picked (was key 1.9, hemi 0.28, ex 0.85, lm 1.0, sat 1.04, con 0.1)
 /** The pickups' size: the pickups' own models (pickups.js) are held to ITEM_W m across; the gold ring is 1.3 m. */
 const ITEM_W = 1.05, ITEM_LOAD_MS = 15000;
 /**

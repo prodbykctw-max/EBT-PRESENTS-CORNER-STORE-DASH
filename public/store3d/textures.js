@@ -12,7 +12,7 @@ export function tex(canvas, { srgb = true, repeat = false, aniso = 4 } = {}) {
 
 /** the tile's own colour: the warm sand of the first 3D store the owner was shown (Nov 24 2026: he asked for that pastel look back; from Nov 17 to
  *  then it was a pinker cream, [226, 206, 194], with greyer flecks and grout and white light pools) */
-export const FLOOR_RGB = [206, 188, 158];
+export const FLOOR_RGB = [188, 162, 108];   // Nov 23 2026: darker and more yellow than the first sand [206, 188, 158] (owner's pick)
 /** cream floor tiles: 4 x 4 tiles per canvas (0.6 m each). Returns { map, normalMap, roughnessMap } (tileable). accent: gold / rose inlay tiles. */
 export function floorTextures(aniso) {
   const N = 512, T = N / 4, c = cv(N, N), g = c.getContext('2d'), hmap = new Float32Array(N * N), rough = cv(N, N), rg = rough.getContext('2d');
@@ -28,7 +28,7 @@ export function floorTextures(aniso) {
     const gr = g.createRadialGradient(i * T + T / 2, j * T + T / 2, T * 0.1, i * T + T / 2, j * T + T / 2, T * 0.75); gr.addColorStop(0, 'rgba(255,250,240,0.10)'); gr.addColorStop(1, 'rgba(120,100,70,0.10)'); g.fillStyle = gr; g.fillRect(i * T, j * T, T, T);
   }
   // grout: 3 px, darker, with a bevelled height profile
-  g.fillStyle = 'rgba(150,132,104,0.95)';
+  g.fillStyle = 'rgba(134,112,72,0.95)';
   for (let k = 0; k < 4; k++) { g.fillRect(k * T - 1.5, 0, 3, N); g.fillRect(0, k * T - 1.5, N, 3); }
   g.fillRect(N - 1.5, 0, 1.5, N); g.fillRect(0, N - 1.5, N, 1.5);
   for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const dx = Math.min(x % T, T - (x % T)), dy = Math.min(y % T, T - (y % T)), d = Math.min(dx, dy); hmap[y * N + x] = Math.min(1, d / 5); }
