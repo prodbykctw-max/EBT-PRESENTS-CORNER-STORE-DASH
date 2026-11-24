@@ -8,6 +8,7 @@
 // Depth is the main pass's own depthTexture, so the overpass cutaway, the near-tree cut, leaf alpha and wind and the
 // crowd's vertex animation are all in it already: no second geometry pass.
 import * as THREE from './vendor/three.module.min.js';
+import { GLOW } from './daylight.js';
 
 const VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }';
 const DEPTH_GLSL = `
@@ -99,6 +100,7 @@ const UP_FRAG = `
 const FINAL_FRAG = `
   uniform sampler2D tColor, tDepth, tAO, tBloom; uniform vec2 uAoSize; uniform float uAoOn, uAoMix, uBloomOn, uBloom, uHazeOn, uHazeK, uHazeMix, uGrade, uSat, uContrast, uTime;
   uniform vec3 uHaze, uSunCol, uSunView, uTint;
+  uniform sampler2D tLampMap; uniform float uLampOn, uLampK, uShopK, uLampCap; uniform vec4 uLampBox; uniform vec2 uLampY; uniform vec3 uLampCol, uShopCol; uniform mat4 uCamWorld;
   varying vec2 vUv;
   ${DEPTH_GLSL}
   float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
@@ -118,6 +120,21 @@ const FINAL_FRAG = `
           sa += s.r * w; sw += w;
         }
         col *= mix(1.0, sa / sw, uAoMix);
+      }
+      if (uLampOn > 0.5) {
+        // the night's street light (streetlight.js lampLight): this pixel's world position from the depth, the light that reaches it from the map,
+        // and the pixel brightened by its own colour, i.e. by what the surface is (its colour under the night's ambient stands in for its albedo;
+        // capped, so a lit window or a signal does not get brighter). Facing up takes all of it, a wall or a person's side most, an underside little.
+        vec3 vp = viewPosAt(vUv, dep), wp = (uCamWorld * vec4(vp, 1.0)).xyz;
+        vec2 luv = (vec2(wp.x, -wp.z) - uLampBox.xy) * uLampBox.zw;
+        if (luv.x > 0.0 && luv.x < 1.0 && luv.y > 0.0 && luv.y < 1.0) {
+          vec4 lm = texture2D(tLampMap, luv);
+          vec3 vn = cross(dFdx(vp), dFdy(vp)); vn = dot(vn, vn) > 1e-12 ? normalize(vn) : vec3(0.0, 0.0, 1.0); if (dot(vn, vp) > 0.0) vn = -vn;
+          float up = (mat3(uCamWorld) * vn).y, face = clamp(0.6 + 0.4 * up, 0.25, 1.0);
+          float headY = uLampY.x + lm.b * uLampY.y, gY = uLampY.x + lm.a * uLampY.y;
+          float eL = lm.r * smoothstep(headY + 0.3, headY - 1.2, wp.y) * uLampK, eS = lm.g * smoothstep(gY + 4.5, gY + 1.5, wp.y) * uShopK;
+          col += min(col, vec3(uLampCap)) * (uLampCol * eL + uShopCol * eS) * face;
+        }
       }
       if (uHazeOn > 0.5) {
         vec3 vp = viewPosAt(vUv, dep); float dist = length(vp);
@@ -140,6 +157,11 @@ const FINAL_FRAG = `
     gl_FragColor.rgb = mix(gl_FragColor.rgb, clamp(g, 0.0, 1.0), uGrade);
     gl_FragColor.rgb += (ign(gl_FragCoord.xy + uTime) - 0.5) / 255.0;   // breaks up banding in the sky gradient
   }`;
+
+// the night's lamp light in the final pass (see the FINAL_FRAG block "the night's street light"): how many times its own brightness a surface right
+// under a lamp gets (gain), how much the shop windows add (shop), and the brightness above which a pixel is treated as giving off light, not
+// reflecting it (cap, linear, before exposure). Weighted by GLOW.uLamp x GLOW.uDark (0 by day and through the pink dusk) and by uPoolK (rain).
+export const LAMP = { gain: 9, shop: 5, cap: 0.18 };
 
 function kernel(n) {
   // cosine-ish distributed hemisphere samples, denser near the centre
@@ -179,6 +201,8 @@ export class RealLook {
         uAoOn: { value: 1 }, uAoMix: { value: 0.85 }, uBloomOn: { value: 1 }, uBloom: { value: this.tier.bloom }, uHazeOn: { value: 1 }, uHazeK: { value: 0.00085 }, uHazeMix: { value: 0.7 },
         uHaze: { value: new THREE.Color(0xc9dcef) }, uSunCol: { value: new THREE.Color(1, 0.9, 0.7) }, uSunView: { value: new THREE.Vector3(0, 1, 0) },
         uGrade: { value: 1 }, uSat: { value: 1.0 }, uContrast: { value: 0.12 }, uTint: { value: new THREE.Color(1.03, 1.0, 0.95) }, uTime: { value: 0 },
+        tLampMap: { value: null }, uLampOn: { value: 0 }, uLampK: { value: 0 }, uShopK: { value: 0 }, uLampCap: { value: LAMP.cap }, uLampBox: { value: new THREE.Vector4() }, uLampY: { value: new THREE.Vector2() },
+        uLampCol: { value: new THREE.Color(1.0, 0.74, 0.46) }, uShopCol: { value: new THREE.Color(1.0, 0.8, 0.55) }, uCamWorld: { value: new THREE.Matrix4() },
       }, { toneMapped: true }),
     };
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.m.fin); this.quad.frustumCulled = false;
@@ -228,6 +252,12 @@ export class RealLook {
       fin.tBloom.value = L[0].texture;
     }
     fin.uBloomOn.value = bloom ? 1 : 0; fin.uHazeOn.value = fx.haze ? 1 : 0; fin.uGrade.value = fx.grade ? 1 : 0;
+    const lm = this.scene.userData.lampMap, lk = GLOW.uLamp.value * GLOW.uDark.value;
+    fin.uLampOn.value = lm && lk > 0.001 ? 1 : 0;
+    if (fin.uLampOn.value) {
+      fin.tLampMap.value = lm.tex; fin.uLampBox.value.copy(lm.box); fin.uLampY.value.copy(lm.y); fin.uCamWorld.value.copy(cam.matrixWorld);
+      fin.uLampK.value = lk * GLOW.uPoolK.value * LAMP.gain; fin.uShopK.value = GLOW.uLit.value * GLOW.uDark.value * Math.min(1, GLOW.uPoolK.value) * LAMP.shop; fin.uLampCap.value = LAMP.cap;
+    }
     if (this.sunDir) fin.uSunView.value.copy(this.sunDir).transformDirection(cam.matrixWorldInverse);
     fin.uTime.value = (fin.uTime.value + 1.7) % 100;
     this.quad.material = this.m.fin; r.setRenderTarget(null); r.render(this.post, this.ortho);

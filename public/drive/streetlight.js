@@ -19,22 +19,73 @@ const quiet = (fn) => { const real = Math.random; Math.random = isoRandom; try {
 const HEAD = new THREE.Vector3(0, 8.6, -2.3), UP = new THREE.Vector3(0, 1, 0);
 const POOL_R = 8;   // metres: a cobra-head lamp at 9 m lights the road out to about this
 
+/** every street lamp's head: world x, y (three z = -y), the ground under it and the head's height (three y) */
+function lampHeads(city) {
+  const v = new THREE.Vector3();
+  return (city.furniture?.lamp || []).map(([x, y, yaw, , sc]) => {
+    v.copy(HEAD).multiplyScalar(sc).applyAxisAngle(UP, yaw - Math.PI / 2);   // (landscape.js instances it at yaw - PI/2)
+    const px = x + v.x, py = y - v.z, g = city.ground(px, py);
+    return { x: px, y: py, g, h: city.ground(x, y) + v.y };
+  });
+}
+
+// The night's street light (realistic look, weighted by GLOW.uDark): light that falls on whatever is there, not a painted decal. A top-down map of
+// how much lamp light (and shop-window spill) reaches each spot of the city, baked once on the CPU into one small texture; the final pass
+// (real-post.js) rebuilds every pixel's world position from the depth buffer, looks it up and brightens that pixel by its own colour (so asphalt
+// stays asphalt, lane paint catches more light than the road, and the runner, the bully, cars and cards under a lamp are lit like the road under
+// them). No geometry, so no floating plane, no hard edge where a decal cuts into a slope or a curb, nothing that can sit under the camera.
+//   R: lamp light (soft: a 6.5 m gaussian core and a faint tail out to 14 m), G: shop spill, B: the lamp heads' height (light only falls below
+//   the head), A: the ground's height (the spill only lights the first few metres up). Steady: nothing here moves or changes over time.
+export const LAMP_LIGHT = { core: 6.5, tail: 14, shop: 0.5 };
+export function lampLight(city, spots = []) {
+  const heads = lampHeads(city);
+  if (!heads.length) return null;
+  const R = LAMP_LIGHT.tail + 2;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, yLo = Infinity, yHi = -Infinity;
+  const shops = spots.map(([x, z, w]) => ({ x, y: -z, r: w / 2 + 3, g: city.ground(x, -z) }));
+  for (const p of [...heads, ...shops]) { x0 = Math.min(x0, p.x - R); y0 = Math.min(y0, p.y - R); x1 = Math.max(x1, p.x + R); y1 = Math.max(y1, p.y + R); yLo = Math.min(yLo, p.g); yHi = Math.max(yHi, p.h ?? p.g); }
+  yLo -= 2; yHi += 2;
+  const tx = Math.max(1, Math.max(x1 - x0, y1 - y0) / 1024);   // metres a texel: 1 m, coarser only for a very big city (the light varies over metres, and it is filtered)
+  const W = Math.ceil((x1 - x0) / tx) + 1, H = Math.ceil((y1 - y0) / tx) + 1;
+  const lamp = new Float32Array(W * H), shop = new Float32Array(W * H), hs = new Float32Array(W * H), gs = new Float32Array(W * H);
+  const splat = (p, rad, fn, acc, hv) => {
+    const i0 = Math.max(0, Math.floor((p.x - rad - x0) / tx)), i1 = Math.min(W - 1, Math.ceil((p.x + rad - x0) / tx));
+    const j0 = Math.max(0, Math.floor((p.y - rad - y0) / tx)), j1 = Math.min(H - 1, Math.ceil((p.y + rad - y0) / tx));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const r = Math.hypot(x0 + i * tx - p.x, y0 + j * tx - p.y); if (r > rad) continue;
+      const e = fn(r), k = j * W + i; acc[k] += e; if (hv) { hs[k] += e * hv[0]; gs[k] += e * hv[1]; }
+    }
+  };
+  const { core, tail } = LAMP_LIGHT;
+  for (const p of heads) splat(p, tail, (r) => 0.85 * Math.exp(-((r / core) ** 2)) + 0.15 * (1 - r / tail) ** 2, lamp, [p.h, p.g]);
+  for (const p of shops) splat(p, p.r, (r) => (1 - (r / p.r) ** 2) ** 2, shop, [p.g + 3, p.g]);
+  const wsum = new Float32Array(W * H); for (let k = 0; k < W * H; k++) wsum[k] = lamp[k] + shop[k];
+  const data = new Uint8Array(W * H * 4), span = yHi - yLo, q = (v) => Math.max(0, Math.min(255, Math.round(v * 255)));
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const k = j * W + i, w = wsum[k], g = w > 1e-4 ? gs[k] / w : city.ground(x0 + i * tx, y0 + j * tx), h = w > 1e-4 ? hs[k] / w : g + HEAD.y;
+    data[k * 4] = q(lamp[k]); data[k * 4 + 1] = q(shop[k]); data[k * 4 + 2] = q((h - yLo) / span); data[k * 4 + 3] = q((g - yLo) / span);
+  }
+  const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.minFilter = tex.magFilter = THREE.LinearFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
+  // box: world x0, y0 and 1 / the map's size in metres; y: the height code's origin and span
+  return { tex, box: new THREE.Vector4(x0, y0, 1 / (W * tx), 1 / (H * tx)), y: new THREE.Vector2(yLo, span), lamps: heads.length, size: [W, H], texel: tx };
+}
+
 export function lampPools(city, scene) {
   const lamps = city.furniture?.lamp || [];
   if (!lamps.length) return null;
   return quiet(() => {
     const geo = new THREE.PlaneGeometry(1, 1); geo.rotateX(-Math.PI / 2);
     const mat = new THREE.ShaderMaterial({
-      uniforms: { uLamp: GLOW.uLamp, uPoolK: GLOW.uPoolK, uCol: { value: new THREE.Color(1.0, 0.7, 0.4) } },
+      uniforms: { uLamp: GLOW.uLamp, uPoolK: GLOW.uPoolK, uDark: GLOW.uDark, uCol: { value: new THREE.Color(1.0, 0.7, 0.4) } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }',
-      fragmentShader: `uniform float uLamp, uPoolK; uniform vec3 uCol; varying vec2 vUv;
-        void main() { float r = length(vUv - 0.5) * 2.0, a = max(0.0, 1.0 - r * r); a *= a; gl_FragColor = vec4(uCol * a * uLamp * uPoolK * 0.6, 1.0); }`,
+      // (1 - uDark): these flat decals are the dusk's pools only; from blue hour on the lamps light the street through lampLight() below
+      fragmentShader: `uniform float uLamp, uPoolK, uDark; uniform vec3 uCol; varying vec2 vUv;
+        void main() { float r = length(vUv - 0.5) * 2.0, a = max(0.0, 1.0 - r * r); a *= a; gl_FragColor = vec4(uCol * a * uLamp * uPoolK * 0.6 * (1.0 - uDark), 1.0); }`,
       blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false, toneMapped: false,
     });
     const im = new THREE.InstancedMesh(geo, mat, lamps.length), m4 = new THREE.Matrix4(), v = new THREE.Vector3(), q = new THREE.Quaternion();
-    lamps.forEach(([x, y, yaw, , sc], i) => {
-      v.copy(HEAD).multiplyScalar(sc).applyAxisAngle(UP, yaw - Math.PI / 2);   // (landscape.js instances it at yaw - PI/2)
-      const px = x + v.x, py = y - v.z;                                          // world x, y (three z = -y)
+    lampHeads(city).forEach(({ x: px, y: py }, i) => {
       m4.compose(v.set(px, city.ground(px, py) + LEVEL.CURB_TOP + 0.04, -py), q.identity(), new THREE.Vector3(POOL_R * 2, 1, POOL_R * 2));
       im.setMatrixAt(i, m4);
     });
@@ -63,10 +114,10 @@ export function shopSpill(root, city) {
     if (!spots.length) return null;
     const geo = new THREE.PlaneGeometry(1, 1); geo.rotateX(-Math.PI / 2);
     const mat = new THREE.ShaderMaterial({
-      uniforms: { uLit: GLOW.uLit, uPoolK: GLOW.uPoolK },
+      uniforms: { uLit: GLOW.uLit, uPoolK: GLOW.uPoolK, uDark: GLOW.uDark },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }',
-      fragmentShader: `uniform float uLit, uPoolK; varying vec2 vUv;
-        void main() { float r = length(vUv - 0.5) * 2.0, a = max(0.0, 1.0 - r * r); a *= a; gl_FragColor = vec4(vec3(1.0, 0.78, 0.5) * a * uLit * min(uPoolK, 1.0) * 0.28, 1.0); }`,
+      fragmentShader: `uniform float uLit, uPoolK, uDark; varying vec2 vUv;
+        void main() { float r = length(vUv - 0.5) * 2.0, a = max(0.0, 1.0 - r * r); a *= a; gl_FragColor = vec4(vec3(1.0, 0.78, 0.5) * a * uLit * min(uPoolK, 1.0) * 0.28 * (1.0 - uDark), 1.0); }`,
       blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false, toneMapped: false,
     });
     const im = new THREE.InstancedMesh(geo, mat, spots.length), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3();
@@ -75,6 +126,7 @@ export function shopSpill(root, city) {
       im.setMatrixAt(i, m4);
     });
     im.name = 'shop_spill'; im.frustumCulled = false; im.renderOrder = 3; im.matrixAutoUpdate = false;
+    im.userData.spots = spots;   // (lampLight() puts the same spill into the night's light map)
     return im;
   });
 }
@@ -86,13 +138,13 @@ export function lightHero(root, chain) {
     const m = o.isMesh && o.material;
     if (!m || seen.has(m) || !/^facade_/.test(m.name || '')) return; seen.add(m);
     chain(m, (sh) => {
-      sh.uniforms.uLit = GLOW.uLit;
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uLit;')
+      sh.uniforms.uLit = GLOW.uLit; sh.uniforms.uDark = GLOW.uDark;
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uLit, uDark;')
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         {
           vec2 u = vMapUv;   // the facade image: sign board v 0.70-0.98, shop window v 0.10-0.57 (the awning between them stays dark)
           float board = smoothstep(0.68, 0.71, u.y) * (1.0 - smoothstep(0.985, 1.0, u.y)), glass = step(0.1, u.y) * (1.0 - step(0.57, u.y)) * step(0.07, u.x) * (1.0 - step(0.93, u.x));
-          totalEmissiveRadiance += diffuseColor.rgb * (board * 1.7 + glass * 1.15) * uLit + diffuseColor.rgb * board * 0.05;
+          totalEmissiveRadiance += diffuseColor.rgb * (board * 1.7 + glass * 1.15) * uLit * (1.0 - 0.3 * uDark) + diffuseColor.rgb * board * 0.05;
         }`);
     }, 'hero_lit');
   });
@@ -110,7 +162,8 @@ export function carLights(carRig) {
     spot.position.set(0, c.y + 0.05, c.z); spot.target.position.set(0, c.y - 0.5, c.z + fz * 26);
     spot.castShadow = false; spot.name = 'car_headlights'; spot.userData.base = 900;
     carRig.add(spot, spot.target);
-    const set = () => { spot.intensity = spot.userData.base * GLOW.uLamp.value; spot.visible = GLOW.uLamp.value > 0.04; };
+    // (at night, uDark, a little less: with the street lamps now lighting the street, a full-strength cone was the brightest thing on screen)
+    const set = () => { spot.intensity = spot.userData.base * GLOW.uLamp.value * (1 - 0.55 * GLOW.uDark.value); spot.visible = GLOW.uLamp.value > 0.04; };
     set(); spot.userData.refresh = set;
     return spot;
   });
