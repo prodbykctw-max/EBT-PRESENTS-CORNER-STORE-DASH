@@ -18,7 +18,7 @@ import { useAtlas, productGeometry } from './products.js';
 import { pickupGeometry, PICKUP_KINDS } from './pickups.js';
 import { buildStructure, PX, m } from './structure.js';
 import { GeoBuf, paintMaterial, withRM } from './geobuf.js';
-import { ATL, ATL_GRADE, atlCanvas, atlPlacements, writePlacements, ageBoard } from './atl.js';
+import { ATL, ATL_GRADE, atlCanvas, atlPlacements, writePlacements, ageBoard, REAL, printBoard } from './atl.js';
 /** which look the store is built in: 'atl' with ?storelook=atl in the page's address (the ATL corner store, atl.js: an alternative to compare),
  *  else 'default' (the live look, unchanged). The game page (/standalone.html?store=3d&storelook=atl) needs no code of its own: this reads its address. */
 export const STORE_LOOK = (() => { try { return /[?&]storelook=atl\b/i.test(location.search) ? 'atl' : 'default'; } catch (e) { return 'default'; } })();
@@ -78,7 +78,7 @@ export class Store3D {
     try { this._make(canvas, { layout, base, mobile, pixelRatio, look }); } catch (e) { this._unguard(); throw e; }
   }
   _make(canvas, { layout, base, mobile, pixelRatio, look }) {
-    this.look_ = look; this.atl = look === 'atl'; this.tuneBase = this.atl ? { ...TUNE, ...ATL.tune } : TUNE;   // (TUNE itself is never changed)
+    this.look_ = look; this.atl = look === 'atl'; this.real = this.atl && !!REAL.on; this.tuneBase = this.atl ? { ...TUNE, ...ATL.tune, ...(this.real ? REAL.tune : {}) } : TUNE;   // (TUNE itself is never changed)
     this.layout = layout; this.base = base; this.mobile = mobile; this.canvas = canvas; this.t = 0;
     const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     r.info.autoReset = false; r.setPixelRatio(pixelRatio ?? Math.min(devicePixelRatio, mobile ? 1.5 : 2));
@@ -89,6 +89,10 @@ export class Store3D {
     this.look.fx.haze = false; this.look.m.ao.uniforms.uFade.value = 1e6;   // indoors: no aerial haze; the AO must not fade with the long lens's distance
     this.look.m.ao.uniforms.uRadius.value = 0.9; this.look.m.ao.uniforms.uPower.value = 1.5; this.look.m.fin.uniforms.uAoMix.value = 0.9;
     this.look.m.fin.uniforms.uSat.value = 1.04; this.look.m.fin.uniforms.uContrast.value = 0.1;
+    if (this.real) {   // the REAL layer (atl.js REAL): filmic highlights, deeper contact darkness at shelf bases and corners
+      if (REAL.tone === 'aces') r.toneMapping = THREE.ACESFilmicToneMapping;
+      this.look.m.ao.uniforms.uPower.value = REAL.aoPower; this.look.m.fin.uniforms.uAoMix.value = REAL.aoMix;
+    }
     if (this.atl) {   // the ATL grade (atl.js ATL_GRADE): spliced into this store's own copy of the final pass only (the drive's is not touched)
       const fm = this.look.m.fin, G = ATL.grade, line = 'gl_FragColor.rgb += (ign(gl_FragCoord.xy + uTime)';
       if (!fm.fragmentShader.includes(line)) throw new Error('store3d: the final pass changed, the ATL grade cannot be spliced in');
@@ -104,13 +108,13 @@ export class Store3D {
     const { layout } = this, aniso = this.mobile ? 4 : 8;
     const loader = new THREE.TextureLoader(), conc = (f, srgb) => loader.loadAsync(new URL('tex/real/' + f, this.base).href).then((t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; return t; });
     const [concD, concN] = await Promise.all([conc('conc_d.webp', true), conc('conc_n.webp', false)]);
-    lap(TM, 'concrete'); await yieldNow(); const wallT = T.wallTexture(aniso, { atl: this.atl }), floorT = T.floorTextures(aniso, this.atl ? { rgb: ATL.floorRGB } : undefined); lap(TM, 'wallFloorTex'); await yieldNow(); const atlas = T.labelAtlas(aniso); useAtlas(atlas); this.atlas = atlas;
+    lap(TM, 'concrete'); await yieldNow(); const wallT = T.wallTexture(aniso, { atl: this.atl && ATL.wall }), floorT = T.floorTextures(aniso, this.atl ? { rgb: ATL.floorRGB } : undefined); lap(TM, 'wallFloorTex'); await yieldNow(); const atlas = T.labelAtlas(aniso); useAtlas(atlas); this.atlas = atlas;
     const white = atlas.cell('white'), whiteUV = [(white[0] + white[2]) / 2, (white[1] + white[3]) / 2];
     lap(TM, 'labelAtlas'); await yieldNow(); const { aoMap, lightMap, lampVis } = this.bakeFloorLight(); lap(TM, 'floorLight'); await yieldNow();
     const grime = this.bakeFloorGrime(); lap(TM, 'grime'); await yieldNow(); const wearTex = T.wearTexture(); lap(TM, 'wearTex'); await yieldNow();
     const mats = this.mats = {
       default: new THREE.MeshStandardMaterial({ color: 0x888888 }),
-      paint: paintMaterial(atlas.map, { envMapIntensity: 0.8, wear: wearTex, ...(this.atl ? { wearK: ATL.wear } : {}) }),
+      paint: paintMaterial(atlas.map, { envMapIntensity: 0.8, wear: wearTex, ...(this.atl ? { wearK: ATL.wear } : {}), ...(this.real ? { real: REAL } : {}) }),
       floor: new THREE.MeshPhysicalMaterial({ clearcoat: 0.55, clearcoatRoughness: 0.22, map: floorT.map, normalMap: floorT.normalMap, normalScale: new THREE.Vector2(0.9, 0.9), roughnessMap: floorT.roughnessMap, roughness: 1, metalness: 0, aoMap, aoMapIntensity: 1.0, lightMap, lightMapIntensity: 1.0, envMapIntensity: 0.55 }),
       wall: new THREE.MeshStandardMaterial({ map: wallT, normalMap: concN, normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.82, metalness: 0 }),
       glass: new THREE.MeshStandardMaterial({ color: 0xcfe6f2, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.22, depthWrite: false, envMapIntensity: 2.2 }),
@@ -128,6 +132,10 @@ export class Store3D {
         '#include <opaque_fragment>'].join('\n'));
     };
     if (this.atl) { mats.glass.color.set(ATL.glass.color); mats.glass.opacity = ATL.glass.opacity; }   // dirtier glass
+    if (this.real) {   // the pickups keep their own colours (not muted with the store); the floor a worn low sheen with more grain; the walls more texture
+      mats.itemPaint = paintMaterial(atlas.map, { envMapIntensity: 0.8, wear: wearTex, wearK: ATL.wear });
+      mats.floor.clearcoat = REAL.floorCoat; mats.floor.normalScale.set(REAL.floorBump, REAL.floorBump); mats.wall.normalScale.set(REAL.wallBump, REAL.wallBump);
+    }
     lap(TM, 'materials'); this.scene.environment = this.makeEnvironment(); this.scene.environmentIntensity = 0.5; lap(TM, 'environment'); await yieldNow();
     const S = this.structure = buildStructure(layout, mats, { white: whiteUV, defer: true, look: this.look_ }); lap(TM, 'structure');
     { // the stock and the merged meshes, a slice at a time (the page gets a turn at least every ~30 ms)
@@ -318,7 +326,7 @@ export class Store3D {
     for (const k of ['sale', 'fresh', 'cold', 'eat']) entries.push({ name: 'poster_' + k, w: 256, h: 340, draw: (g, w, h) => T.drawPoster(g, w, h, k) });
     entries.push({ name: 'matEntrance', w: 256, h: 240, draw: (g, w, h) => T.drawPlate(g, w, h, 'ENTRANCE', { bg: '#a82020', fg: '#f3c34a', border: '#f3c34a' }) });
     entries.push({ name: 'matExit', w: 256, h: 240, draw: (g, w, h) => T.drawPlate(g, w, h, 'EXIT', { bg: '#a82020', fg: '#f3c34a', border: '#f3c34a' }) });
-    if (this.atl) entries.forEach((e, i) => { const d = e.draw; e.draw = (g, w, h) => { d(g, w, h); ageBoard(g, w, h, i + 1, T.hash); }; });   // the ATL look: the same boards, aged
+    if (this.atl) entries.forEach((e, i) => { const d = e.draw; e.draw = (g, w, h) => { d(g, w, h); ageBoard(g, w, h, i + 1, T.hash); if (this.real) printBoard(g, w, h); }; });   // the ATL look: the same boards, aged
     const A = this.decalAtlas = T.decalAtlas(entries, this.mobile ? 4 : 8), wd = A.white, buf = new GeoBuf();
     // header signs: a pink board, the lettered face toward the camera (+z)
     // (hung by hand, Nov 24 2026: each board is a little off level, SIGN_TILT[i] radians about its centre, so the lettering stays where it was)
@@ -363,7 +371,7 @@ export class Store3D {
       const inner = new THREE.Group(); g.add(inner);
       (KINDS[it.id] || []).forEach(([k, o], i) => {
         const own = PICKUP_KINDS.includes(k), geo = withRM((own ? pickupGeometry(k, o) : productGeometry(k, o)).clone()); geo.computeBoundingBox();
-        const bb = geo.boundingBox, hgt = bb.max.y, tgt = { apple: 0.42, can: 0.45, sack: 0.62 }[k] || 0.66, mesh = new THREE.Mesh(geo, this.mats.paint);
+        const bb = geo.boundingBox, hgt = bb.max.y, tgt = { apple: 0.42, can: 0.45, sack: 0.62 }[k] || 0.66, mesh = new THREE.Mesh(geo, this.mats.itemPaint || this.mats.paint);
         // the pickups' own models are also held to ITEM_W across (the roast chicken's tray is wide and low)
         mesh.scale.setScalar(own ? Math.min(tgt / hgt, ITEM_W / Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z)) : tgt / hgt);
         mesh.position.x = it.id === 'RICE & BEANS' ? (i ? 0.34 : -0.22) : 0; inner.add(mesh);

@@ -216,7 +216,7 @@ export function wallTexture(aniso = 8, { atl = false } = {}) {
   for (let k = 0; k < 5; k++) { const x = hash(k, 11, 41) * W, w = 40 + hash(k, 12, 41) * 80, gg = g.createRadialGradient(x, y(1.1), 0, x, y(1.1), w); gg.addColorStop(0, 'rgba(255,225,235,0.18)'); gg.addColorStop(1, 'rgba(255,225,235,0)'); g.fillStyle = gg; g.fillRect(x - w, y(1.25), w * 2, y(0.95) - y(1.25)); }   // the band rubbed paler
   for (let k = 0; k < 6; k++) { const x = hash(k, 13, 43) * W, l = 30 + hash(k, 14, 43) * 120, gg = g.createLinearGradient(0, y(0.93), 0, y(0.93) + l); gg.addColorStop(0, 'rgba(60,45,20,0.28)'); gg.addColorStop(1, 'rgba(60,45,20,0)'); g.fillStyle = gg; g.fillRect(x, y(0.93), 2 + hash(k, 15, 43) * 3, l); }   // drips
   for (let k = 0; k < 7; k++) { const x = hash(k, 16, 47) * W; g.fillStyle = 'rgba(70,55,20,0.45)'; g.fillRect(x, y(1.27), 8 + hash(k, 17, 47) * 40, 5); }   // the gold rule dulled
-  if (atl) atlWall(g, W, H, y);
+  if (atl) atlWall(g, W, H, y, atl === true ? 1 : +atl);   // atl: true or how strong (store3d/atl.js ATL.wall)
   return tex(c, { repeat: true, aniso });
 }
 
@@ -255,7 +255,8 @@ export function wearTexture() {
  * stains running down from it with tide-line rims, paint peeling off in ragged patches (an older pale-green coat and grey plaster under the
  * lavender), greasy hand and shoulder smudges at lean height, and the whole wall a little yellowed. Steady, hash-based, tileable across u.
  */
-function atlWall(g, W, H, y) {
+function atlWall(g, W, H, y, k = 1) {
+  g.save(); g.globalAlpha = Math.max(0, Math.min(1, k));   // k: how strong all of it is
   g.fillStyle = 'rgba(150,140,70,0.12)'; g.fillRect(0, 0, W, H);   // nicotine-yellowed
   // the ceiling tiles' edge: a pale band with dark grid lines and stains
   g.fillStyle = '#c9c4b2'; g.fillRect(0, 0, W, y(3.22)); g.fillStyle = 'rgba(60,55,40,0.6)'; g.fillRect(0, y(3.22) - 3, W, 4);
@@ -276,4 +277,5 @@ function atlWall(g, W, H, y) {
   }
   // greasy smudges at shoulder and hand height
   for (let k = 0; k < 6; k++) { const x = hash(k, 10, 97) * W, yy = y(1.0 + hash(k, 11, 97) * 0.6), r = 20 + hash(k, 12, 97) * 30, gg = g.createRadialGradient(x, yy, 2, x, yy, r); gg.addColorStop(0, 'rgba(40,32,20,0.28)'); gg.addColorStop(1, 'rgba(40,32,20,0)'); g.fillStyle = gg; g.fillRect(x - r, yy - r, r * 2, r * 2); }
+  g.restore();
 }

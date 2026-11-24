@@ -21,18 +21,65 @@ import * as THREE from '../drive/vendor/three.module.min.js';
  *  uneven (0 = all the same .. 1 = some nearly out; steady), col (the tubes' colour). wear / floor: store3d WEAR / FLOOR_WEAR for this look.
  *  dress: 0 turns all the set dressing and signs off (light and grade only). */
 export const ATL = {
-  tune: { key: 1.25, hemi: 0.28, env: 0.34, ex: 0.66, lm: 0.6, bloom: 0.24, bt: 1.6, sat: 0.78, con: -0.06 },
-  grade: { lift: 0.028, fog: 0.05, vignette: 0.36, grain: 0.03, tint: [0.95, 1.02, 0.84], fogCol: [0.5, 0.53, 0.43] },
-  lamps: { uneven: 0.7, col: [222, 240, 188] },
-  wear: { grime: 1.7, rust: 1.9, chips: 1.6, scuffs: 1.5 },
-  floor: { dirt: 1.45, marks: 1.35, tape: 1.05, paths: 1, puddles: 1 },   // (tape at most 1.1: the tape patches are baked at 0.9)
-  glass: { color: 0xb9c4b8, opacity: 0.32 },
-  floorRGB: [146, 136, 104],   // the tile: an older, greyer beige than the live look's sand (textures.js FLOOR_RGB)
-  signAge: 1,                  // how aged the aisle boards, EXIT plate, posters and mats are (0..1: faded, yellowed, scuffed; the text stays legible)
+  // (Nov 24 2026, owner: "A little too aged lol": dialled back to about halfway between the live worn look and the first ATL build.
+  //  The first build's values are in the comments: tune key 1.25 hemi 0.28 env 0.34 ex 0.66 lm 0.6 bt 1.6 sat 0.78 con -0.06; grade lift 0.028
+  //  fog 0.05 vignette 0.36 grain 0.03 tint [0.95, 1.02, 0.84]; lamps uneven 0.7; wear 1.7 / 1.9 / 1.6 / 1.5; floor dirt 1.45 marks 1.35 tape 1.05
+  //  paths 1 puddles 1; glass 0.32; floorRGB [146, 136, 104]; signAge 1; wall 1; few: everything on.)
+  tune: { key: 1.5, hemi: 0.33, env: 0.44, ex: 0.73, lm: 0.8, bloom: 0.23, bt: 1.8, sat: 0.86, con: -0.03 },
+  grade: { lift: 0.014, fog: 0.025, vignette: 0.2, grain: 0.015, tint: [0.975, 1.01, 0.92], fogCol: [0.5, 0.53, 0.43] },
+  lamps: { uneven: 0.3, col: [240, 238, 196] },
+  wear: { grime: 1.35, rust: 1.4, chips: 1.3, scuffs: 1.25 },
+  floor: { dirt: 1.2, marks: 1.15, tape: 1.0, paths: 0.5, puddles: 0.6 },   // (tape at most 1.1: the tape patches are baked at 0.9)
+  glass: { color: 0xc3ccc2, opacity: 0.27 },
+  floorRGB: [161, 138, 92],    // the tile: kept close to the live look's yellow sand (textures.js FLOOR_RGB [164, 138, 88])
+  signAge: 0.5,                // how aged the aisle boards, EXIT plate, posters and mats are (0..1: faded, yellowed, scuffed; the text stays legible)
+  wall: 0.5,                   // the wall's water stains, peeling paint, smudges and yellowing (textures.js atlWall), 0..1
+  // how much set dressing: the taped signs that go up (glass: on the storefront glass, by name; counter: on each register's front; plexi: notes
+  // on the register glass (all = every register, else only the first); shelf: cardboard price signs per unit; wall: on the back wall),
+  // crates (sidewalk: how many of the milk crates outside, desk: registers with a crate on the desk, dairyStack: crates stacked two high),
+  // coolerCases: share of cooler-top spots that get a case or crate
+  few: { glass: ['p_noloiter', 'p_ebt', 'p_lotto', 'c_ice'], doorSigns: 1, counter: 1, plexi: 'first', shelf: 1, wall: ['poster_old2'], sidewalk: 2, desk: 1, dairyStack: false, coolerCases: 0.35 },
   dress: 1,
 };
+/**
+ * REAL (Nov 24 2026, owner: "Just not so game looking"): a layer on top of the ATL look that makes it read as photographed rather than rendered.
+ * on: 0 turns the layer off (?storelook=atl&atlreal=0 does the same, for comparing). Colour and materials (the shared paint material, geobuf.js
+ * paintMaterial({ real })): sat (how much colour the painted fixtures and products keep, 1 = as is), mottle (orange-peel paint / printed card
+ * unevenness), roughMin (nothing shinier than this: painted steel and laminate, not toy plastic), metalK (metalness kept), dust (grey dust on
+ * top faces). Products (structure.js Stock.vary): fade (how much a product's colours may be bleached), tint (how far each one's colour
+ * drifts), height (size spread). Signs: signSat / signFade (the aisle boards, EXIT plate, posters and mats printed and sun-faded). Light:
+ * tune (TUNE on top of ATL.tune: filmic tone mapping 'aces', exposure, bloom), aoMix / aoPower (contact darkness at shelf bases and corners),
+ * floorCoat (the floor's clear coat: a worn, low sheen), floorBump / wallBump (surface grain). The pickups keep their own colours (their own
+ * material), the people and the HUD are not touched.
+ */
+export const REAL = {
+  on: 1,
+  sat: 0.7, mottle: 0.06, roughMin: 0.5, metalK: 0.6, dust: 0.05,
+  fade: 0.22, tint: 0.1, height: 0.1,
+  signSat: 0.5, signFade: 0.1,
+  tone: 'aces', tune: { ex: 0.52, bloom: 0.2, bt: 1.0, sat: 0.95 },   // (ex: three.js's filmic curve is about 1.6x brighter at the same exposure)
+  aoMix: 1.0, aoPower: 1.9, floorCoat: 0.22, floorBump: 1.4, wallBump: 0.65,
+};
+try { if (/[?&]atlreal=0\b/i.test(location.search)) REAL.on = 0; } catch (e) { /* node: no address */ }
+/** per product on the shelves (Stock.vary): a bleached, tinted colour and a little height spread, from a hash of its index (never Math.random) */
+export function stockVary(hash) {
+  return (i, kind) => {
+    const f = 1 - REAL.fade * hash(i, 1, 1201) ** 1.5, t = REAL.tint, k = kind === 'case' ? 0.4 : 1;
+    const tint = [f * (1 + (hash(i, 2, 1201) - 0.5) * t * k), f * (1 + (hash(i, 3, 1201) - 0.5) * t * k), f * (1 + (hash(i, 4, 1201) - 0.5) * t * k)].map((v) => Math.min(1, v + (1 - f) * 0.35));   // bleached toward pale, not toward black
+    return { tint, sy: 1 + (hash(i, 5, 1201) - 0.5) * 2 * REAL.height * k };
+  };
+}
+/** a board printed and sun-faded (the aisle signs, EXIT, posters, mats): colour pulled out, a pale cast over it; the lettering keeps its contrast */
+export function printBoard(g, w, h) {
+  if (!REAL.on) return;
+  g.save(); g.globalCompositeOperation = 'saturation'; g.fillStyle = `rgba(128,128,128,${1 - REAL.signSat})`; g.fillRect(0, 0, w, h);
+  g.globalCompositeOperation = 'source-atop'; g.fillStyle = `rgba(236,228,210,${REAL.signFade})`; g.fillRect(0, 0, w, h); g.restore();
+}
 /** the stock and fixtures a bit more shopped and more tired than the default MESS (structure.js), same meaning */
-export const MESS_ATL = { yaw: 0.1, yawBigShare: 0.12, gapFront: 0.1, halfEmpty: 0.22, misplace: 0.03, levelVar: 0.045, frontVar: 0.05, sag: 0.018, bowedShare: 0.35, stripTilt: 0.018, crookedShare: 0.25, tagMiss: 0.24, tape: 0.75, stackSlop: 0.07 };
+// (dialled back, Nov 24 2026: halfway to the live MESS, tape repairs as live, less leaning and toppling than live. First build: yaw 0.1 yawBigShare 0.12
+//  gapFront 0.1 halfEmpty 0.22 misplace 0.03 levelVar 0.045 frontVar 0.05 sag 0.018 bowedShare 0.35 stripTilt 0.018 crookedShare 0.25 tagMiss 0.24
+//  tape 0.75 stackSlop 0.07, lean and topple as live 0.55 / 0.3)
+export const MESS_ATL = { yaw: 0.085, yawBigShare: 0.1, gapFront: 0.085, halfEmpty: 0.19, misplace: 0.02, levelVar: 0.037, frontVar: 0.042, sag: 0.015, bowedShare: 0.28, stripTilt: 0.015, crookedShare: 0.2, tagMiss: 0.18, tape: 0.4, stackSlop: 0.06, lean: 0.35, topple: 0.2 };
 
 // ------------------------------------------------------------------------------------------------------------------------------------
 // geometry (no canvas here: the node tools build the structure too)
@@ -96,7 +143,7 @@ export function dressAtl(B, info, layout, { hash, Stock }) {
         if (h(ci + k, i, 6) > 0.12) B.box([c, 0.45, 0], x, yb, za + 0.015, x + wd, yb + ht, zb2 - 0.015); x += wd + 0.008; }
     }
     // a milk crate on the desk, holding bags
-    milkCrate(B, x0 + 1.25, top, z0 + 0.4, P.crateBlue, 0.2 * (h(ci, 7, 7) - 0.5));
+    if (ci < ATL.few.desk) milkCrate(B, x0 + 1.25, top, z0 + 0.4, P.crateBlue, 0.2 * (h(ci, 7, 7) - 0.5));
     A.counters.push({ x0, z0, x1, z1, top, gx0, gx1, zg, gy1, rx, hx0, hx1, hy1 });
   });
   // ---- the storefront: a steady neon OPEN's backing box inside the glass; outside on the sidewalk the milk crates people sit on,
@@ -105,8 +152,9 @@ export function dressAtl(B, info, layout, { hash, Stock }) {
   A.neon = { x: 13.35, y: 1.78, z: ez - 0.07, w: 0.92, h: 0.4 };
   B.box('dark', A.neon.x - A.neon.w / 2, A.neon.y - A.neon.h / 2, ez - 0.1, A.neon.x + A.neon.w / 2, A.neon.y + A.neon.h / 2, ez - 0.075);
   B.box('dark', A.neon.x - 0.3, A.neon.y + A.neon.h / 2, ez - 0.09, A.neon.x - 0.29, sf.H - 0.12, ez - 0.085); B.box('dark', A.neon.x + 0.29, A.neon.y + A.neon.h / 2, ez - 0.09, A.neon.x + 0.3, sf.H - 0.12, ez - 0.085);   // hung on two chains
-  milkCrate(B, 2.7, 0, ez + 0.4, P.crateBlue, 0.12); milkCrate(B, 2.72, 0.28, ez + 0.41, P.crateRed, -0.1); milkCrate(B, 3.25, 0, ez + 0.47, P.crateGrey, 0.35);
-  milkCrate(B, 3.72, 0.28, ez + 0.62, P.crateRed, -0.25, false); B.box(['#6a4a2a', 0.9, 0], 3.58, 0.28, ez + 0.48, 3.86, 0.3, ez + 0.76);   // one upside down with a flattened box on it: a seat
+  const crates = [() => milkCrate(B, 2.7, 0, ez + 0.4, P.crateBlue, 0.12), () => { milkCrate(B, 3.3, 0, ez + 0.55, P.crateRed, -0.25, false); B.box(['#6a4a2a', 0.9, 0], 3.16, 0.28, ez + 0.41, 3.44, 0.3, ez + 0.69); },   // the second one upside down with a flattened box on it: a seat
+    () => milkCrate(B, 2.72, 0.28, ez + 0.41, P.crateRed, -0.1), () => milkCrate(B, 3.85, 0, ez + 0.47, P.crateGrey, 0.35)];
+  crates.slice(0, ATL.few.sidewalk).forEach((f) => f());
   // the wet-floor sign: an A-frame, the two boards leaning together (faces are decals)
   // (each board stands on its own foot, 0.17 m either side of the middle, and leans in so the tops meet)
   A.wet = { x: 12.05, z: ez + 0.55, lean: 0.27, foot: 0.17, yaw: 0.35 };
@@ -122,8 +170,8 @@ export function dressAtl(B, info, layout, { hash, Stock }) {
     const posts = [u.signX - u.signW / 2 + 0.23, u.signX + u.signW / 2 - 0.23], y = u.H + 0.06, ok = (x, w) => posts.every((p) => Math.abs(p - x) > w / 2 + 0.08);
     if (u.kind === 'cooler') {
       let k = 0; for (let x = u.x0 + 0.35; x < u.x1 - 0.35; x += 0.55 + h(k, 3, 11) * 0.5, k++) {
-        if (!ok(x, 0.4) || h(k, idn(u.id), 12) < 0.35) continue;
-        if (u.id === 'dairy' && k % 2 === 0) { milkCrate(B, x, y, u.zb + 0.4, k % 4 ? P.crateRed : P.crateBlue, (h(k, 1, 13) - 0.5) * 0.4); if (h(k, 2, 13) < 0.6) milkCrate(B, x + 0.01, y + 0.28, u.zb + 0.41, P.crateBlue, (h(k, 3, 13) - 0.5) * 0.5); continue; }
+        if (!ok(x, 0.4) || h(k, idn(u.id), 12) > ATL.few.coolerCases) continue;
+        if (u.id === 'dairy' && k % 2 === 0) { milkCrate(B, x, y, u.zb + 0.4, k % 4 ? P.crateRed : P.crateBlue, (h(k, 1, 13) - 0.5) * 0.4); if (ATL.few.dairyStack && h(k, 2, 13) < 0.6) milkCrate(B, x + 0.01, y + 0.28, u.zb + 0.41, P.crateBlue, (h(k, 3, 13) - 0.5) * 0.5); continue; }
         const st = 1 + (h(k, 4, 13) < 0.4 ? 1 : 0); for (let j = 0; j < st; j++) Stock.add('case', { label: 'casetop', w: 0.38 + h(k, j, 14) * 0.1, h: 0.26, d: 0.34, color: j % 2 ? '#a8794a' : '#b88a5a' }, x + (h(k, j, 15) - 0.5) * 0.08, y + j * 0.26, u.zb + 0.35 + (h(k, j, 16) - 0.5) * 0.08, (h(k, j, 17) - 0.5) * 0.5, 1);
       }
     }
@@ -241,7 +289,7 @@ function entries() {
       const gr = g.createRadialGradient(w / 2, h * 0.9, 8, w / 2, h * 0.9, w * 0.5); gr.addColorStop(0, 'rgba(210,205,180,0.32)'); gr.addColorStop(1, 'rgba(210,205,180,0)'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
     }, true],
     ['fog', 256, 256, (g, w, h, H) => {   // fogged cooler glass: a frosted band low down, drips, finger streaks
-      g.clearRect(0, 0, w, h); let gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, 'rgba(225,232,228,0.03)'); gr.addColorStop(0.55, 'rgba(225,232,228,0.1)'); gr.addColorStop(1, 'rgba(225,232,228,0.26)'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+      g.clearRect(0, 0, w, h); let gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, 'rgba(225,232,228,0.02)'); gr.addColorStop(0.55, 'rgba(225,232,228,0.07)'); gr.addColorStop(1, 'rgba(225,232,228,0.17)'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
       for (let k = 0; k < 18; k++) { const x = H(k, 1, 87) * w, y0 = h * (0.45 + H(k, 2, 87) * 0.4), l = 20 + H(k, 3, 87) * 60; g.fillStyle = 'rgba(40,50,48,0.14)'; g.fillRect(x, y0, 2, l); }
       for (let k = 0; k < 5; k++) { const x = H(k, 4, 87) * w; gr = g.createLinearGradient(x - 14, 0, x + 14, 0); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.5, 'rgba(60,70,66,0.16)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x - 14, h * 0.4, 28, h * 0.6); }
     }, true],
@@ -283,15 +331,17 @@ export function atlPlacements(info, hash) {
   if (!A || !ATL.dress) return out;
   const v = (name, x, y, z, w, ht, rot = 0, curl = 0, glow = 0) => out.push({ name, kind: 'v', x, y, z, w, h: ht, rot, curl, glow });
   // checkouts
-  const CS = [['p_cash', 'p_noloiter'], ['p_lotto', 'p_cash'], ['p_id', 'p_cash']];
+  const CS = [['p_noloiter', 'p_cash'], ['p_lotto', 'p_id'], ['p_ebt', 'p_cash']], F = ATL.few;
   A.counters.forEach((c, i) => {
     const { x0, x1, z1, top, gx0, gx1, zg, gy1, hx0, hx1, hy1 } = c, zf = z1 + 0.016;
     v(CS[i % 3][0], x0 + 0.75 + h(i, 1, 1) * 0.3, 0.55, zf, 0.42, CS[i % 3][0] === 'p_cash' ? 0.36 : 0.33, (h(i, 2, 1) - 0.5) * 0.12, 0.02);
-    v(CS[i % 3][1], x0 + 2.0 + h(i, 3, 1) * 0.4, 0.5, zf, 0.4, 0.33, (h(i, 4, 1) - 0.5) * 0.14, 0.015);
+    if (F.counter > 1) v(CS[i % 3][1], x0 + 2.0 + h(i, 3, 1) * 0.4, 0.5, zf, 0.4, 0.33, (h(i, 4, 1) - 0.5) * 0.14, 0.015);
     v('plexi', (gx0 + gx1) / 2, (top + gy1) / 2, zg + 0.009, gx1 - gx0, gy1 - top);
-    v('photos', hx1 + 0.3, top + 0.42, zg + 0.011, 0.5, 0.33, (h(i, 5, 1) - 0.5) * 0.06);
-    v(i === 1 ? 'p_nochecks' : 'p_id', (gx0 + hx0) / 2, top + 0.45, zg + 0.011, 0.34, 0.24, (h(i, 6, 1) - 0.5) * 0.1, 0.012);
-    v('p_ebt', (hx0 + hx1) / 2, hy1 + 0.22, zg + 0.011, 0.3, 0.21, (h(i, 7, 1) - 0.5) * 0.1, 0.01);
+    if (F.plexi === 'all' || i === 0) {
+      v('photos', hx1 + 0.3, top + 0.42, zg + 0.011, 0.5, 0.33, (h(i, 5, 1) - 0.5) * 0.06);
+      if (F.plexi === 'all') v(i === 1 ? 'p_nochecks' : 'p_id', (gx0 + hx0) / 2, top + 0.45, zg + 0.011, 0.34, 0.24, (h(i, 6, 1) - 0.5) * 0.1, 0.012);
+      v('p_ebt', (hx0 + hx1) / 2, hy1 + 0.22, zg + 0.011, 0.3, 0.21, (h(i, 7, 1) - 0.5) * 0.1, 0.01);
+    }
     v('cigs', x1 - 0.38, top + 0.24, c.z0 + 0.6 + 0.004, 0.5, 0.44);
     { const lz = z1 - 0.14, ly = top + 0.12; out.push({ name: 'lotto', kind: 'v', x: gx0 - 0.305, y: ly, z: lz + 0.004, w: 0.47, h: 0.22, rot: 0, curl: 0, glow: 0.25, tiltX: -0.12, pivot: [gx0 - 0.3, top, z1 - 0.32] }); }
   });
@@ -299,9 +349,9 @@ export function atlPlacements(info, hash) {
   const ez = info.storefront.z, zo = ez + 0.014, sf = info.storefront;
   const glassSigns = [['p_noloiter', 1.25, 1.55, 0.5, 0.39], ['c_wings', 0.95, 0.85, 0.55, 0.44], ['c_2for5', 2.2, 1.0, 0.5, 0.39], ['p_ebt', 3.25, 1.62, 0.5, 0.35], ['p_atm', 4.25, 1.2, 0.46, 0.27],
     ['p_lotto', 14.45, 1.6, 0.5, 0.35], ['c_ice', 15.55, 1.0, 0.5, 0.39], ['p_id', 16.55, 1.6, 0.48, 0.38], ['p_hours', 13.0, 0.95, 0.36, 0.43], ['p_cash', 17.0, 0.9, 0.4, 0.34]];
-  glassSigns.forEach(([n, x, y, w, ht], i) => v(n, x, y, zo, w, ht, (h(i, 8, 2) - 0.5) * 0.12, 0.02 + h(i, 9, 2) * 0.02));
+  glassSigns.forEach(([n, x, y, w, ht], i) => { if (ATL.few.glass.includes(n)) v(n, x, y, zo, w, ht, (h(i, 8, 2) - 0.5) * 0.12, 0.02 + h(i, 9, 2) * 0.02); });
   v('vinyl1', 2.7, 2.08, zo - 0.002, 1.05, 0.44); v('vinyl2', 15.6, 2.08, zo - 0.002, 1.05, 0.44);
-  v('p_ebt', sf.ex0 + 0.7, 1.45, ez - 0.14 + 0.012, 0.36, 0.25, 0.05, 0.015); v('p_noloiter', sf.ex1 - 0.7, 1.45, ez - 0.14 + 0.012, 0.36, 0.28, -0.04, 0.015);
+  v('p_ebt', sf.ex0 + 0.7, 1.45, ez - 0.14 + 0.012, 0.36, 0.25, 0.05, 0.015); if (ATL.few.doorSigns > 1) v('p_noloiter', sf.ex1 - 0.7, 1.45, ez - 0.14 + 0.012, 0.36, 0.28, -0.04, 0.015);
   v('neon', A.neon.x, A.neon.y, ez - 0.073, A.neon.w, A.neon.h, 0, 0, 1.6);
   // the wet-floor sign's two faces and the puddle on the sidewalk
   if (A.wet) { const { x, z, lean, foot, yaw } = A.wet, zf = z + foot; out.push({ name: 'wetfloor', kind: 'v', x, y: 0.31, z: zf + 0.0095, w: 0.28, h: 0.56, rot: 0, curl: 0, glow: 0, tiltX: -lean, tiltY: yaw, pivot: [x, 0, zf] }); }
@@ -311,7 +361,7 @@ export function atlPlacements(info, hash) {
     if (u.kind === 'cooler') { v('cooler_decal', u.x0 + 1.0 + h(idn(u.id), 1, 3) * 0.4, 0.27, u.z1 + 0.012, 1.1, 0.13, (h(idn(u.id), 2, 3) - 0.5) * 0.03); v('cooler_decal', u.x1 - 1.0, 0.27, u.z1 + 0.012, 1.1, 0.13, 0.01); }
     if (u.id === 'frozen') { const n = 4, w = (u.x1 - u.x0 - 0.14) / n; for (let k = 0; k < n; k++) v('fog', u.x0 + 0.07 + w * (k + 0.5), 1.12, u.z1 + 0.036, w, 1.5, 0); v('vinyl1', u.x0 + 1.2, 1.55, u.z1 + 0.037, 0.8, 0.33); }
     // cardboard price signs taped to the shelf fronts
-    if (u.kind === 'gondola' && u.levels.length) for (let k = 0; k < 3; k++) {
+    if (u.kind === 'gondola' && u.levels.length) for (let k = 0; k < ATL.few.shelf; k++) {
       const L = k % u.levels.length, t = h(idn(u.id), k, 4), x = u.sx0 + 0.35 + t * (u.sx1 - u.sx0 - 0.7), sag = u.sags[L] * 4 * ((x - u.sx0) / (u.sx1 - u.sx0)) * (1 - (x - u.sx0) / (u.sx1 - u.sx0));
       if (h(idn(u.id), k, 5) < 0.25) continue;
       const nm = ['c_99', 'c_129', 'c_2for3', 'c_sale', 'c_noret'][Math.floor(h(idn(u.id), k, 6) * 5)];
@@ -320,7 +370,7 @@ export function atlPlacements(info, hash) {
   }
   // the north wall: two sun-faded posters curling off the wall, a paper sign
   const zw = 100 / 48 + 0.014;
-  v('poster_old1', 2.5, 1.45, zw, 0.5, 0.66, -0.05, 0.07); v('poster_old2', 6.7, 1.5, zw, 0.5, 0.66, 0.06, 0.06); v('p_nobags', 4.7, 1.55, zw, 0.4, 0.27, 0.08, 0.02);
+  for (const a of [['poster_old1', 2.5, 1.45, zw, 0.5, 0.66, -0.05, 0.07], ['poster_old2', 6.7, 1.5, zw, 0.5, 0.66, 0.06, 0.06], ['p_nobags', 4.7, 1.55, zw, 0.4, 0.27, 0.08, 0.02]]) if (ATL.few.wall.includes(a[0])) v(...a);
   return out;
 }
 

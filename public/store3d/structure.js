@@ -10,7 +10,7 @@ import * as THREE from '../drive/vendor/three.module.min.js';
 import { mergeGeometries } from '../drive/vendor/BufferGeometryUtils.js';
 import { Stock, productGeometry } from './products.js';
 import { GeoBuf, PAINT } from './geobuf.js';
-import { MESS_ATL, dressAtl } from './atl.js';
+import { MESS_ATL, dressAtl, REAL, stockVary } from './atl.js';
 
 export const PX = 48;
 export const m = (b) => b / PX;
@@ -208,7 +208,8 @@ export function buildStructure(layout, mats, opts = {}) {
       mm.makeRotationY(hj(2) * 0.07).setPosition(x0 + 0.65 + i * 0.3 + hj(3) * 0.03, 0.12 + i * 0.004, z); B.bufFor(z).geo(cg, mm, 'cart'); }
   }
   storefront(B, layout, info);
-  if (atl) dressAtl(B, info, layout, { hash, Stock: B.stock });   // the ATL look's set dressing (atl.js): nothing here when the param is off
+  if (atl) dressAtl(B, info, layout, { hash, Stock: B.stock });
+  if (atl && REAL.on) B.stock.vary = stockVary(hash);   // the REAL layer: every shelf product its own fade, tint and height   // the ATL look's set dressing (atl.js): nothing here when the param is off
   // ---- the exit door in the north pier (south face of the solid block between the dairy and the rice units)
   // (set 0.22 m into the pier: the walkable floor reaches the pier's face at y 232, and a door standing proud of it hid a player hugging the wall)
   { const zf = m(232) - 0.22, cxd = m(435); info.exit = { x: cxd, z: zf };
