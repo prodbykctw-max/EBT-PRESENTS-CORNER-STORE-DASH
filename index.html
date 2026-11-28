@@ -3052,7 +3052,7 @@ function drawThreat(dt){
     threatEl.style.cssText="position:fixed;inset:0;pointer-events:none;z-index:4;opacity:0;background:radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(200,20,30,.55) 100%)";
     document.body.appendChild(threatEl);
     outsideEl=document.createElement("div"); outsideEl.setAttribute("aria-hidden","true");
-    outsideEl.style.cssText="position:fixed;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:5;display:none;align-items:center;gap:8px;padding:5px 12px 5px 5px;border-radius:24px;background:rgba(10,12,18,.82);border:2px solid #d62634;color:#fff;font:900 15px/1 ui-monospace,Menlo,monospace;letter-spacing:.04em;pointer-events:none;white-space:nowrap";
+    outsideEl.style.cssText="position:fixed;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:5;display:none;align-items:center;gap:8px;padding:5px 12px 5px 5px;padding-right:calc(12px + 24px*(1 - pi/4));border-radius:24px;background:rgba(10,12,18,.82);border:2px solid #d62634;color:#fff;font:900 15px/1 ui-monospace,Menlo,monospace;letter-spacing:.04em;pointer-events:none;white-space:nowrap";
     // his head is the drive's race-bar icon (next to drive.js, wherever this copy loads the drive from)
     outsideEl.innerHTML='<i style="width:34px;height:34px;border-radius:50%;background:url('+DRIVE_URL.replace(/drive\.js$/,"heads.png")+') 100% 0/200% 100% no-repeat"></i><span></span>';
     document.body.appendChild(outsideEl);
